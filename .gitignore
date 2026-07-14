@@ -1,0 +1,46 @@
+# IDE
+.idea/
+.vscode/
+
+# Java / Maven
+target/
+**/target/
+*.class
+
+# Frontend
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.vite/
+**/.vite/
+
+# Python
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Env / secrets
+.env
+*.env
+**/.env
+**/*.env
+application-local.properties
+**/application-local.properties
+
+# Logs
+*.log
+logs/
+**/logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# AI development context exports
+*_context.txt
+codemind_project_manifest.txt
+# Local runtime data
+/codemind-server/data/
