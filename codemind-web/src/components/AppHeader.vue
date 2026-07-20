@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { AgentTab } from '../types/codemind'
 
-defineProps<{
+const props = defineProps<{
   activeTab: AgentTab
+  projectCode?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -45,7 +46,7 @@ const emit = defineEmits<{
     </nav>
 
     <div class="project-badge">
-      Project：P001
+      Project：{{ props.projectCode || '-' }}
     </div>
   </header>
 </template>

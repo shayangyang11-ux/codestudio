@@ -11,8 +11,15 @@ public class AgentTaskErrorClassifier {
             String errorCode,
             String errorMessage
     ) {
-        String originalCode = safe(errorCode, "AGENT_TASK_FAILED");
-        String originalMessage = safe(errorMessage, "任务执行失败。");
+        String originalCode = safe(
+                errorCode,
+                "AGENT_TASK_FAILED"
+        );
+
+        String originalMessage = safe(
+                errorMessage,
+                "任务执行失败。"
+        );
 
         String text = (originalCode + " " + originalMessage)
                 .toLowerCase(Locale.ROOT);
@@ -45,17 +52,56 @@ public class AgentTaskErrorClassifier {
             );
         }
 
+        /*
+         * Pydantic uses error identifiers such as "extra_forbidden".
+         * This block must run before authentication classification, otherwise
+         * the word "forbidden" may be incorrectly treated as a 403/API-Key
+         * failure.
+         */
+        if (containsAny(
+                text,
+                "validation errors for uicontractartifact",
+                "validation error for uicontractartifact",
+                "extra_forbidden",
+                "extra inputs are not permitted",
+                "pydantic",
+                "model_validate",
+                "schema validation",
+                "schema_validation",
+                "ui_contract validation",
+                "ui contract validation",
+                "ui_contract 校验",
+                "契约校验",
+                "输出结构校验",
+                "agent_output_schema_invalid"
+        )) {
+            return new AgentTaskErrorDiagnosis(
+                    "AGENT_OUTPUT_SCHEMA_INVALID",
+                    "模型已正常响应，但输出的 UI_CONTRACT 不符合系统契约，系统未保存无效原型。",
+                    originalCode,
+                    originalMessage,
+                    false,
+                    "请检查 UI_CONTRACT Prompt、字段归一化和 Pydantic Schema 后重新生成。"
+            );
+        }
+
         if (containsAny(
                 text,
                 "invalid api key",
                 "api key invalid",
                 "apikey invalid",
                 "unauthorized",
-                "authentication",
-                "401",
-                "403",
+                "authentication failed",
+                "authentication error",
+                "invalid authentication",
+                "http 401",
+                "status 401",
+                "status code 401",
+                "http 403",
+                "status 403",
+                "status code 403",
                 "permission denied",
-                "forbidden",
+                "access denied",
                 "鉴权失败",
                 "认证失败",
                 "api key 无效",
@@ -250,7 +296,11 @@ public class AgentTaskErrorClassifier {
             String... keywords
     ) {
         for (String keyword : keywords) {
-            if (keyword != null && !keyword.isBlank() && text.contains(keyword.toLowerCase(Locale.ROOT))) {
+            if (keyword != null
+                    && !keyword.isBlank()
+                    && text.contains(
+                    keyword.toLowerCase(Locale.ROOT)
+            )) {
                 return true;
             }
         }
@@ -258,7 +308,9 @@ public class AgentTaskErrorClassifier {
         return false;
     }
 
-    private String normalizeFallbackCode(String originalCode) {
+    private String normalizeFallbackCode(
+            String originalCode
+    ) {
         if (originalCode == null || originalCode.isBlank()) {
             return "AGENT_TASK_FAILED";
         }
@@ -272,7 +324,9 @@ public class AgentTaskErrorClassifier {
         return normalized;
     }
 
-    private String buildFallbackMessage(String originalMessage) {
+    private String buildFallbackMessage(
+            String originalMessage
+    ) {
         if (originalMessage == null || originalMessage.isBlank()) {
             return "任务执行失败，请稍后重试；如果多次失败，请查看任务详情和后端日志。";
         }

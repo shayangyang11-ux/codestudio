@@ -35,7 +35,9 @@ import type {
   FullChainAsyncTaskResponse,
   ModuleArtifactTaskItem,
   ModuleTreeNode,
+  UiContractGenerationReadinessResponse,
 } from '../types/codemind'
+import type { ProjectThemeProfile } from '../types/themeProfile'
 
 export interface UseAsyncArtifactTasksOptions {
   resolveWorkspaceId: () => string
@@ -53,6 +55,18 @@ export interface UseAsyncArtifactTasksOptions {
     stepId: string,
     status: AssistantStep['status'],
   ) => void
+  resolveUiContractReadiness?: () =>
+    UiContractGenerationReadinessResponse | null
+  resolveUiContractReadinessLoading?: () => boolean
+  resolveThemeProfile?: () => ProjectThemeProfile | null
+  onTaskBlocked?: (
+    message: string,
+    taskType: AsyncRequirementTaskType,
+  ) => void | Promise<void>
+  onTaskFailed?: (
+    message: string,
+    taskType: AsyncRequirementTaskType,
+  ) => void | Promise<void>
   onTaskCreated?: (
     task: AgentTaskSummary,
     definition: {
@@ -104,10 +118,17 @@ export function useAsyncArtifactTasks(
 
     return ASYNC_REQUIREMENT_ARTIFACT_DEFINITIONS.map((definition) => {
       const artifact = options.getArtifactByType(definition.artifactType)
-      const unavailableReason = getRequirementTaskUnavailableReason(
-        definition.taskType,
-        module,
-      )
+      const nodeUnavailableReason =
+        getRequirementTaskUnavailableReason(
+          definition.taskType,
+          module,
+        )
+
+      const unavailableReason =
+        resolveTaskUnavailableReason(
+          definition.taskType,
+          nodeUnavailableReason,
+        )
 
       return {
         artifactType: definition.artifactType,
@@ -124,6 +145,38 @@ export function useAsyncArtifactTasks(
       }
     })
   })
+
+  function resolveTaskUnavailableReason(
+    taskType: AsyncRequirementTaskType,
+    nodeUnavailableReason: string | null,
+  ): string | null {
+    if (nodeUnavailableReason) {
+      return nodeUnavailableReason
+    }
+
+    if (taskType !== 'GENERATE_UI_CONTRACT') {
+      return null
+    }
+
+    if (options.resolveUiContractReadinessLoading?.()) {
+      return '正在检查交互原型生成条件，请稍候。'
+    }
+
+    const readiness =
+      options.resolveUiContractReadiness?.() || null
+
+    if (!readiness) {
+      return '尚未完成交互原型生成准备度检查。'
+    }
+
+    if (!readiness.ready) {
+      return readiness.blockers.length
+        ? readiness.blockers.join('；')
+        : '当前 PAGE 尚未满足交互原型生成条件。'
+    }
+
+    return null
+  }
 
   async function handleGenerateArtifactTaskFromPanel(taskType: string) {
     if (!isAsyncRequirementTaskType(taskType)) {
@@ -194,13 +247,19 @@ export function useAsyncArtifactTasks(
       return
     }
 
-    const unavailableReason = getRequirementTaskUnavailableReason(
+    const unavailableReason = resolveTaskUnavailableReason(
       taskType,
-      module,
+      getRequirementTaskUnavailableReason(
+        taskType,
+        module,
+      ),
     )
 
     if (unavailableReason) {
-      window.alert(unavailableReason)
+      await options.onTaskBlocked?.(
+        unavailableReason,
+        taskType,
+      )
       return
     }
 
@@ -246,6 +305,14 @@ export function useAsyncArtifactTasks(
       options.setStepStatus(definition.stepId, 'failed')
       options.setStepStatus('artifact', 'failed')
       setGeneratingFlag(taskType, false)
+
+      await options.onTaskFailed?.(
+        resolveTaskErrorMessage(
+          error,
+          `${definition.title}任务创建失败。`,
+        ),
+        taskType,
+      )
     }
   }
 
@@ -254,11 +321,21 @@ export function useAsyncArtifactTasks(
     moduleId: string,
     moduleName: string,
   ): Promise<AsyncAgentTaskResponse> {
+    const themeProfile =
+      taskType === 'GENERATE_UI_CONTRACT'
+        ? options.resolveThemeProfile?.() || null
+        : null
+
     const payload = {
       requirementText: buildAsyncRequirementTaskPrompt(
         taskType,
         moduleName,
       ),
+      ...(themeProfile
+        ? {
+            themeProfile: normalizeThemeProfileForTaskPayload(themeProfile),
+          }
+        : {}),
     }
 
     if (taskType === 'GENERATE_MODULE_PRD') {
@@ -330,6 +407,17 @@ export function useAsyncArtifactTasks(
       moduleId,
       payload,
     )
+  }
+
+  function normalizeThemeProfileForTaskPayload(
+    profile: ProjectThemeProfile,
+  ): ProjectThemeProfile {
+    return {
+      ...profile,
+      notes: profile.notes || null,
+      secondaryColor: profile.secondaryColor || null,
+      accentColor: profile.accentColor || null,
+    }
   }
 
   async function handleCancelAgentTask(taskId: string) {
@@ -743,6 +831,17 @@ export function useAsyncArtifactTasks(
     return ASYNC_REQUIREMENT_ARTIFACT_DEFINITIONS.some(
       (definition) => definition.taskType === value,
     )
+  }
+
+  function resolveTaskErrorMessage(
+    error: unknown,
+    fallback: string,
+  ): string {
+    if (error instanceof Error && error.message) {
+      return error.message
+    }
+
+    return fallback
   }
 
   onBeforeUnmount(() => {

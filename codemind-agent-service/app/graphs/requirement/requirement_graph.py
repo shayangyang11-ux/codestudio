@@ -123,7 +123,10 @@ class RequirementGraph:
         graph.add_node(f"{prefix}_compact_context", nodes.compact_context)
         graph.add_node(f"{prefix}_dependency_check", nodes.dependency_check)
         graph.add_node(f"{prefix}_build_prompt", nodes.build_prompt)
-        graph.add_node(f"{prefix}_prompt_debug_response", nodes.build_prompt_debug_response)
+        graph.add_node(
+            f"{prefix}_prompt_debug_response",
+            nodes.build_prompt_debug_response,
+        )
         graph.add_node(f"{prefix}_llm_generate", nodes.llm_generate)
         graph.add_node(f"{prefix}_json_parse", nodes.json_parse)
         graph.add_node(f"{prefix}_json_repair", nodes.json_repair)
@@ -220,7 +223,10 @@ class RequirementGraph:
         return self._build_failed_response(
             request=request,
             error_code=result.get("error_code", "REQUIREMENT_GRAPH_FAILED"),
-            error_message=result.get("error_message", "Requirement graph failed."),
+            error_message=result.get(
+                "error_message",
+                "Requirement graph failed.",
+            ),
         )
 
     async def _route_task(
@@ -272,7 +278,7 @@ class RequirementGraph:
 
         try:
             artifact = await self.ui_contract_agent.run(request)
-            content = self._artifact_content(artifact)
+            content = self._ui_contract_content(artifact)
 
             state["response"] = AgentTaskResponse(
                 task_id=request.task_id,
@@ -287,10 +293,11 @@ class RequirementGraph:
                 metadata={
                     "graph_name": "requirement_graph",
                     "node_name": "generate_ui_contract",
-                    "generation_mode": "UI_CONTRACT_MOCK_PREVIEW_CONTRACT",
+                    "generation_mode": "UI_CONTRACT_STRUCTURED_PAGE_CONTRACT",
                     "final_artifact_type": "UI_CONTRACT",
                     "contract_usage": {
                         "mock_preview": True,
+                        "prototype_code_source": True,
                         "dev_agent_source": True,
                     },
                 },
@@ -305,7 +312,7 @@ class RequirementGraph:
 
         return state
 
-    def _artifact_content(
+    def _ui_contract_content(
         self,
         artifact: Any,
     ) -> dict[str, Any]:
@@ -320,24 +327,21 @@ class RequirementGraph:
         content.pop("markdown", None)
 
         content["artifactType"] = "UI_CONTRACT"
-        content.setdefault("schemaVersion", "1.0")
-        content.setdefault("routes", [])
-        content.setdefault("pages", [])
-        content.setdefault("mockData", {})
-        content.setdefault("apiBindings", [])
-        content.setdefault(
-            "developmentRules",
-            {
-                "mustFollowLayout": True,
-                "mustFollowFields": True,
-                "mustFollowValidationRules": True,
-                "mustFollowInteractionFlow": True,
-                "mustFollowApiBindings": True,
-                "allowStyleOptimization": True,
-                "breakingChangeRequiresReview": True,
-            },
-        )
+        content["schemaVersion"] = "1.0"
 
+        content.setdefault("interactions", [])
+        content.setdefault("validationRules", [])
+        content.setdefault("pageStates", [])
+        content.setdefault("mockData", {})
+        content.setdefault("mockScenarios", [])
+        content.setdefault("apiBindings", [])
+        content.setdefault("navigationTargets", [])
+        content.setdefault("featureCoverage", [])
+        content.setdefault("assumptions", [])
+        content.setdefault("developmentRules", {})
+        content.setdefault("analysisSummary", "")
+
+        # Old routes/pages/module defaults are intentionally not restored.
         return content
 
     def _build_failed_response(

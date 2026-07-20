@@ -1,3 +1,4 @@
+
 <template>
   <div class="app-shell">
     <AppHeader :active-tab="activeTab" :project-code="project.projectCode" @change-tab="handleChangeAgentTab" />
@@ -22,6 +23,10 @@
         导出项目交付包
       </button>
 
+      <button class="logout-button" @click="openThemeProfileDrawer">
+        项目风格
+      </button>
+
       <button class="logout-button" @click="handleLogout">
         退出登录
       </button>
@@ -32,7 +37,20 @@
         @create-root="handleCreateRootModuleNode" @create-child="handleCreateChildModuleNode"
         @rename-node="handleRenameModuleNode" @move-node="handleMoveModuleNode" @delete-node="handleDeleteModuleNode" />
 
-      <WorkspacePanel :selected-module="selectedModule" :selected-artifact-type="selectedArtifactType"
+      <DevelopmentHandoffGatePanel
+        v-if="activeTab === 'development'"
+        :workspace-id="props.workspace.workspaceId"
+        :project-code="props.project.projectCode"
+        :selected-module="selectedModule"
+        :readiness="developmentHandoffReadiness"
+        :loading="developmentHandoffLoading"
+        :error="developmentHandoffError"
+        @refresh="loadDevelopmentHandoffReadiness"
+        @open-quality-check="handleOpenQualityCheck"
+        @preview-ui-contract="handlePreviewUiContract"
+      />
+
+      <WorkspacePanel v-else :selected-module="selectedModule" :selected-artifact-type="selectedArtifactType"
         :is-generating-prd="isGeneratingPrd" :is-generating-business-flow="isGeneratingBusinessFlow"
         :is-generating-page-spec="isGeneratingPageSpec" :is-generating-data-model="isGeneratingDataModel"
         :is-generating-api-contract="isGeneratingApiContract" :is-generating-test-spec="isGeneratingTestSpec"
@@ -44,7 +62,11 @@
         :api-contract-markdown="apiContractMarkdown" :api-contract-artifact="apiContractArtifact"
         :test-spec-markdown="testSpecMarkdown" :test-spec-artifact="testSpecArtifact"
         :is-generating-ui-contract="isGeneratingUiContract" :ui-contract-markdown="uiContractMarkdown"
-        :ui-contract-artifact="uiContractArtifact" :dev-handoff-package-markdown="devHandoffPackageMarkdown"
+        :ui-contract-artifact="uiContractArtifact" :ui-contract-readiness="uiContractReadiness"
+        :ui-contract-readiness-loading="uiContractReadinessLoading"
+        :ui-contract-readiness-error="uiContractReadinessError"
+        :artifact-task-feedback="artifactTaskFeedback"
+        :dev-handoff-package-markdown="devHandoffPackageMarkdown"
         :dev-handoff-package-artifact="devHandoffPackageArtifact" :artifact-task-items="moduleArtifactTaskItems"
         @view-artifact="handleViewArtifact" @generate-full-chain="handleGenerateFullChain"
         @generate-module-prd="handleGenerateModulePrd" @generate-business-flow="handleGenerateBusinessFlow"
@@ -55,7 +77,9 @@
         @retry-artifact-task="handleRetryAgentTask" @open-artifact-versions="handleOpenArtifactVersions"
         @open-impact-analysis="handleOpenImpactAnalysis" @export-artifacts-zip="handleExportArtifactsZip"
         @export-artifacts-docx="handleExportArtifactsDocx" @open-quality-check="handleOpenQualityCheck"
-        @generate-ui-contract="handleGenerateUiContract" @preview-ui-contract="handlePreviewUiContract" />
+        @generate-ui-contract="handleGenerateUiContract"
+        @refresh-ui-contract-readiness="handleRefreshUiContractReadiness"
+        @preview-ui-contract="handlePreviewUiContract" />
 
       <RightAiAssistantPanel v-model:collapsed="aiAssistantCollapsed" :module-tree-exists="moduleTreeExists"
         :is-generating-tree="isGeneratingTree" :is-sending-message="isSendingAssistantMessage"
@@ -83,8 +107,46 @@
         :module-name="selectedModule ? getModuleDisplayName(selectedModule) : '当前模块'"
         :result="artifactQualityCheckResult" @close="closeQualityCheckDrawer" @export-zip="handleExportArtifactsZip" />
 
-      <UiContractPreviewDrawer :visible="uiContractPreviewVisible" :artifact="uiContractArtifact"
-        @close="uiContractPreviewVisible = false" />
+      <UiContractPreviewDrawer
+        :visible="uiContractPreviewVisible"
+        :artifact="uiContractArtifact"
+        :project-theme-profile="themeProfile"
+        :confirmed-snapshot="uiContractSnapshot"
+        :snapshot-loading="uiContractSnapshotLoading"
+        :confirming="uiContractConfirming"
+        :snapshot-error="uiContractSnapshotError"
+        @close="uiContractPreviewVisible = false"
+        @confirm-ui-contract="handleConfirmUiContractSnapshot"
+      />
+
+      <div
+        v-if="themeProfileDrawerVisible"
+        class="theme-profile-mask"
+        @click.self="closeThemeProfileDrawer"
+      >
+        <aside class="theme-profile-drawer">
+          <header class="theme-profile-drawer-header">
+            <div>
+              <p>Project Theme Profile</p>
+              <h2>项目风格配置</h2>
+              <span>统一当前项目所有交互原型和后续页面生成的视觉方向。</span>
+            </div>
+
+            <button
+              type="button"
+              @click="closeThemeProfileDrawer"
+            >
+              ×
+            </button>
+          </header>
+
+          <ProjectThemeProfilePanel
+            :workspace-id="props.workspace.workspaceId"
+            :project-code="props.project.projectCode"
+            @changed="handleThemeProfileChanged"
+          />
+        </aside>
+      </div>
 
       <ModuleTreeNodeEditorDialog :visible="nodeEditorVisible" :mode="nodeEditorMode" :parent-node="nodeEditorParent"
         :editing-node="nodeEditorTarget" @cancel="closeNodeEditor" @submit="handleSubmitNodeEditor" />
@@ -103,10 +165,12 @@ import { computed, ref, watch } from 'vue'
 import AppHeader from '../components/AppHeader.vue'
 import ModuleTreePanel from '../components/ModuleTreePanel.vue'
 import WorkspacePanel from '../components/WorkspacePanel.vue'
+import DevelopmentHandoffGatePanel from '../components/DevelopmentHandoffGatePanel.vue'
 import ArtifactVersionHistoryDrawer from '../components/ArtifactVersionHistoryDrawer.vue'
 import ArtifactImpactAnalysisDrawer from '../components/ArtifactImpactAnalysisDrawer.vue'
 import ArtifactQualityCheckDrawer from '../components/ArtifactQualityCheckDrawer.vue'
 import UiContractPreviewDrawer from '../components/UiContractPreviewDrawer.vue'
+import ProjectThemeProfilePanel from '../components/ProjectThemeProfilePanel.vue'
 import ModuleTreeNodeEditorDialog from '../components/ModuleTreeNodeEditorDialog.vue'
 import ModuleTreeNodeMoveDialog from '../components/ModuleTreeNodeMoveDialog.vue'
 import ModuleTreeDeleteConfirmDialog from '../components/ModuleTreeDeleteConfirmDialog.vue'
@@ -128,6 +192,16 @@ import {
   sendAssistantMessage,
   uploadAssistantAttachment,
 } from '../api'
+import {
+  fetchUiContractReadiness,
+} from '../api/agentTaskApi'
+import {
+  fetchDevelopmentHandoffReadiness,
+} from '../api/developmentHandoffApi'
+import {
+  confirmUiContractSnapshot,
+  fetchCurrentUiContractSnapshot,
+} from '../api/uiContractSnapshotApi'
 
 import {
   approveModuleArtifactVersion,
@@ -148,8 +222,14 @@ import {
   type AsyncRequirementTaskType,
   type RequirementArtifactType,
 } from '../domain/requirementArtifactDefinitions'
+import {
+  isFeatureNode,
+  isPageNode,
+} from '../domain/requirementNodePolicy'
+import { buildArtifactQualityGate } from '../domain/artifactQualityGate'
 import { useAssistantSteps } from '../composables/useAssistantSteps'
 import { useAsyncArtifactTasks } from '../composables/useAsyncArtifactTasks'
+import { useProjectThemeProfile } from '../composables/useProjectThemeProfile'
 import {
   getArtifactModuleId,
   useModuleArtifacts,
@@ -162,7 +242,6 @@ import {
 
 import type {
   AgentTab,
-  ArtifactResponse,
   ArtifactVersionDetailResponse,
   ArtifactVersionSummaryResponse,
   AgentTaskSummary,
@@ -172,8 +251,12 @@ import type {
   ModuleTreeNode,
   ModuleTreePatchProposalResponse,
   ProjectSummary,
+  UiContractGenerationReadinessResponse,
   WorkspaceSummary,
 } from '../types/codemind'
+import type { ProjectThemeProfile } from '../types/themeProfile'
+import type { ConfirmedUiContractSnapshot } from '../types/uiContractSnapshot'
+import type { DevelopmentHandoffReadinessResponse } from '../types/developmentHandoff'
 
 const router = useRouter()
 
@@ -206,7 +289,27 @@ const artifactVersionArtifactType = ref<RequirementArtifactType | null>(null)
 const artifactVersionSummaries = ref<ArtifactVersionSummaryResponse[]>([])
 const selectedArtifactVersion = ref<ArtifactVersionDetailResponse | null>(null)
 
+type ArtifactTaskFeedback = {
+  level: 'info' | 'success' | 'error'
+  message: string
+}
+
+const uiContractReadiness =
+  ref<UiContractGenerationReadinessResponse | null>(null)
+const uiContractReadinessLoading = ref(false)
+const uiContractReadinessError = ref('')
+const artifactTaskFeedback =
+  ref<ArtifactTaskFeedback | null>(null)
+
 const uiContractPreviewVisible = ref(false)
+const uiContractSnapshot = ref<ConfirmedUiContractSnapshot | null>(null)
+const uiContractSnapshotLoading = ref(false)
+const uiContractConfirming = ref(false)
+const uiContractSnapshotError = ref('')
+const developmentHandoffReadiness = ref<DevelopmentHandoffReadinessResponse | null>(null)
+const developmentHandoffLoading = ref(false)
+const developmentHandoffError = ref('')
+const themeProfileDrawerVisible = ref(false)
 const qualityCheckDrawerVisible = ref(false)
 const impactAnalysisDrawerVisible = ref(false)
 const impactAnalysisSubmitting = ref(false)
@@ -256,6 +359,14 @@ const {
   () => props.workspace.workspaceId,
   () => props.project.projectCode,
 )
+
+const {
+  themeProfile,
+  loadProjectThemeProfile,
+} = useProjectThemeProfile({
+  resolveWorkspaceId: () => props.workspace.workspaceId,
+  resolveProjectCode: () => props.project.projectCode,
+})
 
 const {
   prdArtifact,
@@ -329,8 +440,30 @@ const {
   clearArtifactsAfterArtifact,
   clearAllArtifacts: clearArtifacts,
   setStepStatus,
+  resolveUiContractReadiness: () =>
+    uiContractReadiness.value,
+  resolveUiContractReadinessLoading: () =>
+    uiContractReadinessLoading.value,
+  resolveThemeProfile: () =>
+    themeProfile.value,
+  onTaskBlocked: async (message) => {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message,
+    }
+  },
+  onTaskFailed: async (message) => {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message,
+    }
+  },
   onTaskCreated: async (task, definition) => {
     selectedArtifactType.value = definition.artifactType
+    artifactTaskFeedback.value = {
+      level: 'success',
+      message: `${definition.title}任务已创建，系统正在后台生成。`,
+    }
 
     await saveCurrentWorkspaceState({
       selectedModuleId: selectedModule.value?.id || null,
@@ -426,174 +559,14 @@ const impactAnalysisItems = computed(() => {
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
 })
 
-const artifactQualityCheckResult = computed(() => {
-  const assets = REQUIREMENT_ARTIFACT_DEFINITIONS.map((definition) => {
-    const artifact = getArtifactByType(definition.artifactType)
-    const markdown = getArtifactMarkdownByType(definition.artifactType)
-    const exists = Boolean(
-      artifact?.artifactId ||
-      artifact?.exists ||
-      artifact?.content ||
-      artifact?.contentMarkdown ||
-      markdown,
-    )
-
-    const contentOk = hasMeaningfulArtifactContent(
-      artifact,
-      markdown,
-    )
-
-    const status = artifact?.status || null
-
-    let level: 'pass' | 'warning' | 'blocker' = 'pass'
-    let statusText = '已生成'
-
-    if (!exists) {
-      level = 'blocker'
-      statusText = '缺失'
-    } else if (!contentOk) {
-      level = 'blocker'
-      statusText = '内容为空'
-    } else if (status === 'REJECTED') {
-      level = 'blocker'
-      statusText = '已退回'
-    } else if (status === 'DRAFT' || status === 'ACTIVE' || status === 'PENDING_REVIEW') {
-      level = 'warning'
-      statusText = status === 'PENDING_REVIEW' ? '待审核' : '未确认'
-    } else if (status === 'APPROVED') {
-      level = 'pass'
-      statusText = '已确认'
-    } else {
-      level = 'warning'
-      statusText = status || '状态未知'
-    }
-
-    if (artifact?.current === false && level !== 'blocker') {
-      level = 'warning'
-      statusText = '非当前版本'
-    }
-
-    return {
-      artifactType: definition.artifactType,
-      title: definition.title,
-      exists,
-      versionNo: artifact?.versionNo || null,
-      status,
-      current: artifact?.current,
-      updatedAt: artifact?.updatedAt || null,
-      level,
-      statusText,
-    }
-  })
-
-  const blockers = []
-  const warnings = []
-  const passes = []
-
-  for (const asset of assets) {
-    if (!asset.exists) {
-      blockers.push({
-        id: `missing-${asset.artifactType}`,
-        level: 'blocker' as const,
-        title: `${asset.title}缺失`,
-        description: `当前模块尚未生成${asset.title}，会影响完整交付包。`,
-        artifactType: asset.artifactType,
-      })
-      continue
-    }
-
-    if (asset.status === 'REJECTED') {
-      blockers.push({
-        id: `rejected-${asset.artifactType}`,
-        level: 'blocker' as const,
-        title: `${asset.title}已退回`,
-        description: `${asset.title}当前处于已退回状态，建议修改并重新提交审核。`,
-        artifactType: asset.artifactType,
-      })
-      continue
-    }
-
-    if (asset.level === 'blocker') {
-      blockers.push({
-        id: `empty-${asset.artifactType}`,
-        level: 'blocker' as const,
-        title: `${asset.title}内容不可用`,
-        description: `${asset.title}存在空内容或占位内容，无法作为正式交付依据。`,
-        artifactType: asset.artifactType,
-      })
-      continue
-    }
-
-    if (asset.level === 'warning') {
-      warnings.push({
-        id: `status-${asset.artifactType}`,
-        level: 'warning' as const,
-        title: `${asset.title}尚未确认`,
-        description: `${asset.title}当前状态为“${asset.statusText}”，建议确认通过后再交付。`,
-        artifactType: asset.artifactType,
-      })
-    } else {
-      passes.push({
-        id: `pass-${asset.artifactType}`,
-        level: 'pass' as const,
-        title: `${asset.title}已生成`,
-        description: `${asset.title}存在有效内容，可以进入交付检查。`,
-        artifactType: asset.artifactType,
-      })
-    }
-  }
-
-  for (const definition of REQUIREMENT_ARTIFACT_DEFINITIONS) {
-    const artifact = getArtifactByType(definition.artifactType)
-
-    if (!artifact?.updatedAt) {
-      continue
-    }
-
-    for (const upstreamType of definition.upstreamArtifactTypes) {
-      const upstreamArtifact = getArtifactByType(upstreamType)
-
-      if (!upstreamArtifact?.updatedAt) {
-        continue
-      }
-
-      const currentUpdatedAt = Date.parse(artifact.updatedAt)
-      const upstreamUpdatedAt = Date.parse(upstreamArtifact.updatedAt)
-
-      if (
-        Number.isFinite(currentUpdatedAt) &&
-        Number.isFinite(upstreamUpdatedAt) &&
-        upstreamUpdatedAt > currentUpdatedAt
-      ) {
-        const upstreamTitle = REQUIREMENT_ARTIFACT_DEFINITIONS.find(
-          (item) => item.artifactType === upstreamType,
-        )?.title || upstreamType
-
-        warnings.push({
-          id: `stale-${definition.artifactType}-${upstreamType}`,
-          level: 'warning' as const,
-          title: `${definition.title}可能已滞后`,
-          description: `${upstreamTitle}的更新时间晚于${definition.title}，建议重新生成${definition.title}以保持链路一致。`,
-          artifactType: definition.artifactType,
-        })
-      }
-    }
-  }
-
-  const score = Math.max(
-    0,
-    100 - blockers.length * 18 - warnings.length * 6,
-  )
-
-  return {
-    score,
-    generatedAt: new Date().toLocaleString(),
-    assets,
-    blockers,
-    warnings,
-    passes,
-  }
-})
+const artifactQualityCheckResult = computed(() =>
+  buildArtifactQualityGate({
+    node: selectedModule.value,
+    getArtifactByType,
+    getArtifactMarkdownByType,
+    confirmedUiContractSnapshot: uiContractSnapshot.value,
+  }),
+)
 
 watch(
   () => [
@@ -612,7 +585,10 @@ async function loadProjectWorkspace() {
   stopTaskPolling()
   resetWorkspaceState()
 
-  await loadAssistantMessageHistory()
+  await Promise.allSettled([
+    loadAssistantMessageHistory(),
+    loadProjectThemeProfile(),
+  ])
 
   modules.value = await fetchProjectModules(
     props.workspace.workspaceId,
@@ -675,6 +651,55 @@ async function handleAssistantTaskTerminalNotification(payload: {
     return
   }
 
+  if (
+    payload.definition.artifactType === 'PAGE_SPEC' ||
+    payload.definition.artifactType === 'UI_CONTRACT'
+  ) {
+    await loadUiContractReadiness()
+  }
+
+  if (
+    payload.definition.artifactType === 'UI_CONTRACT' &&
+    (
+      task.status === 'SUCCESS' ||
+      task.status === 'PARTIAL_SUCCESS'
+    ) &&
+    selectedModule.value
+  ) {
+    await loadCurrentArtifactByType(
+      selectedModule.value,
+      'UI_CONTRACT',
+    )
+
+    await loadCurrentUiContractSnapshot(selectedModule.value)
+    await loadDevelopmentHandoffReadiness(selectedModule.value)
+
+    selectedArtifactType.value = 'UI_CONTRACT'
+
+    if (uiContractArtifact.value?.content) {
+      uiContractPreviewVisible.value = true
+    }
+
+    artifactTaskFeedback.value = {
+      level: 'success',
+      message:
+        task.status === 'PARTIAL_SUCCESS'
+          ? '交互原型已生成，但存在质量警告，请在契约检查中确认。'
+          : '交互原型已生成，已自动打开预览。',
+    }
+  } else if (
+    task.status === 'FAILED' ||
+    task.status === 'TIMEOUT'
+  ) {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message:
+        task.errorMessage ||
+        task.lastErrorMessage ||
+        `${payload.definition.title}生成失败。`,
+    }
+  }
+
   try {
     const response = await createAssistantTaskNotification(
       props.workspace.workspaceId,
@@ -728,6 +753,9 @@ async function restoreProjectWorkspaceState() {
     if (matchedModule) {
       await loadAllCurrentModuleArtifacts(matchedModule)
       await loadCurrentModuleAgentTasks()
+      await loadUiContractReadiness(matchedModule)
+      await loadCurrentUiContractSnapshot(matchedModule)
+      await loadDevelopmentHandoffReadiness(matchedModule)
 
       if (state.selectedArtifactType && isRequirementArtifactType(state.selectedArtifactType)) {
         selectedArtifactType.value = state.selectedArtifactType
@@ -769,6 +797,9 @@ async function restoreLatestModulePrd() {
 
   await loadAllCurrentModuleArtifacts(matchedModule)
   await loadCurrentModuleAgentTasks()
+  await loadUiContractReadiness(matchedModule)
+  await loadCurrentUiContractSnapshot(matchedModule)
+  await loadDevelopmentHandoffReadiness(matchedModule)
 
   selectedArtifactType.value = getCurrentSelectedArtifactType()
 
@@ -1053,6 +1084,9 @@ async function handleSelectModule(node: ModuleTreeNode) {
   stopTaskPolling()
 
   selectModule(node)
+  uiContractReadiness.value = null
+  uiContractReadinessError.value = ''
+  artifactTaskFeedback.value = null
   clearArtifacts()
   clearCurrentModuleAgentTasks()
   selectedArtifactType.value = null
@@ -1063,6 +1097,9 @@ async function handleSelectModule(node: ModuleTreeNode) {
 
   await loadAllCurrentModuleArtifacts(node)
   await loadCurrentModuleAgentTasks()
+  await loadUiContractReadiness(node)
+  await loadCurrentUiContractSnapshot(node)
+  await loadDevelopmentHandoffReadiness(node)
 
   selectedArtifactType.value = getCurrentSelectedArtifactType()
 
@@ -1317,6 +1354,151 @@ function resolveErrorMessage(
   return fallback
 }
 
+async function loadUiContractReadiness(
+  node: ModuleTreeNode | null = selectedModule.value,
+): Promise<UiContractGenerationReadinessResponse | null> {
+  if (!node?.id || !isPageNode(node)) {
+    uiContractReadiness.value = null
+    uiContractReadinessLoading.value = false
+    uiContractReadinessError.value = ''
+    return null
+  }
+
+  const targetNodeId = node.id
+
+  uiContractReadinessLoading.value = true
+  uiContractReadinessError.value = ''
+
+  try {
+    const readiness = await fetchUiContractReadiness(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      targetNodeId,
+    )
+
+    if (selectedModule.value?.id !== targetNodeId) {
+      return null
+    }
+
+    uiContractReadiness.value = readiness
+    return readiness
+  } catch (error) {
+    if (selectedModule.value?.id !== targetNodeId) {
+      return null
+    }
+
+    const message = resolveErrorMessage(
+      error,
+      '交互原型生成准备度检查失败。',
+    )
+
+    uiContractReadiness.value = null
+    uiContractReadinessError.value = message
+    return null
+  } finally {
+    if (selectedModule.value?.id === targetNodeId) {
+      uiContractReadinessLoading.value = false
+    }
+  }
+}
+
+async function handleRefreshUiContractReadiness() {
+  await loadUiContractReadiness()
+}
+
+async function loadCurrentUiContractSnapshot(
+  node: ModuleTreeNode | null = selectedModule.value,
+): Promise<ConfirmedUiContractSnapshot | null> {
+  if (!node?.id || !isPageNode(node)) {
+    uiContractSnapshot.value = null
+    uiContractSnapshotLoading.value = false
+    uiContractSnapshotError.value = ''
+    return null
+  }
+
+  const targetNodeId = node.id
+
+  uiContractSnapshotLoading.value = true
+  uiContractSnapshotError.value = ''
+
+  try {
+    const snapshot = await fetchCurrentUiContractSnapshot(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      targetNodeId,
+    )
+
+    if (selectedModule.value?.id !== targetNodeId) {
+      return null
+    }
+
+    uiContractSnapshot.value = snapshot
+    return snapshot
+  } catch (error) {
+    if (selectedModule.value?.id !== targetNodeId) {
+      return null
+    }
+
+    uiContractSnapshot.value = null
+    uiContractSnapshotError.value = resolveErrorMessage(
+      error,
+      '读取交互原型确认快照失败。',
+    )
+    return null
+  } finally {
+    if (selectedModule.value?.id === targetNodeId) {
+      uiContractSnapshotLoading.value = false
+    }
+  }
+}
+
+
+async function loadDevelopmentHandoffReadiness(
+  node: ModuleTreeNode | null = selectedModule.value,
+): Promise<DevelopmentHandoffReadinessResponse | null> {
+  if (!node?.id) {
+    developmentHandoffReadiness.value = null
+    developmentHandoffLoading.value = false
+    developmentHandoffError.value = ''
+    return null
+  }
+
+  const targetNodeId = node.id
+
+  developmentHandoffLoading.value = true
+  developmentHandoffError.value = ''
+
+  try {
+    const readiness = await fetchDevelopmentHandoffReadiness(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      targetNodeId,
+    )
+
+    if (selectedModule.value?.id !== targetNodeId) {
+      return null
+    }
+
+    developmentHandoffReadiness.value = readiness
+    return readiness
+  } catch (error) {
+    if (selectedModule.value?.id !== targetNodeId) {
+      return null
+    }
+
+    developmentHandoffReadiness.value = null
+    developmentHandoffError.value = resolveErrorMessage(
+      error,
+      '开发交接准备度检查失败。',
+    )
+    return null
+  } finally {
+    if (selectedModule.value?.id === targetNodeId) {
+      developmentHandoffLoading.value = false
+    }
+  }
+}
+
 async function handleGenerateModulePrd() {
   await startAsyncArtifactTask('GENERATE_MODULE_PRD')
 }
@@ -1344,51 +1526,45 @@ async function handleGenerateApiContract() {
 async function handleGenerateTestSpec() {
   await startAsyncArtifactTask('GENERATE_TEST_SPEC')
 }
-function isPageNode(node: ModuleTreeNode | null): boolean {
-  if (!node) {
-    return false
-  }
-
-  const moduleType = String(
-    node.moduleType ||
-    node.type ||
-    node.extra?.moduleType ||
-    node.extra?.type ||
-    '',
-  ).toUpperCase()
-
-  return moduleType === 'PAGE' || moduleType === 'PAGE_MODULE'
-}
-
-function isFeatureNode(node: ModuleTreeNode | null): boolean {
-  if (!node) {
-    return false
-  }
-
-  const moduleType = String(
-    node.moduleType ||
-    node.type ||
-    node.extra?.moduleType ||
-    node.extra?.type ||
-    '',
-  ).toUpperCase()
-
-  return moduleType === 'FEATURE'
-}
-
 async function handleGenerateUiContract() {
-  if (!selectedModule.value) {
-    window.alert('请先选择一个页面节点。')
+  const module = selectedModule.value
+
+  if (!module) {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message: '请先选择一个页面节点。',
+    }
     return
   }
 
-  if (isFeatureNode(selectedModule.value)) {
-    window.alert('当前选中的是页面功能点。请回到其所属 PAGE 页面节点生成交互原型。')
+  if (isFeatureNode(module)) {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message:
+        '当前选中的是页面功能点。请回到其所属 PAGE 页面节点生成交互原型。',
+    }
     return
   }
 
-  if (!isPageNode(selectedModule.value)) {
-    window.alert('交互原型只能基于 PAGE 页面节点生成。请在模块树中选择具体页面，例如列表页、创建/编辑页、详情页或审批页。')
+  if (!isPageNode(module)) {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message:
+        '交互原型只能基于 PAGE 页面节点生成。请在模块树中选择具体页面。',
+    }
+    return
+  }
+
+  const readiness = await loadUiContractReadiness(module)
+
+  if (!readiness?.ready) {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message:
+        readiness?.blockers?.join('；') ||
+        uiContractReadinessError.value ||
+        '当前页面尚未满足交互原型生成条件。',
+    }
     return
   }
 
@@ -1421,18 +1597,93 @@ async function handleViewArtifact(
   })
 }
 
-function handlePreviewUiContract() {
+async function handlePreviewUiContract() {
   if (!selectedModule.value || !isPageNode(selectedModule.value)) {
-    window.alert('请先选择具体 PAGE 页面节点，再预览交互原型。')
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message: '请先选择具体 PAGE 页面节点，再预览交互原型。',
+    }
     return
   }
 
   if (!uiContractArtifact.value?.content) {
-    window.alert('当前页面还没有可预览的 UI 契约，请先生成交互原型。')
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message: '当前页面还没有可预览的 UI 契约，请先生成交互原型。',
+    }
     return
   }
 
+  await loadCurrentUiContractSnapshot(selectedModule.value)
+
+  artifactTaskFeedback.value = null
   uiContractPreviewVisible.value = true
+}
+
+async function handleConfirmUiContractSnapshot(payload: {
+  confirmationNote?: string
+}) {
+  if (!selectedModule.value?.id || !isPageNode(selectedModule.value)) {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message: '请先选择具体 PAGE 页面节点，再确认交互原型。',
+    }
+    return
+  }
+
+  if (!uiContractArtifact.value?.artifactId) {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message: '当前页面还没有可确认的 UI_CONTRACT 版本。',
+    }
+    return
+  }
+
+  uiContractConfirming.value = true
+  uiContractSnapshotError.value = ''
+
+  try {
+    const snapshot = await confirmUiContractSnapshot(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      selectedModule.value.id,
+      {
+        artifactId: uiContractArtifact.value.artifactId,
+        confirmationNote: payload.confirmationNote || '',
+      },
+    )
+
+    uiContractSnapshot.value = snapshot
+    await loadDevelopmentHandoffReadiness(selectedModule.value)
+    artifactTaskFeedback.value = {
+      level: 'success',
+      message: '页面效果已确认，后续 Development Agent 将以该版 UI_CONTRACT 作为页面蓝图。',
+    }
+  } catch (error) {
+    const message = resolveErrorMessage(
+      error,
+      '确认交互原型失败。',
+    )
+
+    uiContractSnapshotError.value = message
+    window.alert(message)
+  } finally {
+    uiContractConfirming.value = false
+  }
+}
+
+function openThemeProfileDrawer() {
+  themeProfileDrawerVisible.value = true
+}
+
+function closeThemeProfileDrawer() {
+  themeProfileDrawerVisible.value = false
+}
+
+function handleThemeProfileChanged(
+  profile: ProjectThemeProfile,
+) {
+  themeProfile.value = profile
 }
 
 async function handleOpenArtifactVersions(
@@ -1491,43 +1742,6 @@ function getArtifactMarkdownByType(
   if (artifactType === 'DEV_HANDOFF_PACKAGE') return devHandoffPackageMarkdown.value || ''
   if (artifactType === 'UI_CONTRACT') return uiContractMarkdown.value || ''
   return ''
-}
-
-function hasMeaningfulArtifactContent(
-  artifact: ArtifactResponse | null | undefined,
-  fallbackMarkdown: string,
-): boolean {
-  const markdown = artifact?.contentMarkdown || fallbackMarkdown
-
-  if (markdown && markdown.trim().length > 20) {
-    const normalizedMarkdown = markdown.trim()
-
-    if (
-      normalizedMarkdown.includes('当前模块尚未生成') ||
-      normalizedMarkdown.includes('暂无内容') ||
-      normalizedMarkdown.includes('TODO') ||
-      normalizedMarkdown.includes('占位')
-    ) {
-      return false
-    }
-
-    return true
-  }
-
-  if (!artifact?.content) {
-    return false
-  }
-
-  try {
-    const contentText = JSON.stringify(artifact.content)
-
-    return contentText.length > 20 &&
-      contentText !== '{}' &&
-      !contentText.includes('当前模块尚未生成') &&
-      !contentText.includes('暂无内容')
-  } catch {
-    return false
-  }
 }
 
 async function handleExportArtifactsZip() {
@@ -2296,6 +2510,10 @@ function closeArtifactVersionDrawer() {
 async function handleChangeAgentTab(tab: AgentTab) {
   activeTab.value = tab
 
+  if (tab === 'development') {
+    await loadDevelopmentHandoffReadiness()
+  }
+
   await saveCurrentWorkspaceState({
     selectedModuleId: selectedModule.value?.id || null,
     selectedArtifactType: selectedArtifactType.value,
@@ -2324,6 +2542,17 @@ function resetWorkspaceState() {
   modules.value = []
   assistantHistoryMessages.value = []
   latestAssistantResponse.value = null
+  uiContractReadiness.value = null
+  uiContractReadinessLoading.value = false
+  uiContractReadinessError.value = ''
+  uiContractSnapshot.value = null
+  uiContractSnapshotLoading.value = false
+  uiContractConfirming.value = false
+  uiContractSnapshotError.value = ''
+  developmentHandoffReadiness.value = null
+  developmentHandoffLoading.value = false
+  developmentHandoffError.value = ''
+  artifactTaskFeedback.value = null
   clearSelectedModuleAndArtifacts()
   resetSteps()
 }
@@ -2333,6 +2562,17 @@ function clearSelectedModuleAndArtifacts() {
   clearArtifacts()
   clearCurrentModuleAgentTasks()
   selectedArtifactType.value = null
+  uiContractReadiness.value = null
+  uiContractReadinessLoading.value = false
+  uiContractReadinessError.value = ''
+  uiContractSnapshot.value = null
+  uiContractSnapshotLoading.value = false
+  uiContractConfirming.value = false
+  uiContractSnapshotError.value = ''
+  developmentHandoffReadiness.value = null
+  developmentHandoffLoading.value = false
+  developmentHandoffError.value = ''
+  artifactTaskFeedback.value = null
 }
 
 function handleLogout() {
@@ -2357,4 +2597,73 @@ function handleLogout() {
   flex: 1;
   min-width: 0;
 }
+
+.theme-profile-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(4px);
+}
+
+.theme-profile-drawer {
+  width: min(520px, 96vw);
+  height: 100%;
+  overflow: auto;
+  border-left: 1px solid #dbe4ef;
+  padding: 20px;
+  background: #f8fafc;
+  box-shadow: -24px 0 60px rgba(15, 23, 42, 0.18);
+}
+
+.theme-profile-drawer-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+  border: 1px solid #dbe4ef;
+  border-radius: 18px;
+  padding: 18px;
+  background: #ffffff;
+}
+
+.theme-profile-drawer-header p {
+  margin: 0 0 5px;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.theme-profile-drawer-header h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 20px;
+}
+
+.theme-profile-drawer-header span {
+  display: block;
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.theme-profile-drawer-header button {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border: 1px solid #dbe4ef;
+  border-radius: 11px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 22px;
+  cursor: pointer;
+}
+
 </style>
+
+

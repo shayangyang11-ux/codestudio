@@ -75,7 +75,20 @@ public class RequirementTaskDependencyGuard {
                     );
 
             if (!exists) {
-                missing.add(artifactType);
+                boolean usableCurrentVersion = artifactVersionRepository
+                        .findFirstByProjectIdAndModuleIdAndArtifactTypeAndCurrentTrueOrderByVersionNoDesc(
+                                task.getProjectId(),
+                                task.getModuleId(),
+                                artifactType
+                        )
+                        .filter(artifact -> !"REJECTED".equalsIgnoreCase(artifact.getStatus()))
+                        .filter(artifact -> !"ARCHIVED".equalsIgnoreCase(artifact.getStatus()))
+                        .filter(artifact -> !"SUPERSEDED".equalsIgnoreCase(artifact.getStatus()))
+                        .isPresent();
+
+                if (!usableCurrentVersion) {
+                    missing.add(artifactType);
+                }
             }
         }
 
@@ -103,20 +116,25 @@ public class RequirementTaskDependencyGuard {
     }
 
     /**
-     * Resolve dependency edges according to the selected module-tree node type.
+     * UI_CONTRACT does not use the old "all previous core assets" rule.
      *
-     * Examples:
-     * - FEATURE + GENERATE_API_CONTRACT only requires FEATURE MODULE_PRD
-     *   ("功能点需求"), not PAGE_SPEC / DATA_MODEL on the FEATURE node.
-     * - PAGE + GENERATE_UI_CONTRACT requires PAGE MODULE_PRD, PAGE_SPEC and
-     *   PAGE API_CONTRACT as core page development assets.
-     * - MODULE + GENERATE_API_CONTRACT requires module PRD / flow / page map,
-     *   because it is a module-level API planning artifact.
+     * Generic task dependency:
+     * - PAGE_SPEC only.
+     *
+     * Dedicated readiness validation before generation:
+     * - selected node is PAGE;
+     * - interactive PAGE has FEATURE children;
+     * - every FEATURE has a usable MODULE_PRD or complete structured extra;
+     * - BUSINESS_FLOW / DATA_MODEL / API_CONTRACT / TEST_SPEC are warnings.
      */
     private List<String> requiredNodeAwareModuleArtifacts(
             AgentTaskEntity task,
             TaskType taskType
     ) {
+        if (TaskType.GENERATE_UI_CONTRACT.equals(taskType)) {
+            return List.of("PAGE_SPEC");
+        }
+
         if (task.getModuleId() == null) {
             return dependencyPolicy.requiredModuleArtifacts(taskType);
         }

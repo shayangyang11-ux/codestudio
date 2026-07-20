@@ -310,6 +310,11 @@ public class ArtifactService {
             UUID moduleId,
             String checkedBy
     ) {
+        ProjectModuleEntity module = resolveQualityGateModule(
+                projectId,
+                moduleId
+        );
+
         List<ArtifactVersionEntity> currentArtifacts =
                 artifactVersionRepository.findByProjectIdAndModuleIdAndCurrentTrue(
                         projectId,
@@ -324,8 +329,11 @@ public class ArtifactService {
 
         LocalDateTime checkedAt = LocalDateTime.now();
 
+        List<ArtifactExportDefinition> definitions =
+                buildRequirementArtifactExportDefinitions(module);
+
         ArtifactQualityCheckResult result = buildModuleQualityCheckResult(
-                buildRequirementArtifactExportDefinitions(),
+                definitions,
                 artifactByType,
                 checkedAt
         );
@@ -333,7 +341,7 @@ public class ArtifactService {
         return persistQualityCheckRecord(
                 projectId,
                 moduleId,
-                "MODULE",
+                resolveQualityGateScope(module),
                 result,
                 false,
                 "MANUAL_CHECK",
@@ -369,6 +377,21 @@ public class ArtifactService {
             String exportedBy,
             boolean forceExport
     ) {
+        ProjectModuleEntity module = resolveQualityGateModule(
+                projectId,
+                moduleId
+        );
+
+        String resolvedModuleKey = firstNonBlank(
+                moduleKey,
+                module.getModuleKey()
+        );
+
+        String resolvedModuleName = firstNonBlank(
+                moduleName,
+                module.getModuleName()
+        );
+
         List<ArtifactVersionEntity> currentArtifacts =
                 artifactVersionRepository.findByProjectIdAndModuleIdAndCurrentTrue(
                         projectId,
@@ -384,7 +407,9 @@ public class ArtifactService {
         LocalDateTime exportedAt = LocalDateTime.now();
 
         List<ArtifactExportDefinition> definitions =
-                buildRequirementArtifactExportDefinitions();
+                buildRequirementArtifactExportDefinitions(module);
+
+        String qualityScope = resolveQualityGateScope(module);
 
         Map<String, Object> manifest = new LinkedHashMap<>();
         manifest.put("schema_version", "1.0");
@@ -394,8 +419,10 @@ public class ArtifactService {
         manifest.put("project_id", projectId.toString());
         manifest.put("project_code", projectCode);
         manifest.put("module_id", moduleId.toString());
-        manifest.put("module_key", moduleKey);
-        manifest.put("module_name", moduleName);
+        manifest.put("module_key", resolvedModuleKey);
+        manifest.put("module_name", resolvedModuleName);
+        manifest.put("module_type", safeText(module.getModuleType()));
+        manifest.put("quality_scope", qualityScope);
 
         List<Map<String, Object>> assetManifestItems = definitions
                 .stream()
@@ -416,7 +443,7 @@ public class ArtifactService {
         ArtifactQualityCheckRecordEntity qualityRecord = persistQualityCheckRecord(
                 projectId,
                 moduleId,
-                "MODULE",
+                qualityScope,
                 qualityCheckResult,
                 forceExport,
                 "EXPORT_MODULE_ZIP",
@@ -435,13 +462,13 @@ public class ArtifactService {
                     0,
                     false,
                     buildQualityCheckManifest(qualityCheckResult, false),
-                    "当前模块存在交付阻断项，未确认强制导出。",
+                    "当前节点存在交付阻断项，未确认强制导出。",
                     exportedBy
             );
 
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
-                    "当前模块存在交付阻断项，请先完成质量检查并修复问题，或确认后强制导出。"
+                    "当前节点存在交付阻断项，请先完成质量检查并修复问题，或确认后强制导出。"
             );
         }
 
@@ -455,8 +482,8 @@ public class ArtifactService {
 
         byte[] zipContent = buildModuleArtifactZip(
                 projectCode,
-                moduleKey,
-                moduleName,
+                resolvedModuleKey,
+                resolvedModuleName,
                 exportedAt,
                 definitions,
                 artifactByType,
@@ -467,8 +494,8 @@ public class ArtifactService {
 
         String fileName = buildExportZipFileName(
                 projectCode,
-                moduleKey,
-                moduleName,
+                resolvedModuleKey,
+                resolvedModuleName,
                 exportedAt
         );
 
@@ -494,15 +521,205 @@ public class ArtifactService {
     }
 
     private List<ArtifactExportDefinition> buildRequirementArtifactExportDefinitions() {
+        return buildModuleArtifactExportDefinitions();
+    }
+
+    private List<ArtifactExportDefinition> buildRequirementArtifactExportDefinitions(
+            ProjectModuleEntity module
+    ) {
+        String nodeType = resolveQualityGateNodeType(module);
+
+        return switch (nodeType) {
+            case "DOMAIN" -> buildDomainArtifactExportDefinitions();
+            case "SUBMODULE" -> buildSubmoduleArtifactExportDefinitions();
+            case "PAGE" -> buildPageArtifactExportDefinitions();
+            case "FEATURE" -> buildFeatureArtifactExportDefinitions();
+            default -> buildModuleArtifactExportDefinitions();
+        };
+    }
+
+    private List<ArtifactExportDefinition> buildDomainArtifactExportDefinitions() {
         return List.of(
-                new ArtifactExportDefinition("01_MODULE_PRD.md", "MODULE_PRD", "模块 PRD"),
-                new ArtifactExportDefinition("02_BUSINESS_FLOW.md", "BUSINESS_FLOW", "业务流程"),
-                new ArtifactExportDefinition("03_PAGE_SPEC.md", "PAGE_SPEC", "页面规范"),
-                new ArtifactExportDefinition("04_DATA_MODEL.md", "DATA_MODEL", "数据模型"),
-                new ArtifactExportDefinition("05_API_CONTRACT.md", "API_CONTRACT", "接口契约"),
-                new ArtifactExportDefinition("06_TEST_SPEC.md", "TEST_SPEC", "测试规格"),
-                new ArtifactExportDefinition("07_DEV_HANDOFF_PACKAGE.md", "DEV_HANDOFF_PACKAGE", "开发交接包")
+                required("01_DOMAIN_OVERVIEW.md", "MODULE_PRD", "业务域概览"),
+                required("02_DOMAIN_BUSINESS_FLOW.md", "BUSINESS_FLOW", "业务域流程总览"),
+                required("03_DOMAIN_PAGE_MAP.md", "PAGE_SPEC", "模块/页面地图"),
+                optional("04_DOMAIN_DATA_TOPICS.md", "DATA_MODEL", "数据主题总览"),
+                optional("05_DOMAIN_API_BOUNDARY.md", "API_CONTRACT", "接口域总览"),
+                optional("06_DOMAIN_TEST_SCOPE.md", "TEST_SPEC", "业务域测试范围"),
+                optional("07_DOMAIN_DELIVERY_NOTE.md", "DEV_HANDOFF_PACKAGE", "业务域交付说明")
         );
+    }
+
+    private List<ArtifactExportDefinition> buildModuleArtifactExportDefinitions() {
+        return List.of(
+                required("01_MODULE_PRD.md", "MODULE_PRD", "模块 PRD"),
+                required("02_BUSINESS_FLOW.md", "BUSINESS_FLOW", "业务流程"),
+                required("03_PAGE_SPEC.md", "PAGE_SPEC", "页面地图"),
+                optional("04_DATA_MODEL.md", "DATA_MODEL", "数据模型"),
+                required("05_API_CONTRACT.md", "API_CONTRACT", "接口规划"),
+                optional("06_TEST_SPEC.md", "TEST_SPEC", "测试规格"),
+                optional("07_DEV_HANDOFF_PACKAGE.md", "DEV_HANDOFF_PACKAGE", "开发交接包")
+        );
+    }
+
+    private List<ArtifactExportDefinition> buildSubmoduleArtifactExportDefinitions() {
+        return List.of(
+                required("01_SCENE_REQUIREMENT.md", "MODULE_PRD", "场景需求说明"),
+                required("02_SCENE_BUSINESS_FLOW.md", "BUSINESS_FLOW", "场景业务流程"),
+                required("03_SCENE_PAGE_LIST.md", "PAGE_SPEC", "场景页面清单"),
+                optional("04_SCENE_API_LIST.md", "API_CONTRACT", "场景接口清单"),
+                optional("05_SCENE_TEST_SPEC.md", "TEST_SPEC", "场景测试规格"),
+                optional("06_SCENE_DEV_NOTE.md", "DEV_HANDOFF_PACKAGE", "场景开发说明")
+        );
+    }
+
+    private List<ArtifactExportDefinition> buildPageArtifactExportDefinitions() {
+        return List.of(
+                optional("01_PAGE_REQUIREMENT.md", "MODULE_PRD", "页面需求"),
+                optional("02_PAGE_INTERACTION_FLOW.md", "BUSINESS_FLOW", "页面交互流程"),
+                required("03_PAGE_SPEC.md", "PAGE_SPEC", "页面规范"),
+                optional("04_PAGE_DATA_MODEL.md", "DATA_MODEL", "页面数据模型"),
+                required("05_PAGE_API_CONTRACT.md", "API_CONTRACT", "页面接口契约"),
+                optional("06_PAGE_TEST_SPEC.md", "TEST_SPEC", "页面测试规格"),
+                required("07_UI_CONTRACT.json.md", "UI_CONTRACT", "交互原型"),
+                optional("08_PAGE_DEV_HANDOFF.md", "DEV_HANDOFF_PACKAGE", "页面开发交接包")
+        );
+    }
+
+    private List<ArtifactExportDefinition> buildFeatureArtifactExportDefinitions() {
+        return List.of(
+                required("01_FEATURE_REQUIREMENT.md", "MODULE_PRD", "功能点需求"),
+                optional("02_FEATURE_FLOW.md", "BUSINESS_FLOW", "功能点流程"),
+                required("03_FEATURE_API.md", "API_CONTRACT", "功能点接口"),
+                required("04_FEATURE_TEST.md", "TEST_SPEC", "功能点测试"),
+                optional("05_FEATURE_DEV_NOTE.md", "DEV_HANDOFF_PACKAGE", "功能点开发说明")
+        );
+    }
+
+    private ArtifactExportDefinition required(
+            String fileName,
+            String artifactType,
+            String title
+    ) {
+        return new ArtifactExportDefinition(
+                fileName,
+                artifactType,
+                title,
+                true
+        );
+    }
+
+    private ArtifactExportDefinition optional(
+            String fileName,
+            String artifactType,
+            String title
+    ) {
+        return new ArtifactExportDefinition(
+                fileName,
+                artifactType,
+                title,
+                false
+        );
+    }
+
+    private ProjectModuleEntity resolveQualityGateModule(
+            UUID projectId,
+            UUID moduleId
+    ) {
+        ProjectModuleEntity module = projectModuleRepository.findById(moduleId)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Project module not found. moduleId=" + moduleId
+                ));
+
+        if (
+                module.getProjectId() != null &&
+                        !module.getProjectId().equals(projectId)
+        ) {
+            throw new IllegalArgumentException(
+                    "Project module does not belong to current project. projectId="
+                            + projectId
+                            + ", moduleId="
+                            + moduleId
+            );
+        }
+
+        return module;
+    }
+
+    private String resolveQualityGateScope(
+            ProjectModuleEntity module
+    ) {
+        return resolveQualityGateNodeType(module);
+    }
+
+    private String resolveQualityGateNodeType(
+            ProjectModuleEntity module
+    ) {
+        String rawType = normalizeModuleType(
+                module == null ? null : module.getModuleType()
+        );
+
+        if (
+                "DOMAIN".equals(rawType) ||
+                        "DOMAIN_MODULE".equals(rawType) ||
+                        "BUSINESS_DOMAIN".equals(rawType)
+        ) {
+            return "DOMAIN";
+        }
+
+        if (
+                "SUBMODULE".equals(rawType) ||
+                        "SUB_MODULE".equals(rawType) ||
+                        "SCENE".equals(rawType) ||
+                        "BUSINESS_SCENE".equals(rawType)
+        ) {
+            return "SUBMODULE";
+        }
+
+        if (
+                "PAGE".equals(rawType) ||
+                        "PAGE_MODULE".equals(rawType) ||
+                        "SCREEN".equals(rawType) ||
+                        "VIEW".equals(rawType)
+        ) {
+            return "PAGE";
+        }
+
+        if (
+                "FEATURE".equals(rawType) ||
+                        "FUNCTION".equals(rawType) ||
+                        "ACTION".equals(rawType) ||
+                        "OPERATION".equals(rawType)
+        ) {
+            return "FEATURE";
+        }
+
+        return "MODULE";
+    }
+
+    private String normalizeModuleType(
+            String value
+    ) {
+        if (value == null) {
+            return "";
+        }
+
+        return value.trim().toUpperCase();
+    }
+
+    private String firstNonBlank(
+            String first,
+            String second
+    ) {
+        if (first != null && !first.isBlank()) {
+            return first;
+        }
+
+        if (second != null && !second.isBlank()) {
+            return second;
+        }
+
+        return "-";
     }
 
     @Transactional(noRollbackFor = ResponseStatusException.class)
@@ -515,6 +732,21 @@ public class ArtifactService {
             String exportedBy,
             boolean forceExport
     ) {
+        ProjectModuleEntity module = resolveQualityGateModule(
+                projectId,
+                moduleId
+        );
+
+        String resolvedModuleKey = firstNonBlank(
+                moduleKey,
+                module.getModuleKey()
+        );
+
+        String resolvedModuleName = firstNonBlank(
+                moduleName,
+                module.getModuleName()
+        );
+
         List<ArtifactVersionEntity> currentArtifacts =
                 artifactVersionRepository.findByProjectIdAndModuleIdAndCurrentTrue(
                         projectId,
@@ -530,7 +762,9 @@ public class ArtifactService {
         LocalDateTime exportedAt = LocalDateTime.now();
 
         List<ArtifactExportDefinition> definitions =
-                buildRequirementArtifactExportDefinitions();
+                buildRequirementArtifactExportDefinitions(module);
+
+        String qualityScope = resolveQualityGateScope(module);
 
         ArtifactQualityCheckResult qualityCheckResult = buildModuleQualityCheckResult(
                 definitions,
@@ -541,7 +775,7 @@ public class ArtifactService {
         ArtifactQualityCheckRecordEntity qualityRecord = persistQualityCheckRecord(
                 projectId,
                 moduleId,
-                "MODULE",
+                qualityScope,
                 qualityCheckResult,
                 forceExport,
                 "EXPORT_MODULE_DOCX",
@@ -560,20 +794,20 @@ public class ArtifactService {
                     0,
                     false,
                     buildQualityCheckManifest(qualityCheckResult, false),
-                    "当前模块存在交付阻断项，未确认强制导出。",
+                    "当前节点存在交付阻断项，未确认强制导出。",
                     exportedBy
             );
 
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
-                    "当前模块存在交付阻断项，请先完成质量检查并修复问题，或确认后强制导出。"
+                    "当前节点存在交付阻断项，请先完成质量检查并修复问题，或确认后强制导出。"
             );
         }
 
         byte[] docxContent = buildModuleArtifactDocx(
                 projectCode,
-                moduleKey,
-                moduleName,
+                resolvedModuleKey,
+                resolvedModuleName,
                 exportedAt,
                 exportedBy,
                 definitions,
@@ -584,8 +818,8 @@ public class ArtifactService {
 
         String fileName = buildExportDocxFileName(
                 projectCode,
-                moduleKey,
-                moduleName,
+                resolvedModuleKey,
+                resolvedModuleName,
                 exportedAt
         );
 
@@ -594,9 +828,10 @@ public class ArtifactService {
         docxManifest.put("project_id", projectId.toString());
         docxManifest.put("project_code", projectCode);
         docxManifest.put("module_id", moduleId.toString());
-        docxManifest.put("module_key", moduleKey);
-        docxManifest.put("module_name", moduleName);
-        docxManifest.put("exported_by", exportedBy);
+        docxManifest.put("module_key", resolvedModuleKey);
+        docxManifest.put("module_name", resolvedModuleName);
+        docxManifest.put("module_type", safeText(module.getModuleType()));
+        docxManifest.put("quality_scope", qualityScope);
         docxManifest.put("quality_check", buildQualityCheckManifest(qualityCheckResult, forceExport));
 
         persistExportRecord(
@@ -635,9 +870,6 @@ public class ArtifactService {
 
         LocalDateTime exportedAt = LocalDateTime.now();
 
-        List<ArtifactExportDefinition> definitions =
-                buildRequirementArtifactExportDefinitions();
-
         Map<String, Integer> folderNameCounters = new LinkedHashMap<>();
         List<ProjectModuleExportContext> moduleContexts = new ArrayList<>();
 
@@ -656,6 +888,9 @@ public class ArtifactService {
                         artifact
                 );
             }
+
+            List<ArtifactExportDefinition> definitions =
+                    buildRequirementArtifactExportDefinitions(module);
 
             ArtifactQualityCheckResult qualityCheckResult =
                     buildModuleQualityCheckResult(
@@ -687,7 +922,8 @@ public class ArtifactService {
                             folderName,
                             artifactByType,
                             qualityCheckResult,
-                            moduleManifest
+                            moduleManifest,
+                            definitions
                     )
             );
         }
@@ -732,13 +968,13 @@ public class ArtifactService {
                     0,
                     false,
                     blockedManifest,
-                    "当前项目存在 " + blockedModuleCount + " 个模块包含交付阻断项，未确认强制导出。",
+                    "当前项目存在 " + blockedModuleCount + " 个节点包含交付阻断项，未确认强制导出。",
                     exportedBy
             );
 
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
-                    "当前项目存在 " + blockedModuleCount + " 个模块包含交付阻断项，请先修复问题，或确认后强制导出。"
+                    "当前项目存在 " + blockedModuleCount + " 个节点包含交付阻断项，请先修复问题，或确认后强制导出。"
             );
         }
 
@@ -756,7 +992,6 @@ public class ArtifactService {
                 projectCode,
                 projectName,
                 exportedAt,
-                definitions,
                 moduleContexts,
                 projectManifest,
                 forceExport
@@ -859,7 +1094,6 @@ public class ArtifactService {
             String projectCode,
             String projectName,
             LocalDateTime exportedAt,
-            List<ArtifactExportDefinition> definitions,
             List<ProjectModuleExportContext> moduleContexts,
             Map<String, Object> projectManifest,
             boolean forceExport
@@ -912,7 +1146,7 @@ public class ArtifactService {
                             )
                     );
 
-                    for (ArtifactExportDefinition definition : definitions) {
+                    for (ArtifactExportDefinition definition : context.definitions()) {
                         ArtifactVersionEntity artifact = context.artifactByType()
                                 .get(definition.artifactType());
 
@@ -1024,6 +1258,7 @@ public class ArtifactService {
         manifest.put("module_key", module.getModuleKey());
         manifest.put("module_name", module.getModuleName());
         manifest.put("module_type", module.getModuleType());
+        manifest.put("quality_scope", resolveQualityGateScope(module));
         manifest.put("module_path", module.getModulePath());
         manifest.put("level_no", module.getLevelNo());
         manifest.put("sort_order", module.getSortOrder());
@@ -1122,12 +1357,13 @@ public class ArtifactService {
             ## 导出说明
 
             本 ZIP 文件由 CodeMind Studio 自动生成，用于项目级需求资产整体交付。
+            每个模块树节点会按自己的层级执行 Quality Gate v2 检查，业务域、模块、子模块、页面和功能点的资产清单可能不同。
 
             ## 基础信息
 
             - 项目编码：%s
             - 项目名称：%s
-            - 模块数量：%s
+            - 节点数量：%s
             - 导出时间：%s
             - 是否强制导出：%s
 
@@ -1136,20 +1372,14 @@ public class ArtifactService {
             - README.md：项目级导出说明
             - PROJECT_QUALITY_REPORT.md：项目级质量检查报告
             - project_manifest.json：项目级导出元数据
-            - modules/：各模块需求资产目录
+            - modules/：各节点需求资产目录
 
-            ## 模块目录说明
+            ## 节点目录说明
 
-            每个模块目录下包含：
-            - QUALITY_REPORT.md：模块质量检查报告
-            - 01_MODULE_PRD.md：模块 PRD
-            - 02_BUSINESS_FLOW.md：业务流程
-            - 03_PAGE_SPEC.md：页面规范
-            - 04_DATA_MODEL.md：数据模型
-            - 05_API_CONTRACT.md：接口契约
-            - 06_TEST_SPEC.md：测试规格
-            - 07_DEV_HANDOFF_PACKAGE.md：开发交接包
-            - manifest.json：模块导出元数据
+            每个节点目录下包含：
+            - QUALITY_REPORT.md：当前节点质量检查报告
+            - manifest.json：当前节点导出元数据和动态资产清单
+            - 其他资产文件：根据节点层级动态生成，具体以该节点 manifest.json 中的 assets 为准
             """.formatted(
                 safeText(projectCode),
                 safeText(projectName),
@@ -1847,33 +2077,31 @@ public class ArtifactService {
             LocalDateTime exportedAt
     ) {
         return """
-            # CodeMind 模块需求资产交付包
+            # CodeMind 节点需求资产交付包
 
             ## 导出说明
 
-            本 ZIP 文件由 CodeMind Studio 自动生成，用于模块级需求资产交付。
+            本 ZIP 文件由 CodeMind Studio 自动生成，用于当前模块树节点的需求资产交付。
+            资产清单会根据节点层级动态生成；业务域、模块、子模块、页面和功能点不会强制套用同一套交付项。
 
             ## 基础信息
 
             - 项目编码：%s
-            - 模块 Key：%s
-            - 模块名称：%s
+            - 节点 Key：%s
+            - 节点名称：%s
             - 导出时间：%s
 
-            ## 文件清单
+            ## 文件说明
 
-            - 01_MODULE_PRD.md：模块 PRD
-            - 02_BUSINESS_FLOW.md：业务流程
-            - 03_PAGE_SPEC.md：页面规范
-            - 04_DATA_MODEL.md：数据模型
-            - 05_API_CONTRACT.md：接口契约
-            - 06_TEST_SPEC.md：测试规格
-            - 07_DEV_HANDOFF_PACKAGE.md：开发交接包
-            - manifest.json：导出元数据
+            - README.md：导出说明
+            - QUALITY_REPORT.md：当前节点质量检查报告
+            - manifest.json：导出元数据和动态资产清单
+            - 其他资产文件：根据当前节点层级动态生成，具体以 manifest.json 中的 assets 为准
 
             ## 版本说明
 
-            每个资产文件均导出当前版本。若某个资产尚未生成，对应文件内会给出明确占位说明。
+            每个资产文件均导出当前版本。若某个核心资产尚未生成，质量检查会标记为阻断项。
+            补充资产缺失时会标记为警告项，允许后续按需补齐。
             历史版本不会被删除，可在 CodeMind Studio 的版本历史中继续查看和回滚。
             """.formatted(
                 safeText(projectCode),
@@ -1896,6 +2124,7 @@ public class ArtifactService {
         builder.append("## 导出元信息\n\n");
         builder.append("- 资产类型：").append(definition.artifactType()).append("\n");
         builder.append("- 资产名称：").append(definition.title()).append("\n");
+        builder.append("- 核心检查项：").append(definition.required() ? "是" : "否").append("\n");
 
         if (artifact == null) {
             builder.append("- 生成状态：未生成\n\n");
@@ -1947,6 +2176,7 @@ public class ArtifactService {
         item.put("file_name", definition.fileName());
         item.put("artifact_type", definition.artifactType());
         item.put("title", definition.title());
+        item.put("required", definition.required());
         item.put("exists", artifact != null);
         item.put("prompt_template", buildArtifactPromptTemplateManifest(artifact));
 
@@ -1983,6 +2213,11 @@ public class ArtifactService {
         List<ArtifactQualityIssue> warnings = new ArrayList<>();
         List<ArtifactQualityIssue> passes = new ArrayList<>();
 
+        List<String> expectedArtifactTypes = definitions
+                .stream()
+                .map(ArtifactExportDefinition::artifactType)
+                .toList();
+
         for (ArtifactExportDefinition definition : definitions) {
             ArtifactVersionEntity artifact = artifactByType.get(definition.artifactType());
             boolean exists = artifact != null;
@@ -1994,13 +2229,13 @@ public class ArtifactService {
             String statusText = "已生成";
 
             if (!exists) {
-                level = "blocker";
-                statusText = "缺失";
+                level = definition.required() ? "blocker" : "warning";
+                statusText = definition.required() ? "缺失" : "未生成（可后补）";
             } else if (!contentOk) {
-                level = "blocker";
+                level = definition.required() ? "blocker" : "warning";
                 statusText = "内容为空";
             } else if ("REJECTED".equals(status)) {
-                level = "blocker";
+                level = definition.required() ? "blocker" : "warning";
                 statusText = "已退回";
             } else if ("DRAFT".equals(status)
                     || "ACTIVE".equals(status)
@@ -2023,6 +2258,7 @@ public class ArtifactService {
             ArtifactQualityAsset asset = new ArtifactQualityAsset(
                     definition.artifactType(),
                     definition.title(),
+                    definition.required(),
                     exists,
                     artifact == null ? null : artifact.getVersionNo(),
                     status,
@@ -2035,35 +2271,58 @@ public class ArtifactService {
             assets.add(asset);
 
             if (!exists) {
-                blockers.add(new ArtifactQualityIssue(
+                ArtifactQualityIssue issue = new ArtifactQualityIssue(
                         "missing-" + definition.artifactType(),
-                        "blocker",
+                        level,
                         definition.title() + "缺失",
-                        "当前模块尚未生成" + definition.title() + "，会影响完整交付包。",
+                        definition.required()
+                                ? "当前节点尚未生成核心资产“" + definition.title() + "”，会影响正式交付。"
+                                : "当前节点尚未生成补充资产“" + definition.title() + "”，建议在正式交付或进入开发 Agent 前补齐。",
                         definition.artifactType()
-                ));
+                );
+
+                if (definition.required()) {
+                    blockers.add(issue);
+                } else {
+                    warnings.add(issue);
+                }
+
                 continue;
             }
 
             if ("REJECTED".equals(status)) {
-                blockers.add(new ArtifactQualityIssue(
+                ArtifactQualityIssue issue = new ArtifactQualityIssue(
                         "rejected-" + definition.artifactType(),
-                        "blocker",
+                        level,
                         definition.title() + "已退回",
                         definition.title() + "当前处于已退回状态，建议修改并重新提交审核。",
                         definition.artifactType()
-                ));
+                );
+
+                if (definition.required()) {
+                    blockers.add(issue);
+                } else {
+                    warnings.add(issue);
+                }
+
                 continue;
             }
 
-            if ("blocker".equals(level)) {
-                blockers.add(new ArtifactQualityIssue(
+            if (!contentOk) {
+                ArtifactQualityIssue issue = new ArtifactQualityIssue(
                         "empty-" + definition.artifactType(),
-                        "blocker",
+                        level,
                         definition.title() + "内容不可用",
                         definition.title() + "存在空内容或占位内容，无法作为正式交付依据。",
                         definition.artifactType()
-                ));
+                );
+
+                if (definition.required()) {
+                    blockers.add(issue);
+                } else {
+                    warnings.add(issue);
+                }
+
                 continue;
             }
 
@@ -2094,6 +2353,10 @@ public class ArtifactService {
             }
 
             for (String upstreamType : upstreamArtifactTypesOf(definition.artifactType())) {
+                if (!expectedArtifactTypes.contains(upstreamType)) {
+                    continue;
+                }
+
                 ArtifactVersionEntity upstreamArtifact = artifactByType.get(upstreamType);
 
                 if (upstreamArtifact == null || upstreamArtifact.getUpdatedAt() == null) {
@@ -2172,13 +2435,22 @@ public class ArtifactService {
             case "DATA_MODEL" -> List.of("MODULE_PRD", "BUSINESS_FLOW", "PAGE_SPEC");
             case "API_CONTRACT" -> List.of("PAGE_SPEC", "DATA_MODEL");
             case "TEST_SPEC" -> List.of("PAGE_SPEC", "DATA_MODEL", "API_CONTRACT");
-            case "DEV_HANDOFF_PACKAGE" -> List.of(
+            case "UI_CONTRACT" -> List.of(
                     "MODULE_PRD",
                     "BUSINESS_FLOW",
                     "PAGE_SPEC",
                     "DATA_MODEL",
                     "API_CONTRACT",
                     "TEST_SPEC"
+            );
+            case "DEV_HANDOFF_PACKAGE" -> List.of(
+                    "MODULE_PRD",
+                    "BUSINESS_FLOW",
+                    "PAGE_SPEC",
+                    "DATA_MODEL",
+                    "API_CONTRACT",
+                    "TEST_SPEC",
+                    "UI_CONTRACT"
             );
             default -> List.of();
         };
@@ -2501,12 +2773,14 @@ public class ArtifactService {
                 .append("\n\n");
 
         builder.append("## 资产状态\n\n");
-        builder.append("| 资产 | 状态 | 版本 | 检查结果 | 更新时间 |\n");
-        builder.append("|---|---|---:|---|---|\n");
+        builder.append("| 资产 | 范围 | 状态 | 版本 | 检查结果 | 更新时间 |\n");
+        builder.append("|---|---|---|---:|---|---|\n");
 
         for (ArtifactQualityAsset asset : result.assets()) {
             builder.append("| ")
                     .append(asset.title())
+                    .append(" | ")
+                    .append(asset.required() ? "核心" : "补充")
                     .append(" | ")
                     .append(asset.statusText())
                     .append(" | ")
@@ -2703,7 +2977,8 @@ public class ArtifactService {
     private record ArtifactExportDefinition(
             String fileName,
             String artifactType,
-            String title
+            String title,
+            boolean required
     ) {
     }
 
@@ -2720,6 +2995,7 @@ public class ArtifactService {
     private record ArtifactQualityAsset(
             String artifactType,
             String title,
+            boolean required,
             boolean exists,
             Integer versionNo,
             String status,
@@ -2744,7 +3020,8 @@ public class ArtifactService {
             String folderName,
             Map<String, ArtifactVersionEntity> artifactByType,
             ArtifactQualityCheckResult qualityCheckResult,
-            Map<String, Object> manifest
+            Map<String, Object> manifest,
+            List<ArtifactExportDefinition> definitions
     ) {
     }
 

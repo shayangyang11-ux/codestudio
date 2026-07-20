@@ -19,7 +19,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -37,6 +39,8 @@ public class UiContractPersistenceService {
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper;
     private final CurrentUserProvider currentUserProvider;
+    private final UiContractGenerationReadinessService readinessService;
+    private final UiContractValidationService validationService;
 
     public UiContractPersistenceService(
             ProjectAccessService projectAccessService,
@@ -47,7 +51,9 @@ public class UiContractPersistenceService {
             AuditService auditService,
             TransactionTemplate transactionTemplate,
             ObjectMapper objectMapper,
-            CurrentUserProvider currentUserProvider
+            CurrentUserProvider currentUserProvider,
+            UiContractGenerationReadinessService readinessService,
+            UiContractValidationService validationService
     ) {
         this.projectAccessService = projectAccessService;
         this.agentTaskService = agentTaskService;
@@ -58,6 +64,8 @@ public class UiContractPersistenceService {
         this.transactionTemplate = transactionTemplate;
         this.objectMapper = objectMapper;
         this.currentUserProvider = currentUserProvider;
+        this.readinessService = readinessService;
+        this.validationService = validationService;
     }
 
     public Map<String, Object> generateAndPersistUiContract(
@@ -66,7 +74,7 @@ public class UiContractPersistenceService {
             UUID moduleId,
             GenerateUiContractRequest request
     ) {
-        ProjectEntity project = projectAccessService.resolveAccessibleProjectEntity(
+        ProjectEntity project = resolveProject(
                 workspaceId,
                 projectCode
         );
@@ -75,7 +83,20 @@ public class UiContractPersistenceService {
                 project.getId(),
                 moduleId
         );
+
         assertPageNodeForUiContract(module);
+
+        GenerateUiContractRequest safeRequest = request == null
+                ? new GenerateUiContractRequest()
+                : request;
+
+        UiContractGenerationReadinessResult readiness =
+                readinessService.evaluate(
+                        project.getId(),
+                        module
+                );
+
+        readiness.assertReady();
 
         CurrentUser currentUser = currentUserProvider.getCurrentUser();
 
@@ -84,7 +105,8 @@ public class UiContractPersistenceService {
                 workspaceId,
                 projectCode,
                 module,
-                request
+                safeRequest,
+                readiness
         );
 
         AgentTaskEntity task = agentTaskService.createRunningTask(
@@ -101,7 +123,8 @@ public class UiContractPersistenceService {
                 workspaceId,
                 projectCode,
                 module,
-                request,
+                safeRequest,
+                readiness,
                 currentUser.username()
         );
     }
@@ -114,7 +137,7 @@ public class UiContractPersistenceService {
             GenerateUiContractRequest request,
             String username
     ) {
-        ProjectEntity project = projectAccessService.resolveAccessibleProjectEntity(
+        ProjectEntity project = resolveProject(
                 workspaceId,
                 projectCode
         );
@@ -126,7 +149,31 @@ public class UiContractPersistenceService {
 
         assertPageNodeForUiContract(module);
 
+        GenerateUiContractRequest safeRequest = request == null
+                ? new GenerateUiContractRequest()
+                : request;
+
         AgentTaskEntity task = agentTaskService.getById(taskId);
+
+        UiContractGenerationReadinessResult readiness =
+                readinessService.evaluate(
+                        project.getId(),
+                        module
+                );
+
+        if (!readiness.ready()) {
+            String errorMessage = readiness.blockers().isEmpty()
+                    ? "当前 PAGE 尚未满足交互原型生成条件。"
+                    : String.join("；", readiness.blockers());
+
+            agentTaskService.markFailed(
+                    task.getId(),
+                    "UI_CONTRACT_NOT_READY",
+                    errorMessage
+            );
+
+            throw new IllegalStateException(errorMessage);
+        }
 
         return executeUiContractGeneration(
                 task,
@@ -134,7 +181,8 @@ public class UiContractPersistenceService {
                 workspaceId,
                 projectCode,
                 module,
-                request,
+                safeRequest,
+                readiness,
                 username
         );
     }
@@ -146,27 +194,41 @@ public class UiContractPersistenceService {
             String projectCode,
             ProjectModuleEntity module,
             GenerateUiContractRequest request,
+            UiContractGenerationReadinessResult readiness,
             String username
     ) {
-        Map<String, Object> requestPayload = task.getRequestPayload();
+        Map<String, Object> requestPayload =
+                mutablePayload(task.getRequestPayload());
 
-        if (requestPayload == null || requestPayload.isEmpty()) {
+        if (requestPayload.isEmpty()) {
             requestPayload = buildRequestPayload(
                     project,
                     workspaceId,
                     projectCode,
                     module,
-                    request
+                    request,
+                    readiness
+            );
+        } else {
+            requestPayload.put(
+                    "ui_contract_readiness",
+                    readiness.toMap()
             );
         }
 
         try {
-            Map<String, Object> contextPackage = contextPackageService.buildAndLogContextPackage(
-                    task,
-                    project,
-                    module,
-                    TaskType.GENERATE_UI_CONTRACT,
-                    requestPayload
+            Map<String, Object> contextPackage =
+                    contextPackageService.buildAndLogContextPackage(
+                            task,
+                            project,
+                            module,
+                            TaskType.GENERATE_UI_CONTRACT,
+                            requestPayload
+                    );
+
+            contextPackage.put(
+                    "ui_contract_readiness",
+                    readiness.toMap()
             );
 
             Object response = agentGatewayService.generateUiContract(
@@ -203,63 +265,133 @@ public class UiContractPersistenceService {
                 throw new IllegalStateException(errorMessage);
             }
 
-            Map<String, Object> artifactContent = extractArtifactContent(responseEnvelope);
-            String contentMarkdown = extractMarkdown(responseEnvelope, artifactContent);
+            Map<String, Object> artifactContent =
+                    extractArtifactContent(responseEnvelope);
 
-            ArtifactVersionEntity artifact = transactionTemplate.execute(status -> {
-                ArtifactVersionEntity savedArtifact = artifactService.saveArtifact(
-                        project.getId(),
-                        module.getId(),
-                        task.getId(),
-                        ARTIFACT_TYPE,
-                        module.getModuleName() + " 交互式 UI 契约",
-                        artifactContent,
-                        contentMarkdown,
-                        username
-                );
-
-                if (shouldMarkPartialSuccess(responseEnvelope)) {
-                    agentTaskService.markPartialSuccess(
-                            task.getId(),
-                            responseEnvelope,
-                            savedArtifact.getId(),
-                            "AGENT_WORKFLOW_SUCCESS_WITH_WARNINGS",
-                            "Python workflow finished with warnings. See response metadata for details."
+            UiContractValidationResult validation =
+                    validationService.validate(
+                            project.getId(),
+                            module,
+                            artifactContent
                     );
-                } else {
-                    agentTaskService.markSuccess(
-                            task.getId(),
-                            responseEnvelope,
-                            savedArtifact.getId()
-                    );
-                }
 
-                auditService.record(
-                        project.getId(),
-                        "USER",
-                        username,
-                        "GENERATE_UI_CONTRACT",
-                        "ARTIFACT_VERSION",
-                        savedArtifact.getId(),
-                        null,
-                        Map.of(
-                                "artifact_type", ARTIFACT_TYPE,
-                                "module_id", module.getId().toString(),
-                                "module_key", module.getModuleKey(),
-                                "version_no", savedArtifact.getVersionNo()
-                        ),
-                        Map.of(
-                                "task_id", task.getId().toString(),
-                                "project_code", projectCode,
-                                "workspace_id", workspaceId == null ? "" : workspaceId.toString()
-                        )
-                );
+            validation.assertValid();
 
-                return savedArtifact;
-            });
+            String contentMarkdown = extractMarkdown(
+                    responseEnvelope,
+                    artifactContent
+            );
+
+            boolean partialSuccess =
+                    shouldMarkPartialSuccess(responseEnvelope)
+                            || !readiness.warnings().isEmpty()
+                            || !validation.warnings().isEmpty();
+
+            ArtifactVersionEntity artifact =
+                    transactionTemplate.execute(status -> {
+                        ArtifactVersionEntity savedArtifact =
+                                artifactService.saveArtifact(
+                                        project.getId(),
+                                        module.getId(),
+                                        task.getId(),
+                                        ARTIFACT_TYPE,
+                                        module.getModuleName() + " 交互原型",
+                                        artifactContent,
+                                        contentMarkdown,
+                                        username
+                                );
+
+                        if (partialSuccess) {
+                            Map<String, Object> enrichedResponse =
+                                    new LinkedHashMap<>(responseEnvelope);
+
+                            enrichedResponse.put(
+                                    "ui_contract_readiness",
+                                    readiness.toMap()
+                            );
+                            enrichedResponse.put(
+                                    "ui_contract_validation",
+                                    validation.toMap()
+                            );
+
+                            agentTaskService.markPartialSuccess(
+                                    task.getId(),
+                                    enrichedResponse,
+                                    savedArtifact.getId(),
+                                    "UI_CONTRACT_SUCCESS_WITH_WARNINGS",
+                                    buildWarningMessage(
+                                            readiness.warnings(),
+                                            validation.warnings()
+                                    )
+                            );
+                        } else {
+                            agentTaskService.markSuccess(
+                                    task.getId(),
+                                    responseEnvelope,
+                                    savedArtifact.getId()
+                            );
+                        }
+
+                        Map<String, Object> after =
+                                new LinkedHashMap<>();
+                        after.put("artifact_type", ARTIFACT_TYPE);
+                        after.put(
+                                "module_id",
+                                module.getId().toString()
+                        );
+                        after.put(
+                                "module_key",
+                                module.getModuleKey()
+                        );
+                        after.put(
+                                "version_no",
+                                savedArtifact.getVersionNo()
+                        );
+                        after.put(
+                                "readiness",
+                                readiness.toMap()
+                        );
+                        after.put(
+                                "validation",
+                                validation.toMap()
+                        );
+
+                        Map<String, Object> metadata =
+                                new LinkedHashMap<>();
+                        metadata.put(
+                                "task_id",
+                                task.getId().toString()
+                        );
+                        metadata.put(
+                                "project_code",
+                                projectCode
+                        );
+                        metadata.put(
+                                "workspace_id",
+                                workspaceId == null
+                                        ? ""
+                                        : workspaceId.toString()
+                        );
+
+                        auditService.record(
+                                project.getId(),
+                                "USER",
+                                username,
+                                "GENERATE_UI_CONTRACT",
+                                "ARTIFACT_VERSION",
+                                savedArtifact.getId(),
+                                null,
+                                after,
+                                metadata
+                        );
+
+                        return savedArtifact;
+                    });
 
             if (artifact == null) {
-                throw new IllegalStateException("Failed to save UI_CONTRACT artifact.");
+                throw new IllegalStateException(
+                        "Failed to save UI_CONTRACT artifact."
+                );
             }
 
             Map<String, Object> result = new LinkedHashMap<>();
@@ -271,9 +403,11 @@ public class UiContractPersistenceService {
             result.put("moduleName", module.getModuleName());
             result.put("content", artifactContent);
             result.put("contentMarkdown", contentMarkdown);
+            result.put("readiness", readiness.toMap());
+            result.put("validation", validation.toMap());
             result.put(
                     "taskStatus",
-                    shouldMarkPartialSuccess(responseEnvelope)
+                    partialSuccess
                             ? TaskStatus.PARTIAL_SUCCESS.name()
                             : TaskStatus.SUCCESS.name()
             );
@@ -281,15 +415,33 @@ public class UiContractPersistenceService {
             return result;
 
         } catch (Exception e) {
-            AgentTaskEntity latestTask = agentTaskService.getById(task.getId());
+            AgentTaskEntity latestTask =
+                    agentTaskService.getById(task.getId());
 
-            if (!TaskStatus.FAILED.name().equals(latestTask.getStatus())) {
+            if (!TaskStatus.FAILED.name().equals(
+                    latestTask.getStatus()
+            )) {
                 agentTaskService.markFailed(
                         task.getId(),
                         "GENERATE_UI_CONTRACT_FAILED",
-                        e.getMessage()
+                        safeMessage(e)
                 );
             }
+
+            Map<String, Object> after = new LinkedHashMap<>();
+            after.put("error_message", safeMessage(e));
+            after.put("module_id", module.getId().toString());
+            after.put("module_key", module.getModuleKey());
+            after.put("readiness", readiness.toMap());
+
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("project_code", projectCode);
+            metadata.put(
+                    "workspace_id",
+                    workspaceId == null
+                            ? ""
+                            : workspaceId.toString()
+            );
 
             auditService.record(
                     project.getId(),
@@ -299,19 +451,28 @@ public class UiContractPersistenceService {
                     "AGENT_TASK",
                     task.getId(),
                     null,
-                    Map.of(
-                            "error_message", e.getMessage() == null ? "" : e.getMessage(),
-                            "module_id", module.getId().toString(),
-                            "module_key", module.getModuleKey()
-                    ),
-                    Map.of(
-                            "project_code", projectCode,
-                            "workspace_id", workspaceId == null ? "" : workspaceId.toString()
-                    )
+                    after,
+                    metadata
             );
 
             throw e;
         }
+    }
+
+    private ProjectEntity resolveProject(
+            UUID workspaceId,
+            String projectCode
+    ) {
+        if (workspaceId == null) {
+            return projectAccessService.resolveAccessibleProjectEntityByCode(
+                    projectCode
+            );
+        }
+
+        return projectAccessService.resolveAccessibleProjectEntity(
+                workspaceId,
+                projectCode
+        );
     }
 
     private Map<String, Object> buildRequestPayload(
@@ -319,24 +480,61 @@ public class UiContractPersistenceService {
             UUID workspaceId,
             String projectCode,
             ProjectModuleEntity module,
-            GenerateUiContractRequest request
+            GenerateUiContractRequest request,
+            UiContractGenerationReadinessResult readiness
     ) {
         Map<String, Object> requestPayload = new LinkedHashMap<>();
 
-        requestPayload.put("project_id", project.getId().toString());
+        requestPayload.put(
+                "project_id",
+                project.getId().toString()
+        );
         requestPayload.put("project_code", projectCode);
-        requestPayload.put("module_id", module.getId().toString());
-        requestPayload.put("module_key", module.getModuleKey());
-        requestPayload.put("module_name", module.getModuleName());
-        requestPayload.put("task_type", TaskType.GENERATE_UI_CONTRACT.name());
-        requestPayload.put("artifact_type", ARTIFACT_TYPE);
-        requestPayload.put("requirement_text", request.getRequirementText());
+        requestPayload.put(
+                "module_id",
+                module.getId().toString()
+        );
+        requestPayload.put(
+                "module_key",
+                module.getModuleKey()
+        );
+        requestPayload.put(
+                "module_name",
+                module.getModuleName()
+        );
+        requestPayload.put(
+                "task_type",
+                TaskType.GENERATE_UI_CONTRACT.name()
+        );
+        requestPayload.put(
+                "artifact_type",
+                ARTIFACT_TYPE
+        );
+        requestPayload.put(
+                "requirement_text",
+                request.getRequirementText()
+        );
+        requestPayload.put(
+                "ui_contract_readiness",
+                readiness.toMap()
+        );
 
         if (workspaceId != null) {
-            requestPayload.put("workspace_id", workspaceId.toString());
+            requestPayload.put(
+                    "workspace_id",
+                    workspaceId.toString()
+            );
         }
 
         return requestPayload;
+    }
+
+    private Map<String, Object> mutablePayload(
+            Map<String, Object> source
+    ) {
+        return source == null
+                ? new LinkedHashMap<>()
+                : new LinkedHashMap<>(source);
     }
 
     private boolean isFailedResponse(
@@ -345,7 +543,9 @@ public class UiContractPersistenceService {
         Object status = responseEnvelope.get("status");
 
         return status != null
-                && TaskStatus.FAILED.name().equalsIgnoreCase(String.valueOf(status));
+                && TaskStatus.FAILED.name().equalsIgnoreCase(
+                String.valueOf(status)
+        );
     }
 
     private boolean shouldMarkPartialSuccess(
@@ -357,25 +557,34 @@ public class UiContractPersistenceService {
             return false;
         }
 
-        Object persistenceHintValue = metadata.get("persistence_hint");
+        Object persistenceHintValue =
+                metadata.get("persistence_hint");
 
         if (!(persistenceHintValue instanceof Map<?, ?> persistenceHint)) {
             return false;
         }
 
-        Object recommendedStatus = persistenceHint.get("recommended_task_status");
+        Object recommendedStatus =
+                persistenceHint.get("recommended_task_status");
 
         return recommendedStatus != null
-                && "SUCCESS_WITH_WARNINGS".equalsIgnoreCase(String.valueOf(recommendedStatus));
+                && "SUCCESS_WITH_WARNINGS".equalsIgnoreCase(
+                String.valueOf(recommendedStatus)
+        );
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> toMap(Object value) {
+    private Map<String, Object> toMap(
+            Object value
+    ) {
         if (value instanceof Map<?, ?> map) {
             Map<String, Object> result = new LinkedHashMap<>();
 
             for (Map.Entry<?, ?> entry : map.entrySet()) {
-                result.put(String.valueOf(entry.getKey()), entry.getValue());
+                result.put(
+                        String.valueOf(entry.getKey()),
+                        entry.getValue()
+                );
             }
 
             return result;
@@ -393,7 +602,10 @@ public class UiContractPersistenceService {
             Map<String, Object> result = new LinkedHashMap<>();
 
             for (Map.Entry<?, ?> entry : contentMap.entrySet()) {
-                result.put(String.valueOf(entry.getKey()), entry.getValue());
+                result.put(
+                        String.valueOf(entry.getKey()),
+                        entry.getValue()
+                );
             }
 
             return result;
@@ -406,7 +618,8 @@ public class UiContractPersistenceService {
             Map<String, Object> responseEnvelope,
             Map<String, Object> artifactContent
     ) {
-        Object contentMarkdown = responseEnvelope.get("content_markdown");
+        Object contentMarkdown =
+                responseEnvelope.get("content_markdown");
 
         if (contentMarkdown != null) {
             return String.valueOf(contentMarkdown);
@@ -427,16 +640,55 @@ public class UiContractPersistenceService {
         return null;
     }
 
+    private String buildWarningMessage(
+            List<String> readinessWarnings,
+            List<String> validationWarnings
+    ) {
+        List<String> all = new ArrayList<>();
+
+        if (readinessWarnings != null) {
+            all.addAll(readinessWarnings);
+        }
+
+        if (validationWarnings != null) {
+            all.addAll(validationWarnings);
+        }
+
+        if (all.isEmpty()) {
+            return "UI_CONTRACT generated with warnings.";
+        }
+
+        return String.join("；", all);
+    }
+
+    private String safeMessage(
+            Exception e
+    ) {
+        if (e == null) {
+            return "Unknown UI_CONTRACT generation error.";
+        }
+
+        if (e.getMessage() == null
+                || e.getMessage().isBlank()) {
+            return e.getClass().getSimpleName();
+        }
+
+        return e.getMessage();
+    }
+
     private void assertPageNodeForUiContract(
             ProjectModuleEntity module
     ) {
         if (module == null) {
-            throw new IllegalArgumentException("module is required.");
+            throw new IllegalArgumentException(
+                    "module is required."
+            );
         }
 
         String moduleType = module.getModuleType();
 
-        if ("PAGE".equalsIgnoreCase(moduleType) || "PAGE_MODULE".equalsIgnoreCase(moduleType)) {
+        if ("PAGE".equalsIgnoreCase(moduleType)
+                || "PAGE_MODULE".equalsIgnoreCase(moduleType)) {
             return;
         }
 
@@ -447,7 +699,8 @@ public class UiContractPersistenceService {
         }
 
         throw new IllegalArgumentException(
-                "交互原型只能基于 PAGE 页面节点生成。请先在模块树中选择具体页面节点，例如列表页、创建/编辑页、详情页或审批页。"
+                "交互原型只能基于 PAGE 页面节点生成。"
+                        + "请先在模块树中选择具体页面节点。"
         );
     }
 }

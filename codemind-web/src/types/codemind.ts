@@ -477,6 +477,29 @@ export type AgentTaskStatus =
   | 'PARTIAL_SUCCESS'
   | string
 
+export interface UiContractFeatureReadinessItem {
+  featureId: string
+  featureKey?: string | null
+  featureName: string
+  complete: boolean
+  definitionSource?: string | null
+  missingFields: string[]
+}
+
+export interface UiContractGenerationReadinessResponse {
+  ready: boolean
+  pageId: string
+  pageKey?: string | null
+  pageName: string
+  pageKind: string
+  pageSpecAvailable: boolean
+  featureCount: number
+  completeFeatureCount: number
+  features: UiContractFeatureReadinessItem[]
+  blockers: string[]
+  warnings: string[]
+}
+
 export interface AsyncAgentTaskResponse {
   taskId: string
   projectId: string

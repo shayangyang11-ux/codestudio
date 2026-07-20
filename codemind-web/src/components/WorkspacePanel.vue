@@ -11,6 +11,23 @@
         </div>
       </div>
 
+      <div
+        v-if="artifactTaskFeedback"
+        class="artifact-task-feedback"
+        :class="artifactTaskFeedback.level"
+      >
+        <strong>
+          {{
+            artifactTaskFeedback.level === 'error'
+              ? '操作未完成'
+              : artifactTaskFeedback.level === 'success'
+                ? '操作已提交'
+                : '提示'
+          }}
+        </strong>
+        <span>{{ artifactTaskFeedback.message }}</span>
+      </div>
+
       <section class="selected-module-card compact-module-card">
         <div class="selected-module-header compact">
           <div>
@@ -89,6 +106,16 @@
           请从左侧模块树选择一个节点。选择后可展开资产面板，也可以直接查看已生成资产。
         </div>
       </section>
+
+      <UiContractReadinessPanel
+        v-if="nodeType === 'PAGE'"
+        :readiness="uiContractReadiness"
+        :loading="uiContractReadinessLoading"
+        :error="uiContractReadinessError"
+        :generating="isGeneratingUiContract"
+        @refresh="$emit('refresh-ui-contract-readiness')"
+        @generate="$emit('generate-ui-contract')"
+      />
 
       <section v-if="selectedModule" class="artifact-view-switcher compact-asset-switcher">
         <details class="asset-status-fold" open>
@@ -294,6 +321,7 @@ import type {
   ArtifactResponse,
   ModuleArtifactTaskItem,
   ModuleTreeNode,
+  UiContractGenerationReadinessResponse,
 } from '../types/codemind'
 import { getModuleDisplayName, getModuleStableKey } from '../api'
 import ApiContractView from './ApiContractView.vue'
@@ -304,6 +332,7 @@ import ModuleArtifactTaskStatusPanel from './ModuleArtifactTaskStatusPanel.vue'
 import ModulePrdView from './ModulePrdView.vue'
 import PageSpecView from './PageSpecView.vue'
 import TestSpecView from './TestSpecView.vue'
+import UiContractReadinessPanel from './UiContractReadinessPanel.vue'
 import {
   isRequirementArtifactType,
   type RequirementArtifactType,
@@ -323,6 +352,13 @@ const props = defineProps<{
   selectedModule: ModuleTreeNode | null
   artifactTaskItems: ModuleArtifactTaskItem[]
   selectedArtifactType: RequirementArtifactType | null
+  uiContractReadiness: UiContractGenerationReadinessResponse | null
+  uiContractReadinessLoading: boolean
+  uiContractReadinessError: string
+  artifactTaskFeedback: {
+    level: 'info' | 'success' | 'error'
+    message: string
+  } | null
 
   isGeneratingPrd: boolean
   isGeneratingBusinessFlow: boolean
@@ -379,6 +415,7 @@ const emit = defineEmits<{
   'export-artifacts-docx': []
   'open-quality-check': []
   'generate-ui-contract': []
+  'refresh-ui-contract-readiness': []
   'preview-ui-contract': []
 }>()
 
@@ -621,6 +658,35 @@ function handleOpenImpactAnalysis() {
   margin: 8px 0 0;
   color: #475569;
   font-size: 13px;
+  line-height: 1.6;
+}
+
+.artifact-task-feedback {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 16px;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: #eff6ff;
+  color: #1e40af;
+}
+
+.artifact-task-feedback.success {
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.artifact-task-feedback.error {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.artifact-task-feedback strong {
+  font-size: 13px;
+}
+
+.artifact-task-feedback span {
+  font-size: 12px;
   line-height: 1.6;
 }
 
@@ -1111,5 +1177,3 @@ function handleOpenImpactAnalysis() {
   color: #334155;
 }
 </style>
-
-

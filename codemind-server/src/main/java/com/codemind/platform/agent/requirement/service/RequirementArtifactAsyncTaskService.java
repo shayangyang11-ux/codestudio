@@ -27,33 +27,84 @@ public class RequirementArtifactAsyncTaskService {
     private final AgentTaskService agentTaskService;
     private final CurrentUserProvider currentUserProvider;
     private final RequirementNodeGenerationPolicy nodeGenerationPolicy;
+    private final UiContractGenerationReadinessService uiContractReadinessService;
 
     public RequirementArtifactAsyncTaskService(
             ProjectAccessService projectAccessService,
             AgentTaskService agentTaskService,
             CurrentUserProvider currentUserProvider,
-            RequirementNodeGenerationPolicy nodeGenerationPolicy
+            RequirementNodeGenerationPolicy nodeGenerationPolicy,
+            UiContractGenerationReadinessService uiContractReadinessService
     ) {
         this.projectAccessService = projectAccessService;
         this.agentTaskService = agentTaskService;
         this.currentUserProvider = currentUserProvider;
         this.nodeGenerationPolicy = nodeGenerationPolicy;
+        this.uiContractReadinessService = uiContractReadinessService;
     }
 
-    public AsyncAgentTaskResponse enqueueModulePrdGeneration(UUID workspaceId, String projectCode, UUID moduleId, GenerateModulePrdRequest request) {
-        return enqueueModuleArtifactGeneration(workspaceId, projectCode, moduleId, TaskType.GENERATE_MODULE_PRD, "MODULE_PRD", request == null ? null : request.getRequirementText());
+    public AsyncAgentTaskResponse enqueueModulePrdGeneration(
+            UUID workspaceId,
+            String projectCode,
+            UUID moduleId,
+            GenerateModulePrdRequest request
+    ) {
+        return enqueueModuleArtifactGeneration(
+                workspaceId,
+                projectCode,
+                moduleId,
+                TaskType.GENERATE_MODULE_PRD,
+                "MODULE_PRD",
+                request == null ? null : request.getRequirementText()
+        );
     }
 
-    public AsyncAgentTaskResponse enqueueBusinessFlowGeneration(UUID workspaceId, String projectCode, UUID moduleId, GenerateBusinessFlowRequest request) {
-        return enqueueModuleArtifactGeneration(workspaceId, projectCode, moduleId, TaskType.GENERATE_BUSINESS_FLOW, "BUSINESS_FLOW", request == null ? null : request.getRequirementText());
+    public AsyncAgentTaskResponse enqueueBusinessFlowGeneration(
+            UUID workspaceId,
+            String projectCode,
+            UUID moduleId,
+            GenerateBusinessFlowRequest request
+    ) {
+        return enqueueModuleArtifactGeneration(
+                workspaceId,
+                projectCode,
+                moduleId,
+                TaskType.GENERATE_BUSINESS_FLOW,
+                "BUSINESS_FLOW",
+                request == null ? null : request.getRequirementText()
+        );
     }
 
-    public AsyncAgentTaskResponse enqueuePageSpecGeneration(UUID workspaceId, String projectCode, UUID moduleId, GeneratePageSpecRequest request) {
-        return enqueueModuleArtifactGeneration(workspaceId, projectCode, moduleId, TaskType.GENERATE_PAGE_SPEC, "PAGE_SPEC", request == null ? null : request.getRequirementText());
+    public AsyncAgentTaskResponse enqueuePageSpecGeneration(
+            UUID workspaceId,
+            String projectCode,
+            UUID moduleId,
+            GeneratePageSpecRequest request
+    ) {
+        return enqueueModuleArtifactGeneration(
+                workspaceId,
+                projectCode,
+                moduleId,
+                TaskType.GENERATE_PAGE_SPEC,
+                "PAGE_SPEC",
+                request == null ? null : request.getRequirementText()
+        );
     }
 
-    public AsyncAgentTaskResponse enqueueUiContractGeneration(UUID workspaceId, String projectCode, UUID moduleId, GenerateUiContractRequest request) {
-        return enqueueModuleArtifactGeneration(workspaceId, projectCode, moduleId, TaskType.GENERATE_UI_CONTRACT, "UI_CONTRACT", request == null ? null : request.getRequirementText());
+    public AsyncAgentTaskResponse enqueueUiContractGeneration(
+            UUID workspaceId,
+            String projectCode,
+            UUID moduleId,
+            GenerateUiContractRequest request
+    ) {
+        return enqueueModuleArtifactGeneration(
+                workspaceId,
+                projectCode,
+                moduleId,
+                TaskType.GENERATE_UI_CONTRACT,
+                "UI_CONTRACT",
+                request == null ? null : request.getRequirementText()
+        );
     }
 
     public AsyncAgentTaskResponse enqueueArtifactGeneration(
@@ -77,7 +128,9 @@ public class RequirementArtifactAsyncTaskService {
             TaskType taskType
     ) {
         if (taskType == null) {
-            throw new IllegalArgumentException("需求资产任务类型不能为空。");
+            throw new IllegalArgumentException(
+                    "需求资产任务类型不能为空。"
+            );
         }
 
         return switch (taskType) {
@@ -89,7 +142,9 @@ public class RequirementArtifactAsyncTaskService {
             case GENERATE_TEST_SPEC -> "TEST_SPEC";
             case GENERATE_UI_CONTRACT -> "UI_CONTRACT";
             case GENERATE_DEV_HANDOFF_PACKAGE -> "DEV_HANDOFF_PACKAGE";
-            default -> throw new IllegalArgumentException("不支持的需求资产任务类型：" + taskType);
+            default -> throw new IllegalArgumentException(
+                    "不支持的需求资产任务类型：" + taskType
+            );
         };
     }
 
@@ -101,28 +156,82 @@ public class RequirementArtifactAsyncTaskService {
             String artifactType,
             String requirementText
     ) {
-        CurrentUser currentUser = currentUserProvider.getCurrentUser();
+        CurrentUser currentUser =
+                currentUserProvider.getCurrentUser();
 
-        ProjectEntity project = projectAccessService.resolveAccessibleProjectEntity(workspaceId, projectCode);
-        ProjectModuleEntity module = projectAccessService.resolveAccessibleModule(project.getId(), moduleId);
+        ProjectEntity project =
+                projectAccessService.resolveAccessibleProjectEntity(
+                        workspaceId,
+                        projectCode
+                );
 
-        nodeGenerationPolicy.assertCanGenerate(module, taskType);
+        ProjectModuleEntity module =
+                projectAccessService.resolveAccessibleModule(
+                        project.getId(),
+                        moduleId
+                );
 
-        return agentTaskService.findActiveTask(project.getId(), module.getId(), taskType)
-                .map(task -> toResponse(task, projectCode, true))
+        nodeGenerationPolicy.assertCanGenerate(
+                module,
+                taskType
+        );
+
+        UiContractGenerationReadinessResult uiContractReadiness =
+                TaskType.GENERATE_UI_CONTRACT.equals(taskType)
+                        ? uiContractReadinessService.evaluate(
+                        project.getId(),
+                        module
+                )
+                        : null;
+
+        if (uiContractReadiness != null) {
+            uiContractReadiness.assertReady();
+        }
+
+        return agentTaskService
+                .findActiveTask(
+                        project.getId(),
+                        module.getId(),
+                        taskType
+                )
+                .map(task -> toResponse(
+                        task,
+                        projectCode,
+                        true
+                ))
                 .orElseGet(() -> {
-                    AgentTaskEntity task = agentTaskService.createQueuedTask(
-                            project.getId(),
-                            module.getId(),
-                            taskType,
-                            buildRequestPayload(project, workspaceId, projectCode, module, taskType, artifactType, requirementText, currentUser),
-                            currentUser.username()
+                    AgentTaskEntity task =
+                            agentTaskService.createQueuedTask(
+                                    project.getId(),
+                                    module.getId(),
+                                    taskType,
+                                    buildRequestPayload(
+                                            project,
+                                            workspaceId,
+                                            projectCode,
+                                            module,
+                                            taskType,
+                                            artifactType,
+                                            requirementText,
+                                            currentUser,
+                                            uiContractReadiness
+                                    ),
+                                    currentUser.username()
+                            );
+
+                    return toResponse(
+                            task,
+                            projectCode,
+                            false
                     );
-                    return toResponse(task, projectCode, false);
                 });
     }
 
-    private AsyncAgentTaskResponse toResponse(AgentTaskEntity task, String projectCode, boolean reused) {
+    private AsyncAgentTaskResponse toResponse(
+            AgentTaskEntity task,
+            String projectCode,
+            boolean reused
+    ) {
         return new AsyncAgentTaskResponse(
                 task.getId(),
                 task.getProjectId(),
@@ -143,27 +252,98 @@ public class RequirementArtifactAsyncTaskService {
             TaskType taskType,
             String artifactType,
             String requirementText,
-            CurrentUser currentUser
+            CurrentUser currentUser,
+            UiContractGenerationReadinessResult uiContractReadiness
     ) {
-        Map<String, Object> requestPayload = new LinkedHashMap<>();
-        requestPayload.put("project_id", project.getId().toString());
-        requestPayload.put("project_code", projectCode);
-        requestPayload.put("module_id", module.getId().toString());
-        requestPayload.put("module_key", module.getModuleKey());
-        requestPayload.put("module_name", module.getModuleName());
-        requestPayload.put("module_type", nodeGenerationPolicy.resolveNodeType(module).name());
-        requestPayload.put("node_type", nodeGenerationPolicy.resolveNodeType(module).name());
-        requestPayload.put("generation_scope", nodeGenerationPolicy.buildGenerationScope(module, taskType));
-        requestPayload.put("current_module", nodeGenerationPolicy.buildCurrentModulePayload(module));
-        requestPayload.put("task_type", taskType.name());
-        requestPayload.put("artifact_type", artifactType);
-        requestPayload.put("requirement_text", nodeGenerationPolicy.buildRequirementInstruction(module, taskType, requirementText));
-        requestPayload.put("created_by_user_id", currentUser.userId().toString());
-        requestPayload.put("created_by_username", currentUser.username());
-        requestPayload.put("created_by_display_name", currentUser.displayName());
+        Map<String, Object> requestPayload =
+                new LinkedHashMap<>();
+
+        requestPayload.put(
+                "project_id",
+                project.getId().toString()
+        );
+        requestPayload.put(
+                "project_code",
+                projectCode
+        );
+        requestPayload.put(
+                "module_id",
+                module.getId().toString()
+        );
+        requestPayload.put(
+                "module_key",
+                module.getModuleKey()
+        );
+        requestPayload.put(
+                "module_name",
+                module.getModuleName()
+        );
+        requestPayload.put(
+                "module_type",
+                nodeGenerationPolicy
+                        .resolveNodeType(module)
+                        .name()
+        );
+        requestPayload.put(
+                "node_type",
+                nodeGenerationPolicy
+                        .resolveNodeType(module)
+                        .name()
+        );
+        requestPayload.put(
+                "generation_scope",
+                nodeGenerationPolicy.buildGenerationScope(
+                        module,
+                        taskType
+                )
+        );
+        requestPayload.put(
+                "current_module",
+                nodeGenerationPolicy.buildCurrentModulePayload(
+                        module
+                )
+        );
+        requestPayload.put(
+                "task_type",
+                taskType.name()
+        );
+        requestPayload.put(
+                "artifact_type",
+                artifactType
+        );
+        requestPayload.put(
+                "requirement_text",
+                nodeGenerationPolicy.buildRequirementInstruction(
+                        module,
+                        taskType,
+                        requirementText
+                )
+        );
+        requestPayload.put(
+                "created_by_user_id",
+                currentUser.userId().toString()
+        );
+        requestPayload.put(
+                "created_by_username",
+                currentUser.username()
+        );
+        requestPayload.put(
+                "created_by_display_name",
+                currentUser.displayName()
+        );
+
+        if (uiContractReadiness != null) {
+            requestPayload.put(
+                    "ui_contract_readiness",
+                    uiContractReadiness.toMap()
+            );
+        }
 
         if (workspaceId != null) {
-            requestPayload.put("workspace_id", workspaceId.toString());
+            requestPayload.put(
+                    "workspace_id",
+                    workspaceId.toString()
+            );
         }
 
         return requestPayload;

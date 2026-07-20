@@ -6,20 +6,20 @@
 
       <div class="summary-grid">
         <div>
-          <strong>{{ contract.schemaVersion || '1.0' }}</strong>
-          <span>Schema Version</span>
-        </div>
-        <div>
-          <strong>{{ contract.pages?.length || 0 }}</strong>
-          <span>页面数</span>
+          <strong>{{ contract.schemaVersion }}</strong>
+          <span>Schema</span>
         </div>
         <div>
           <strong>{{ componentCount }}</strong>
           <span>组件数</span>
         </div>
         <div>
-          <strong>{{ contract.apiBindings?.length || 0 }}</strong>
-          <span>接口绑定</span>
+          <strong>{{ contract.interactions.length }}</strong>
+          <span>动作数</span>
+        </div>
+        <div>
+          <strong>{{ contract.qualitySummary.coverageRate }}%</strong>
+          <span>FEATURE 覆盖</span>
         </div>
       </div>
 
@@ -29,53 +29,134 @@
     </article>
 
     <article class="contract-card">
-      <p class="eyebrow">Routes</p>
-      <h3>页面路由</h3>
+      <p class="eyebrow">Page Identity</p>
+      <h3>页面身份</h3>
+
+      <dl class="identity-grid">
+        <dt>Page ID</dt>
+        <dd>{{ contract.identity.pageId }}</dd>
+        <dt>Page Key</dt>
+        <dd>{{ contract.identity.pageKey }}</dd>
+        <dt>页面名称</dt>
+        <dd>{{ contract.identity.pageName }}</dd>
+        <dt>页面类型</dt>
+        <dd>{{ contract.identity.pageKind }}</dd>
+        <dt>路由</dt>
+        <dd>{{ contract.page.route }}</dd>
+        <dt>布局</dt>
+        <dd>{{ contract.page.layout.type }}</dd>
+      </dl>
+    </article>
+
+    <article class="contract-card">
+      <p class="eyebrow">Component Tree</p>
+      <h3>组件树</h3>
+
+      <ul class="component-tree">
+        <UiContractComponentTreeItem
+          v-for="component in contract.page.componentTree"
+          :key="component.componentId"
+          :component="component"
+        />
+      </ul>
+    </article>
+
+    <article class="contract-card">
+      <p class="eyebrow">Interactions</p>
+      <h3>交互动作</h3>
 
       <div
-        v-for="route in contract.routes || []"
-        :key="route.pageId"
-        class="route-row"
+        v-for="action in contract.interactions"
+        :key="action.actionId"
+        class="interaction-row"
       >
-        <strong>{{ route.title || route.pageId }}</strong>
-        <code>{{ route.path || '-' }}</code>
-        <span>{{ route.pageId }}</span>
+        <div>
+          <strong>{{ action.label || action.actionId }}</strong>
+          <span>{{ action.actionId }}</span>
+        </div>
+        <code>{{ action.type }}</code>
+        <em>
+          {{
+            action.targetPageId ||
+              action.targetId ||
+              action.dataBindingKey ||
+              '-'
+          }}
+        </em>
       </div>
 
-      <p
-        v-if="!contract.routes?.length"
-        class="empty-tip"
-      >
-        暂无路由定义。
+      <p v-if="!contract.interactions.length" class="empty-tip">
+        当前页面没有交互动作。
       </p>
     </article>
 
     <article class="contract-card">
-      <p class="eyebrow">Pages & Components</p>
-      <h3>页面组件树</h3>
+      <p class="eyebrow">Feature Coverage</p>
+      <h3>功能点覆盖</h3>
 
       <div
-        v-for="page in contract.pages || []"
-        :key="page.pageId"
-        class="page-block"
+        v-for="coverage in contract.featureCoverage"
+        :key="coverage.featureId"
+        class="coverage-card"
       >
         <header>
-          <strong>{{ page.pageName || page.title || page.pageId }}</strong>
-          <span>{{ page.layout || '-' }}</span>
+          <div>
+            <strong>{{ coverage.featureName }}</strong>
+            <span>{{ coverage.featureKey }}</span>
+          </div>
+          <em :class="coverage.status.toLowerCase()">
+            {{ coverage.status }}
+          </em>
         </header>
 
-        <p>{{ page.description || '暂无页面说明。' }}</p>
+        <p>
+          组件：{{ coverage.componentIds?.join('、') || '无' }}
+        </p>
+        <p>
+          动作：{{ coverage.actionIds?.join('、') || '无' }}
+        </p>
 
-        <ul>
+        <ul v-if="coverage.notes?.length">
           <li
-            v-for="component in page.components || []"
-            :key="component.componentId"
+            v-for="note in coverage.notes"
+            :key="note"
           >
-            <span>{{ component.type }}</span>
-            {{ component.title || component.label || component.componentId }}
-            <em>{{ componentHint(component) }}</em>
+            {{ note }}
           </li>
         </ul>
+      </div>
+    </article>
+
+    <article class="contract-card">
+      <p class="eyebrow">States & Scenarios</p>
+      <h3>页面状态与 Mock 场景</h3>
+
+      <div class="two-column">
+        <section>
+          <h4>页面状态</h4>
+          <div
+            v-for="state in contract.pageStates"
+            :key="state.stateKey"
+            class="mini-card"
+          >
+            <strong>{{ state.title || state.stateKey }}</strong>
+            <span>{{ state.type }}</span>
+            <p>{{ state.message || '-' }}</p>
+          </div>
+        </section>
+
+        <section>
+          <h4>Mock 场景</h4>
+          <div
+            v-for="scenario in contract.mockScenarios"
+            :key="scenario.scenarioKey"
+            class="mini-card"
+          >
+            <strong>{{ scenario.scenarioKey }}</strong>
+            <span>{{ scenario.outcome }}</span>
+            <p>{{ scenario.message || '-' }}</p>
+          </div>
+        </section>
       </div>
     </article>
 
@@ -84,20 +165,51 @@
       <h3>接口绑定</h3>
 
       <div
-        v-for="binding in contract.apiBindings || []"
-        :key="bindingKey(binding)"
+        v-for="binding in contract.apiBindings"
+        :key="binding.bindingKey"
         class="api-row"
       >
-        <strong>{{ binding.method || '-' }} {{ binding.path || '-' }}</strong>
-        <span>{{ binding.bindingKey || binding.mockBinding || binding.mockAction || '-' }}</span>
+        <strong>{{ binding.method }} {{ binding.path }}</strong>
+        <span>{{ binding.bindingKey }}</span>
+        <em>{{ binding.status || 'MOCK' }}</em>
       </div>
 
-      <p
-        v-if="!contract.apiBindings?.length"
-        class="empty-tip"
-      >
+      <p v-if="!contract.apiBindings.length" class="empty-tip">
         暂无接口绑定。
       </p>
+    </article>
+
+    <article class="contract-card">
+      <p class="eyebrow">Quality</p>
+      <h3>质量摘要</h3>
+
+      <div class="quality-grid">
+        <div>
+          <strong>{{ contract.qualitySummary.score }}</strong>
+          <span>质量分</span>
+        </div>
+        <div>
+          <strong>{{ contract.qualitySummary.coverageRate }}%</strong>
+          <span>覆盖率</span>
+        </div>
+        <div>
+          <strong>{{ contract.qualitySummary.blockers?.length || 0 }}</strong>
+          <span>阻断项</span>
+        </div>
+        <div>
+          <strong>{{ contract.qualitySummary.warnings?.length || 0 }}</strong>
+          <span>警告项</span>
+        </div>
+      </div>
+
+      <ul v-if="contract.qualitySummary.warnings?.length" class="warning-list">
+        <li
+          v-for="warning in contract.qualitySummary.warnings"
+          :key="warning"
+        >
+          {{ warning }}
+        </li>
+      </ul>
     </article>
 
     <article class="contract-card">
@@ -106,7 +218,7 @@
 
       <dl class="rule-grid">
         <template
-          v-for="(value, key) in contract.developmentRules || {}"
+          v-for="(value, key) in contract.developmentRules"
           :key="String(key)"
         >
           <dt>{{ key }}</dt>
@@ -119,6 +231,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import UiContractComponentTreeItem from './UiContractComponentTreeItem.vue'
 import type {
   UiContractComponent,
   UiContractContent,
@@ -129,46 +242,22 @@ const props = defineProps<{
 }>()
 
 const componentCount = computed(() => {
-  return (props.contract.pages || []).reduce((total, page) => {
-    return total + countComponents(page.components || [])
-  }, 0)
+  return countComponents(props.contract.page.componentTree)
 })
 
-function countComponents(components: UiContractComponent[]): number {
-  return components.reduce((total, component) => {
-    return total +
-      1 +
-      countComponents(component.components || []) +
-      (component.tabs || []).reduce((tabTotal, tab) => {
-        return tabTotal + countComponents(tab.components || [])
-      }, 0)
-  }, 0)
-}
-
-function componentHint(component: UiContractComponent): string {
-  if (component.type === 'form') {
-    return `字段 ${component.fields?.length || 0} 个`
-  }
-
-  if (component.type === 'table') {
-    return `列 ${component.columns?.length || 0} 个`
-  }
-
-  if (component.type === 'modal') {
-    return `动作 ${component.actions?.length || 0} 个`
-  }
-
-  return ''
-}
-
-function bindingKey(binding: Record<string, unknown>): string {
-  return String(
-    binding.bindingKey ||
-      `${binding.method || ''}-${binding.path || ''}-${binding.mockBinding || ''}-${binding.mockAction || ''}`,
+function countComponents(
+  components: UiContractComponent[],
+): number {
+  return components.reduce(
+    (total, component) =>
+      total + 1 + countComponents(component.children || []),
+    0,
   )
 }
 
-function formatValue(value: unknown): string {
+function formatValue(
+  value: unknown,
+): string {
   if (typeof value === 'boolean') {
     return value ? '是' : '否'
   }
@@ -214,29 +303,40 @@ function formatValue(value: unknown): string {
   font-size: 16px;
 }
 
-.summary-grid {
+.contract-card h4 {
+  margin: 0 0 10px;
+  color: #334155;
+}
+
+.summary-grid,
+.quality-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
 }
 
-.summary-grid div {
+.summary-grid div,
+.quality-grid div {
   border-radius: 14px;
   padding: 14px;
   background: #f8fafc;
 }
 
 .summary-grid strong,
-.summary-grid span {
+.summary-grid span,
+.quality-grid strong,
+.quality-grid span {
   display: block;
 }
 
-.summary-grid strong {
+.summary-grid strong,
+.quality-grid strong {
   color: #0f172a;
   font-size: 22px;
 }
 
-.summary-grid span {
+.summary-grid span,
+.quality-grid span {
   margin-top: 5px;
   color: #64748b;
   font-size: 12px;
@@ -244,109 +344,210 @@ function formatValue(value: unknown): string {
 
 .analysis {
   margin: 14px 0 0;
-  color: #334155;
+  color: #475569;
   line-height: 1.7;
 }
 
-.route-row,
-.api-row,
-.page-block {
-  border-top: 1px solid #e2e8f0;
-  padding: 12px 0;
+.identity-grid,
+.rule-grid {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  margin: 0;
 }
 
-.route-row strong,
-.route-row code,
-.route-row span,
-.api-row strong,
-.api-row span {
-  display: block;
+.identity-grid dt,
+.identity-grid dd,
+.rule-grid dt,
+.rule-grid dd {
+  margin: 0;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 10px 12px;
 }
 
-.route-row code {
-  width: fit-content;
-  margin: 5px 0;
-  border-radius: 8px;
+.identity-grid dt,
+.rule-grid dt {
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.identity-grid dd,
+.rule-grid dd {
+  overflow-wrap: anywhere;
+  color: #334155;
+}
+
+.component-tree,
+.component-tree ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+  list-style: none;
+}
+
+.component-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: #f8fafc;
+}
+
+.component-line code {
+  border-radius: 6px;
   padding: 3px 6px;
-  background: #f1f5f9;
-  color: #0f172a;
+  background: #e0e7ff;
+  color: #3730a3;
 }
 
-.route-row span,
-.api-row span,
-.empty-tip {
+.component-line span {
   color: #64748b;
   font-size: 12px;
 }
 
-.page-block header {
+.component-line em {
+  margin-left: auto;
+  color: #94a3b8;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.interaction-row,
+.api-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 10px 0;
+}
+
+.interaction-row strong,
+.interaction-row span {
+  display: block;
+}
+
+.interaction-row span,
+.api-row span,
+.interaction-row em,
+.api-row em {
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.coverage-card {
+  margin-top: 10px;
+  border-radius: 12px;
+  padding: 13px;
+  background: #f8fafc;
+}
+
+.coverage-card header {
   display: flex;
   justify-content: space-between;
   gap: 12px;
 }
 
-.page-block header strong {
-  color: #0f172a;
+.coverage-card strong,
+.coverage-card span {
+  display: block;
 }
 
-.page-block header span {
-  color: #2563eb;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.page-block p {
-  margin: 6px 0 10px;
+.coverage-card span {
+  margin-top: 3px;
   color: #64748b;
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 12px;
 }
 
-.page-block ul {
-  margin: 0;
-  padding-left: 18px;
-  color: #334155;
-  line-height: 1.8;
-}
-
-.page-block li span {
-  display: inline-flex;
-  margin-right: 6px;
+.coverage-card em {
+  align-self: start;
   border-radius: 999px;
-  padding: 2px 7px;
-  background: #eef2ff;
-  color: #4338ca;
+  padding: 4px 8px;
+  background: #e2e8f0;
+  color: #475569;
   font-size: 11px;
-  font-weight: 800;
+  font-style: normal;
 }
 
-.page-block li em {
-  margin-left: 6px;
-  color: #94a3b8;
-  font-style: normal;
+.coverage-card em.full {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.coverage-card em.partial {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.coverage-card em.missing {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.coverage-card p,
+.coverage-card ul {
+  margin: 8px 0 0;
+  color: #475569;
   font-size: 12px;
 }
 
-.rule-grid {
+.two-column {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  gap: 10px 14px;
-  margin: 0;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
 }
 
-.rule-grid dt {
+.mini-card {
+  margin-top: 8px;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.mini-card strong,
+.mini-card span {
+  display: block;
+}
+
+.mini-card span {
+  margin-top: 3px;
+  color: #2563eb;
+  font-size: 11px;
+}
+
+.mini-card p {
+  margin: 6px 0 0;
   color: #64748b;
+  font-size: 12px;
 }
 
-.rule-grid dd {
+.warning-list {
+  margin: 14px 0 0;
+  color: #92400e;
+  line-height: 1.7;
+}
+
+.empty-tip {
   margin: 0;
-  color: #0f172a;
-  font-weight: 800;
+  color: #94a3b8;
 }
 
 @media (max-width: 760px) {
   .summary-grid,
+  .quality-grid,
+  .two-column {
+    grid-template-columns: 1fr;
+  }
+
+  .identity-grid,
   .rule-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .interaction-row,
+  .api-row {
     grid-template-columns: 1fr;
   }
 }

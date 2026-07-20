@@ -2,7 +2,9 @@ import type {
   AgentTaskPayloadResponse,
   AgentTaskSummary,
   AsyncAgentTaskResponse,
+  UiContractGenerationReadinessResponse,
 } from '../types/codemind'
+import type { ProjectThemeProfile } from '../types/themeProfile'
 import { authFetch } from './httpClient'
 
 export async function fetchProjectAgentTasks(
@@ -94,6 +96,7 @@ export async function createUiContractTaskAsync(
   moduleId: string,
   payload: {
     requirementText?: string
+    themeProfile?: ProjectThemeProfile | null
   },
 ): Promise<AsyncAgentTaskResponse> {
   return authFetch<AsyncAgentTaskResponse>(
@@ -108,5 +111,18 @@ export async function createUiContractTaskAsync(
       },
       body: JSON.stringify(payload),
     },
+  )
+}
+
+export async function fetchUiContractReadiness(
+  workspaceId: string,
+  projectCode: string,
+  moduleId: string,
+): Promise<UiContractGenerationReadinessResponse> {
+  return authFetch<UiContractGenerationReadinessResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}` +
+      `/projects/${encodeURIComponent(projectCode)}` +
+      `/modules/${encodeURIComponent(moduleId)}` +
+      `/tasks/ui-contract/readiness`,
   )
 }
