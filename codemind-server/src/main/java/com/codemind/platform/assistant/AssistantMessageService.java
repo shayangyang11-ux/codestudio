@@ -254,6 +254,20 @@ public class AssistantMessageService {
                 attachmentContexts
         );
 
+        /*
+         * Phase 6-B: natural language instructions should be routed by their
+         * real business intent, not forcibly bound to the currently opened
+         * asset. For example, while the user is viewing the Login requirement
+         * document, "给用户中心增加密码找回页" is still a module-tree change:
+         * add a PAGE under 用户中心 / 登录注册, not a local edit to the Login doc.
+         */
+        if (shouldForceModuleTreePatchIntent(
+                messageText,
+                classification
+        )) {
+            intent = AssistantIntentRouterService.INTENT_PROPOSE_MODULE_TREE_PATCH;
+        }
+
         AssistantMessageResponse response = route(
                 workspaceId,
                 projectCode,
@@ -723,6 +737,15 @@ public class AssistantMessageService {
         }
 
         /*
+         * Phase 6-B: structural module-tree changes have higher priority than
+         * current-asset patching. The selected node remains context, not a
+         * mandatory edit target.
+         */
+        if (isStrongModuleTreeStructuralInstruction(messageText)) {
+            return AssistantIntentRouterService.INTENT_PROPOSE_MODULE_TREE_PATCH;
+        }
+
+        /*
          * Phase 5-I hotfix: when the user is already viewing a concrete
          * requirement artifact, short instructions such as
          * "登录失败 5 次后锁定 10 分钟" are usually incremental edits to the
@@ -759,6 +782,294 @@ public class AssistantMessageService {
 
         return classifiedIntent;
     }
+
+    private boolean shouldForceModuleTreePatchIntent(
+            String messageText,
+            AssistantIntentClassificationResult classification
+    ) {
+        String text = messageText == null ? "" : messageText.trim();
+
+        if (text.isBlank()) {
+            return false;
+        }
+
+        /*
+         * Asset-local edits should stay on the asset Patch-first path:
+         * "把锁定时间改成 8 分钟" / "登录页加一个密码找回入口".
+         * A local page entrance/button/field is not the same as adding a new
+         * page node to the module tree.
+         */
+        if (isExplicitAssetLocalEditInstruction(text)
+                && !isStrongModuleTreeStructuralInstruction(text)) {
+            return false;
+        }
+
+        String classifiedIntent = classification == null
+                ? ""
+                : nullToEmpty(classification.getIntent());
+
+        if (AssistantIntentRouterService.INTENT_PROPOSE_MODULE_TREE_PATCH.equals(classifiedIntent)
+                && !isInlinePageAssetInstruction(text)) {
+            return true;
+        }
+
+        return isStrongModuleTreeStructuralInstruction(text);
+    }
+
+    private boolean isStrongModuleTreeStructuralInstruction(
+            String messageText
+    ) {
+        String normalized = normalizeForIntent(messageText);
+
+        if (normalized.isBlank()) {
+            return false;
+        }
+
+        if (isInlinePageAssetInstruction(normalized)) {
+            return false;
+        }
+
+        boolean hasStructuralAction = containsAny(
+                normalized,
+                List.of(
+                        "新增",
+                        "增加",
+                        "添加",
+                        "创建",
+                        "新建",
+                        "加一个",
+                        "加个",
+                        "删掉",
+                        "删除",
+                        "移除",
+                        "去掉",
+                        "移动",
+                        "挪到",
+                        "放到",
+                        "放在",
+                        "归到",
+                        "挂到",
+                        "拆成",
+                        "拆分",
+                        "合并",
+                        "重命名",
+                        "改名"
+                )
+        );
+
+        if (!hasStructuralAction) {
+            return false;
+        }
+
+        boolean hasExplicitTreeObject = containsAny(
+                normalized,
+                List.of(
+                        "模块树",
+                        "节点",
+                        "业务域",
+                        "模块",
+                        "子模块",
+                        "页面",
+                        "功能点",
+                        "路由",
+                        "菜单"
+                )
+        );
+
+        boolean hasDedicatedPageNodeObject = containsAny(
+                normalized,
+                List.of(
+                        "密码找回页",
+                        "找回密码页",
+                        "登录页",
+                        "注册页",
+                        "详情页",
+                        "列表页",
+                        "表单页",
+                        "管理页",
+                        "设置页",
+                        "首页"
+                )
+        );
+
+        boolean hasExplicitParentOrPlacement = containsAny(
+                normalized,
+                List.of(
+                        "用户中心",
+                        "账号中心",
+                        "会员中心",
+                        "登录注册",
+                        "后台管理",
+                        "订单中心",
+                        "支付中心",
+                        "库存中心",
+                        "权限中心",
+                        "下面",
+                        "下方",
+                        "上面",
+                        "里面",
+                        "所属",
+                        "属于",
+                        "挂在",
+                        "挂到"
+                )
+        );
+
+        /*
+         * Strong module-tree examples:
+         * - 给用户中心增加密码找回页
+         * - 把发送验证码功能点移动到注册页下面
+         * - 登录注册拆成登录页和注册页
+         */
+        return hasExplicitTreeObject ||
+                hasDedicatedPageNodeObject ||
+                hasExplicitParentOrPlacement;
+    }
+
+    private boolean isInlinePageAssetInstruction(
+            String messageText
+    ) {
+        String normalized = normalizeForIntent(messageText);
+
+        if (normalized.isBlank()) {
+            return false;
+        }
+
+        boolean mentionsExistingPage = containsAny(
+                normalized,
+                List.of(
+                        "登录页",
+                        "注册页",
+                        "当前页面",
+                        "这个页面",
+                        "该页面",
+                        "当前需求",
+                        "这个需求",
+                        "这份需求",
+                        "当前文档",
+                        "这个页面规范"
+                )
+        );
+
+        boolean hasInlineComponentOrRule = containsAny(
+                normalized,
+                List.of(
+                        "入口",
+                        "按钮",
+                        "字段",
+                        "控件",
+                        "表单项",
+                        "提示",
+                        "校验",
+                        "文案",
+                        "链接",
+                        "勾选框",
+                        "验证码输入",
+                        "错误提示",
+                        "成功提示",
+                        "锁定时间",
+                        "失败次数",
+                        "有效期",
+                        "规则"
+                )
+        );
+
+        boolean explicitlyCreatesPage = containsAny(
+                normalized,
+                List.of(
+                        "新增页面",
+                        "增加页面",
+                        "添加页面",
+                        "创建页面",
+                        "新建页面",
+                        "新增页",
+                        "增加页",
+                        "添加页",
+                        "创建页",
+                        "新建页",
+                        "密码找回页",
+                        "找回密码页"
+                )
+        );
+
+        return mentionsExistingPage && hasInlineComponentOrRule && !explicitlyCreatesPage;
+    }
+
+    private boolean isExplicitAssetLocalEditInstruction(
+            String messageText
+    ) {
+        String normalized = normalizeForIntent(messageText);
+
+        if (normalized.isBlank()) {
+            return false;
+        }
+
+        boolean hasLocalEditAction = containsAny(
+                normalized,
+                List.of(
+                        "改成",
+                        "修改成",
+                        "改为",
+                        "调整为",
+                        "变成",
+                        "限制为",
+                        "不要",
+                        "去除",
+                        "改掉",
+                        "替换为",
+                        "加入口",
+                        "增加入口",
+                        "添加入口",
+                        "加按钮",
+                        "增加按钮",
+                        "添加按钮",
+                        "加字段",
+                        "增加字段",
+                        "添加字段"
+                )
+        );
+
+        boolean hasRuleOrInlineObject = containsAny(
+                normalized,
+                List.of(
+                        "时间",
+                        "分钟",
+                        "次数",
+                        "字段",
+                        "按钮",
+                        "入口",
+                        "提示",
+                        "校验",
+                        "规则",
+                        "文案",
+                        "状态",
+                        "流程",
+                        "验证码有效期",
+                        "锁定时间",
+                        "失败次数",
+                        "密码找回入口",
+                        "忘记密码入口"
+                )
+        );
+
+        boolean explicitlyCurrent = containsAny(
+                normalized,
+                List.of(
+                        "当前文档",
+                        "当前需求",
+                        "这个需求",
+                        "这份需求",
+                        "这个页面规范",
+                        "这个接口",
+                        "这里",
+                        "上面这段",
+                        "刚才这段"
+                )
+        );
+
+        return hasLocalEditAction && (hasRuleOrInlineObject || explicitlyCurrent);
+    }
+
 
     private boolean isCurrentAssetEditIntent(
             String messageText,

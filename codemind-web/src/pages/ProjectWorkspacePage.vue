@@ -265,6 +265,7 @@ import type {
   ModuleTreeNode,
   RequirementChangeProposal,
   ModuleTreePatchProposalResponse,
+  ModuleTreePatchOperationRequest,
   ProjectSummary,
   UiContractGenerationReadinessResponse,
   WorkspaceSummary,
@@ -1377,34 +1378,126 @@ async function dispatchAssistantFollowup(payload: {
 function shouldConvertRequirementChangeToTreePatch(
   proposal: RequirementChangeProposal,
 ): boolean {
-  const instruction = String(proposal.originalInstruction || proposal.summary || '')
+  const instruction = String(
+    proposal.originalInstruction ||
+      proposal.summary ||
+      '',
+  ).trim()
+
   const scopeType = String(proposal.scopeType || '').toUpperCase()
+  const changeType = String(proposal.changeType || '').toUpperCase()
+
+  const structuralChangeTypes = [
+    'ADD',
+    'CREATE',
+    'NEW',
+    'REMOVE',
+    'DELETE',
+    'MOVE',
+    'SPLIT',
+    'MERGE',
+    'RENAME',
+    'ADD_NODE',
+    'ADD_PAGE',
+    'MOVE_NODE',
+    'DELETE_NODE',
+    'UPDATE_NODE',
+  ]
+
+  const structuralScopeTypes = [
+    'MODULE_TREE',
+    'PAGE',
+    'PAGE_OR_UI',
+    'PAGE_STRUCTURE',
+    'ROUTE',
+    'NAVIGATION',
+    'MODULE',
+    'SUBMODULE',
+    'FEATURE',
+    'NODE',
+  ]
+
+  const isStructuralChange = structuralChangeTypes.some(
+    (type) => changeType === type || changeType.includes(type),
+  )
+
+  const isStructuralScope = structuralScopeTypes.some(
+    (type) => scopeType === type || scopeType.includes(type),
+  )
 
   if (scopeType === 'MODULE_TREE') {
     return true
   }
 
-  const changeType = String(proposal.changeType || '').toUpperCase()
-
-  if (!['ADD', 'REMOVE', 'SPLIT', 'MERGE'].includes(changeType)) {
-    return false
+  if (isStructuralChange && isStructuralScope) {
+    return true
   }
 
-  return containsAnyText(
+  const hasStructuralAction = containsAnyText(
     instruction,
     [
+      '新增',
+      '增加',
+      '添加',
+      '创建',
+      '新建',
+      '删掉',
+      '删除',
+      '移除',
+      '去掉',
+      '移动',
+      '挪到',
+      '放到',
+      '归到',
+      '拆成',
+      '拆分',
+      '合并',
+      '重命名',
+      '改名',
+    ],
+  )
+
+  const hasStructuralObject = containsAnyText(
+    instruction,
+    [
+      '模块树',
+      '节点',
+      '业务域',
       '模块',
       '子模块',
       '页面',
-      '新页面',
+      '页',
       '功能点',
-      '节点',
       '路由',
-      '放在',
-      '移动到',
-      '归到',
+      '菜单',
+      '用户中心',
+      '登录页',
+      '注册页',
+      '密码找回页',
+      '找回密码页',
+      '列表页',
+      '详情页',
+      '表单页',
     ],
   )
+
+  const hasPlacementExpression = containsAnyText(
+    instruction,
+    [
+      '放在',
+      '放到',
+      '归到',
+      '下面',
+      '下方',
+      '上面',
+      '挂到',
+      '属于',
+      '移动到',
+      '挪到',
+    ],
+  )
+
+  return hasStructuralAction && (hasStructuralObject || hasPlacementExpression)
 }
 
 function resolvePrimaryAffectedArtifactType(
@@ -1545,8 +1638,9 @@ async function handleApplyTreePatchProposal(
   proposalFromMessage?: ModuleTreePatchProposalResponse,
 ) {
   const proposal = proposalFromMessage || treePatchProposal.value
+  const operations = proposal?.proposal?.operations || []
 
-  if (!proposal?.proposal?.operations?.length) {
+  if (!operations.length) {
     window.alert('当前没有可应用的模块树变更操作。')
     return
   }
@@ -1555,25 +1649,70 @@ async function handleApplyTreePatchProposal(
 
   try {
     const currentSelectedModuleId = selectedModule.value?.id || null
-    const preferredArtifactType = resolveTreePatchAssetEditTarget(
-      proposal,
-      selectedArtifactType.value,
+    const addOperations = operations.filter(
+      (operation) => operation.op === 'ADD_NODE',
     )
 
-    const response = await applyModuleTreePatch(
-      props.workspace.workspaceId,
-      props.project.projectCode,
-      {
-        description: proposal.description || proposal.proposal.description || 'AI 模块树变更提案',
-        source: proposal.source || proposal.proposal.source || 'AI_TREE_PATCH',
-        operations: proposal.proposal.operations,
-      },
-    )
+const proposalRecord = proposal as unknown as Record<string, unknown>
+
+const proposalPayload =
+  proposalRecord['proposal'] &&
+  typeof proposalRecord['proposal'] === 'object'
+    ? proposalRecord['proposal'] as Record<string, unknown>
+    : {}
+
+const patchDescription = String(
+  proposalRecord['description'] ||
+    proposalPayload['description'] ||
+    'AI 模块树变更提案',
+)
+
+const patchSource = String(
+  proposalRecord['source'] ||
+    proposalPayload['source'] ||
+    'AI_TREE_PATCH',
+)
+
+const response = await applyModuleTreePatch(
+  props.workspace.workspaceId,
+  props.project.projectCode,
+  {
+    description: patchDescription,
+    source: patchSource,
+    operations,
+  },
+)
 
     modules.value = response.tree
     treePatchProposal.value = null
 
-    if (currentSelectedModuleId) {
+    const createdNodes = resolveCreatedNodesFromTreePatch(
+      addOperations,
+      modules.value,
+    )
+    const preferredCreatedNode = resolvePreferredCreatedNode(createdNodes)
+
+    if (preferredCreatedNode) {
+      await handleSelectModule(preferredCreatedNode)
+
+      const recommendedArtifactType =
+        resolveRecommendedArtifactTypeForCreatedNode(preferredCreatedNode)
+
+      if (recommendedArtifactType) {
+        selectedArtifactType.value = recommendedArtifactType
+
+        await saveCurrentWorkspaceState({
+          selectedModuleId: preferredCreatedNode.id || null,
+          selectedArtifactType: recommendedArtifactType,
+          selectedArtifactId: getArtifactByType(recommendedArtifactType)?.artifactId || null,
+          activeAgentTab: activeTab.value,
+          uiState: {
+            lastAction: 'apply-module-tree-patch-select-created-node',
+            assistantIntent: 'PROPOSE_MODULE_TREE_PATCH',
+          },
+        })
+      }
+    } else if (currentSelectedModuleId) {
       const matchedModule = restoreSelectedModuleById(
         modules.value,
         currentSelectedModuleId,
@@ -1586,15 +1725,195 @@ async function handleApplyTreePatchProposal(
       }
     }
 
-    await proposeAssetEditAfterTreePatch(
-      proposal,
-      preferredArtifactType,
+    const successMessage = buildTreePatchApplySuccessMessage(
+      createdNodes,
+      response.appliedOperations || [],
     )
+
+    artifactTaskFeedback.value = {
+      level: 'success',
+      message: successMessage,
+    }
+
+    latestAssistantResponse.value = {
+      messageId: `module_tree_patch_applied_${Date.now()}`,
+      intent: 'PROPOSE_MODULE_TREE_PATCH',
+      reply: successMessage,
+      requiresUserConfirmation: false,
+      proposal: null,
+      requirementChangeProposal: null,
+      assetEditProposal: null,
+      actions: [],
+    }
   } catch (error) {
     window.alert(resolveErrorMessage(error, '应用 AI 模块树变更提案失败。'))
   } finally {
     isApplyingTreePatch.value = false
   }
+}
+
+function resolveCreatedNodesFromTreePatch(
+  addOperations: ModuleTreePatchOperationRequest[],
+  tree: ModuleTreeNode[],
+): ModuleTreeNode[] {
+  if (!addOperations.length || !tree.length) {
+    return []
+  }
+
+  const flatNodes = flattenModuleTreeNodes(tree)
+  const result: ModuleTreeNode[] = []
+
+  for (const operation of addOperations) {
+    const matchedNode = findCreatedNodeForAddOperation(
+      operation,
+      flatNodes,
+    )
+
+    if (
+      matchedNode?.id &&
+      !result.some((item) => item.id === matchedNode.id)
+    ) {
+      result.push(matchedNode)
+    }
+  }
+
+  return result
+}
+
+function findCreatedNodeForAddOperation(
+  operation: ModuleTreePatchOperationRequest,
+  flatNodes: ModuleTreeNode[],
+): ModuleTreeNode | null {
+  const expectedName = normalizeTreePatchMatchText(operation.moduleName)
+  const expectedKey = normalizeTreePatchMatchText(operation.moduleKey)
+  const expectedType = normalizeTreePatchMatchText(operation.moduleType)
+  const expectedParentId = normalizeTreePatchMatchText(operation.parentId)
+
+  const candidates = flatNodes
+    .map((node) => {
+      const nodeName = normalizeTreePatchMatchText(
+        node.moduleName || node.name || node.title,
+      )
+      const nodeKey = normalizeTreePatchMatchText(node.moduleKey || node.key)
+      const nodeType = normalizeTreePatchMatchText(node.moduleType || node.type)
+      const nodeParentId = normalizeTreePatchMatchText(node.parentId)
+
+      let score = 0
+
+      if (expectedKey && nodeKey && expectedKey === nodeKey) {
+        score += 100
+      }
+
+      if (expectedName && nodeName && expectedName === nodeName) {
+        score += 80
+      }
+
+      if (expectedType && nodeType && expectedType === nodeType) {
+        score += 30
+      }
+
+      if (expectedParentId && nodeParentId && expectedParentId === nodeParentId) {
+        score += 20
+      }
+
+      return {
+        node,
+        score,
+      }
+    })
+    .filter((item) => item.score >= 80)
+    .sort((a, b) => b.score - a.score)
+
+  return candidates[0]?.node || null
+}
+
+function resolvePreferredCreatedNode(
+  createdNodes: ModuleTreeNode[],
+): ModuleTreeNode | null {
+  if (!createdNodes.length) {
+    return null
+  }
+
+  return (
+    createdNodes.find((node) => isPageNode(node)) ||
+    createdNodes.find((node) => isFeatureNode(node)) ||
+    createdNodes[0] ||
+    null
+  )
+}
+
+function resolveRecommendedArtifactTypeForCreatedNode(
+  node: ModuleTreeNode | null,
+): RequirementArtifactType | null {
+  if (!node) {
+    return null
+  }
+
+  if (isPageNode(node)) {
+    return 'PAGE_SPEC'
+  }
+
+  if (isFeatureNode(node)) {
+    return 'MODULE_PRD'
+  }
+
+  return 'MODULE_PRD'
+}
+
+function buildTreePatchApplySuccessMessage(
+  createdNodes: ModuleTreeNode[],
+  appliedOperations: string[],
+): string {
+  const createdNodeNames = createdNodes
+    .map((node) => {
+      const type = node.moduleType || node.type || 'NODE'
+      const name = getModuleDisplayName(node)
+      return `“${name}”/${type}`
+    })
+    .filter(Boolean)
+
+  const createdPart = createdNodeNames.length
+    ? `已新增节点：${createdNodeNames.join('、')}。`
+    : appliedOperations.length
+      ? `已应用操作：${appliedOperations.join('、')}。`
+      : '模块树变更提案已应用。'
+
+  const hasPageNode = createdNodes.some((node) => isPageNode(node))
+
+  const nextStep = hasPageNode
+    ? '建议下一步先为新增页面生成 PAGE_SPEC；PAGE_SPEC 确认后，再生成 UI_CONTRACT 和后续开发交接资产。'
+    : '建议下一步检查新增节点的核心需求资产；如已有上游资产受影响，可在影响分析中使用 AI 局部同步修订。'
+
+  return [
+    `模块树变更提案已应用。${createdPart}`,
+    nextStep,
+    '系统不会自动改写旧资产；旧资产需要同步时，请在影响分析或版本历史中按需处理。',
+  ].join('\n')
+}
+
+function flattenModuleTreeNodes(
+  nodes: ModuleTreeNode[],
+): ModuleTreeNode[] {
+  const result: ModuleTreeNode[] = []
+
+  const walk = (items: ModuleTreeNode[]) => {
+    for (const item of items) {
+      result.push(item)
+      walk(item.children || [])
+    }
+  }
+
+  walk(nodes || [])
+  return result
+}
+
+function normalizeTreePatchMatchText(
+  value: unknown,
+): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
 }
 
 async function proposeAssetEditAfterTreePatch(
