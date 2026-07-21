@@ -179,6 +179,229 @@
             </footer>
           </div>
 
+
+          <div
+            v-if="message.type === 'REQUIREMENT_CHANGE_PROPOSAL' && message.requirementChangeProposal"
+            class="proposal-card requirement-change-card"
+          >
+            <div class="proposal-title-row">
+              <div>
+                <strong>需求变更草案</strong>
+                <p>
+                  {{
+                    message.requirementChangeProposal.summary ||
+                    'AI 已根据你的描述形成一份需求变更草案。'
+                  }}
+                </p>
+              </div>
+
+              <span>
+                {{ message.requirementChangeProposal.changeType || 'CHANGE' }}
+              </span>
+            </div>
+
+            <div class="proposal-section">
+              <h4>变更范围</h4>
+              <p>
+                {{ formatRequirementChangeTarget(message.requirementChangeProposal) }}
+              </p>
+
+              <ul>
+                <li>
+                  范围类型：
+                  <span class="operation-main">
+                    {{ message.requirementChangeProposal.scopeType || 'GENERAL_REQUIREMENT' }}
+                  </span>
+                </li>
+                <li>
+                  当前策略：
+                  <span class="operation-main">
+                    {{ message.requirementChangeProposal.executionPolicy || '仅生成草案，暂不执行。' }}
+                  </span>
+                </li>
+              </ul>
+            </div>
+
+            <div
+              v-if="message.requirementChangeProposal.affectedArtifacts?.length"
+              class="proposal-section"
+            >
+              <h4>预计影响资产</h4>
+              <ul>
+                <li
+                  v-for="artifact in message.requirementChangeProposal.affectedArtifacts"
+                  :key="artifact"
+                >
+                  {{ artifact }}
+                </li>
+              </ul>
+            </div>
+
+            <div
+              v-if="message.requirementChangeProposal.riskNotes?.length"
+              class="proposal-section warning"
+            >
+              <h4>风险提示</h4>
+              <ul>
+                <li
+                  v-for="note in message.requirementChangeProposal.riskNotes"
+                  :key="note"
+                >
+                  {{ note }}
+                </li>
+              </ul>
+            </div>
+
+            <div
+              v-if="message.requirementChangeProposal.recommendedSteps?.length"
+              class="proposal-section"
+            >
+              <h4>后续步骤</h4>
+              <ol>
+                <li
+                  v-for="step in message.requirementChangeProposal.recommendedSteps"
+                  :key="step"
+                >
+                  {{ step }}
+                </li>
+              </ol>
+            </div>
+
+            <footer class="proposal-actions">
+              <button
+                class="secondary-button"
+                :disabled="isBusy"
+                title="放弃当前草案。对不满意的部分，可以直接在输入框继续说明，AI 会基于上下文重新生成方案。"
+                @click="clearRequirementChangeProposal(message)"
+              >
+                放弃并继续说明
+              </button>
+
+              <button
+                class="primary-button"
+                :disabled="isBusy"
+                title="确认该需求变更草案，并交给当前阶段可用的执行链路处理。"
+                @click="handleConfirmRequirementChange(message.requirementChangeProposal)"
+              >
+                确认执行
+              </button>
+            </footer>
+          </div>
+
+          <div
+            v-if="message.type === 'ASSET_EDIT_PROPOSAL' && message.assetEditProposal"
+            class="proposal-card asset-edit-card"
+          >
+            <div class="proposal-title-row">
+              <div>
+                <strong>资产编辑提案</strong>
+                <p>
+                  {{ message.assetEditProposal.summary || 'AI 已生成局部修订方案。请确认修改点，保存后会形成新的待确认版本。' }}
+                </p>
+              </div>
+
+              <span>
+                {{ formatArtifactTypeLabel(message.assetEditProposal.targetArtifactType || message.assetEditProposal.targetArtifact?.artifactType || 'ASSET') }}
+              </span>
+            </div>
+
+            <div class="asset-edit-flow-hint">
+              <strong>执行结果</strong>
+              <span>保存时只应用局部 Patch，并形成新的待确认版本；旧版本保留，不会触发整份重新生成任务。</span>
+            </div>
+
+            <div class="proposal-section">
+              <h4>目标资产</h4>
+              <p>{{ formatAssetEditTarget(message.assetEditProposal) }}</p>
+              <ul>
+                <li>编辑模式：<span class="operation-main">{{ formatAssetEditMode(message.assetEditProposal.editMode) }}</span></li>
+                <li>编辑策略：<span class="operation-main">{{ formatAssetEditPolicy(message.assetEditProposal.editPolicy) }}</span></li>
+              </ul>
+            </div>
+
+            <div
+              v-if="getAssetEditPatchOperations(message.assetEditProposal).length"
+              class="proposal-section patch-ops-section"
+            >
+              <h4>局部 Patch 操作</h4>
+              <p class="section-tip">Agent 只输出需要修改的片段，后端负责应用到当前资产全文并保存完整版本快照。</p>
+              <ul>
+                <li
+                  v-for="(operation, index) in getAssetEditPatchOperations(message.assetEditProposal)"
+                  :key="index"
+                >
+                  <strong>{{ formatPatchOperationTitle(operation, index) }}</strong>
+                  <p v-if="formatPatchOperationText(operation)">{{ formatPatchOperationText(operation) }}</p>
+                </li>
+              </ul>
+            </div>
+
+            <div
+              v-if="message.assetEditProposal.proposedPatchSummary?.length"
+              class="proposal-section"
+            >
+              <h4>拟局部修订内容</h4>
+              <ul>
+                <li
+                  v-for="item in message.assetEditProposal.proposedPatchSummary"
+                  :key="item"
+                >
+                  {{ item }}
+                </li>
+              </ul>
+            </div>
+
+            <div
+              v-if="message.assetEditProposal.downstreamArtifacts?.length"
+              class="proposal-section downstream-section"
+            >
+              <h4>确认后可能受影响的下游资产</h4>
+              <p class="section-tip">这些资产不是必须立即处理；可以稍后在影响分析中逐个使用 AI 局部同步修订。</p>
+              <ul>
+                <li
+                  v-for="artifact in message.assetEditProposal.downstreamArtifacts"
+                  :key="artifact"
+                >
+                  {{ formatArtifactTypeLabel(artifact) }}
+                </li>
+              </ul>
+            </div>
+
+            <div
+              v-if="message.assetEditProposal.riskNotes?.length"
+              class="proposal-section warning"
+            >
+              <h4>风险提示</h4>
+              <ul>
+                <li
+                  v-for="note in message.assetEditProposal.riskNotes"
+                  :key="note"
+                >
+                  {{ note }}
+                </li>
+              </ul>
+            </div>
+
+            <footer class="proposal-actions">
+              <button
+                class="secondary-button"
+                :disabled="isBusy"
+                @click="clearAssetEditProposal(message)"
+              >
+                放弃并继续说明
+              </button>
+
+              <button
+                class="primary-button"
+                :disabled="isBusy || !message.assetEditProposal.proposedContentMarkdown"
+                title="确认本次局部修订，并保存为新的待确认版本。旧版本保留。"
+                @click="handleConfirmAssetEditProposal(message.assetEditProposal)"
+              >
+                确认并保存局部修订版本
+              </button>
+            </footer>
+          </div>
+
           <div
             v-if="message.attachments?.length"
             class="message-attachments"
@@ -295,6 +518,8 @@ import type {
   AssistantMessageResponse,
   ModuleTreePatchOperationRequest,
   ModuleTreePatchProposalResponse,
+  RequirementChangeProposal,
+  AssetEditProposal,
 } from '../types/codemind'
 
 type AssistantMessageRole = 'system' | 'user' | 'assistant'
@@ -302,6 +527,8 @@ type AssistantMessageRole = 'system' | 'user' | 'assistant'
 type AssistantMessageType =
   | 'TEXT'
   | 'TREE_PATCH_PROPOSAL'
+  | 'REQUIREMENT_CHANGE_PROPOSAL'
+  | 'ASSET_EDIT_PROPOSAL'
 
 type AssistantAttachmentUploadStatus =
   | 'UPLOADING'
@@ -328,6 +555,8 @@ interface AssistantMessage {
   createdAt: string
   attachments?: AssistantAttachmentDraft[]
   proposal?: ModuleTreePatchProposalResponse | null
+  requirementChangeProposal?: RequirementChangeProposal | null
+  assetEditProposal?: AssetEditProposal | null
 }
 
 const props = defineProps<{
@@ -348,6 +577,8 @@ const emit = defineEmits<{
     attachments: AssistantAttachmentRef[]
   }]
   'apply-proposal': [proposal: ModuleTreePatchProposalResponse]
+  'confirm-requirement-change': [proposal: RequirementChangeProposal]
+  'confirm-asset-edit-proposal': [proposal: AssetEditProposal]
   'clear-proposal': []
   'clear-conversation': []
 }>()
@@ -459,17 +690,6 @@ watch(
 )
 
 watch(
-  () => props.moduleTreeExists,
-  (exists, previous) => {
-    if (exists && !previous) {
-      pushAssistantText(
-        '模块树已生成。你现在可以继续输入修改要求，例如“给用户中心增加密码找回页”或“把发送验证码移动到注册页下面”。',
-      )
-    }
-  },
-)
-
-watch(
   () => props.assistantResponse,
   (response) => {
     if (!response) {
@@ -483,14 +703,31 @@ watch(
       return
     }
 
+    if (response.intent === 'CONFIRM_ASSET_EDIT') {
+      markAssetEditProposalsAsSaved()
+    }
+
+    const requirementChangeProposal =
+      extractRequirementChangeProposalFromResponse(response)
+    const assetEditProposal =
+      extractAssetEditProposalFromResponse(response)
+
     messages.value.push({
       ...createMessage(
         'assistant',
-        response.proposal ? 'TREE_PATCH_PROPOSAL' : 'TEXT',
+        response.proposal
+          ? 'TREE_PATCH_PROPOSAL'
+          : assetEditProposal
+            ? 'ASSET_EDIT_PROPOSAL'
+            : requirementChangeProposal
+              ? 'REQUIREMENT_CHANGE_PROPOSAL'
+              : 'TEXT',
         response.reply || '已完成处理。',
         response.messageId || undefined,
       ),
       proposal: response.proposal || null,
+      requirementChangeProposal,
+      assetEditProposal,
     })
 
     scrollToBottom()
@@ -559,6 +796,401 @@ function clearProposal(message: AssistantMessage) {
   scrollToBottom()
 }
 
+
+function clearRequirementChangeProposal(message: AssistantMessage) {
+  message.type = 'TEXT'
+  message.requirementChangeProposal = null
+  message.text = '该需求变更草案已放弃。你可以直接继续说明不满意的部分，例如“不是加新页面，是在登录页表单里增加短信验证码”。'
+
+  scrollToBottom()
+}
+
+function handleConfirmRequirementChange(
+  proposal: RequirementChangeProposal | null | undefined,
+) {
+  if (!proposal) {
+    return
+  }
+
+  emit('confirm-requirement-change', proposal)
+}
+
+function clearAssetEditProposal(message: AssistantMessage) {
+  message.type = 'TEXT'
+  message.assetEditProposal = null
+  message.text = '该资产编辑提案已放弃。你可以直接继续说明不满意的部分，AI 会重新生成一版编辑方案。'
+
+  scrollToBottom()
+}
+
+function handleConfirmAssetEditProposal(
+  proposal: AssetEditProposal | null | undefined,
+) {
+  if (!proposal) {
+    return
+  }
+
+  emit('confirm-asset-edit-proposal', proposal)
+}
+
+function markAssetEditProposalsAsSaved() {
+  messages.value = messages.value.map((message) => {
+    if (message.type !== 'ASSET_EDIT_PROPOSAL' || !message.assetEditProposal) {
+      return message
+    }
+
+    return {
+      ...message,
+      type: 'TEXT',
+      assetEditProposal: null,
+      text: '该局部修订提案已确认保存，已进入版本历史。',
+    }
+  })
+}
+
+
+function extractAssetEditProposalFromResponse(
+  response: AssistantMessageResponse | null,
+): AssetEditProposal | null {
+  if (!response) {
+    return null
+  }
+
+  if (response.assetEditProposal) {
+    return response.assetEditProposal
+  }
+
+  const action = response.actions?.find((item) =>
+    item.type === 'ASSET_EDIT_PROPOSAL' ||
+    item.type === 'OPEN_ASSET_EDIT_PROPOSAL',
+  )
+
+  return normalizeAssetEditProposal(
+    action?.payload?.proposal || action?.payload,
+  )
+}
+
+function extractAssetEditProposalFromHistory(
+  message: AssistantConversationMessageResponse,
+): AssetEditProposal | null {
+  if (message.assetEditProposal) {
+    return message.assetEditProposal
+  }
+
+  const content = message.content || {}
+
+  return normalizeAssetEditProposal(
+    content.assetEditProposal ||
+      extractAssetEditProposalFromContentActions(content.actions),
+  )
+}
+
+function extractAssetEditProposalFromContentActions(
+  actions: unknown,
+): unknown {
+  if (!Array.isArray(actions)) {
+    return null
+  }
+
+  const action = actions.find((item) => {
+    if (!isRecord(item)) {
+      return false
+    }
+
+    return item.type === 'ASSET_EDIT_PROPOSAL' ||
+      item.type === 'OPEN_ASSET_EDIT_PROPOSAL'
+  })
+
+  if (!isRecord(action)) {
+    return null
+  }
+
+  const payload = action.payload
+
+  if (isRecord(payload) && payload.proposal) {
+    return payload.proposal
+  }
+
+  return payload
+}
+
+function normalizeAssetEditProposal(
+  value: unknown,
+): AssetEditProposal | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const proposal = value as AssetEditProposal
+
+  if (
+    !proposal.summary &&
+    !proposal.proposalId &&
+    !proposal.targetArtifactType &&
+    !proposal.targetArtifact
+  ) {
+    return null
+  }
+
+  return proposal
+}
+
+function extractRequirementChangeProposalFromResponse(
+  response: AssistantMessageResponse | null,
+): RequirementChangeProposal | null {
+  if (!response) {
+    return null
+  }
+
+  if (response.requirementChangeProposal) {
+    return response.requirementChangeProposal
+  }
+
+  const action = response.actions?.find((item) =>
+    item.type === 'REQUIREMENT_CHANGE_PROPOSAL' ||
+    item.type === 'OPEN_REQUIREMENT_CHANGE_PROPOSAL',
+  )
+
+  return normalizeRequirementChangeProposal(
+    action?.payload?.proposal || action?.payload,
+  )
+}
+
+function extractRequirementChangeProposalFromHistory(
+  message: AssistantConversationMessageResponse,
+): RequirementChangeProposal | null {
+  if (message.requirementChangeProposal) {
+    return message.requirementChangeProposal
+  }
+
+  const content = message.content || {}
+
+  return normalizeRequirementChangeProposal(
+    content.requirementChangeProposal ||
+      extractRequirementChangeProposalFromContentActions(content.actions),
+  )
+}
+
+function extractRequirementChangeProposalFromContentActions(
+  actions: unknown,
+): unknown {
+  if (!Array.isArray(actions)) {
+    return null
+  }
+
+  const action = actions.find((item) => {
+    if (!isRecord(item)) {
+      return false
+    }
+
+    return item.type === 'REQUIREMENT_CHANGE_PROPOSAL' ||
+      item.type === 'OPEN_REQUIREMENT_CHANGE_PROPOSAL'
+  })
+
+  if (!isRecord(action)) {
+    return null
+  }
+
+  const payload = action.payload
+
+  if (isRecord(payload) && payload.proposal) {
+    return payload.proposal
+  }
+
+  return payload
+}
+
+function normalizeRequirementChangeProposal(
+  value: unknown,
+): RequirementChangeProposal | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const proposal = value as RequirementChangeProposal
+
+  if (
+    !proposal.summary &&
+    !proposal.originalInstruction &&
+    !proposal.proposalId
+  ) {
+    return null
+  }
+
+  return proposal
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function formatRequirementChangeTarget(
+  proposal: RequirementChangeProposal,
+): string {
+  const target = proposal.targetNode || {}
+
+  const nodeName = (target as RequirementChangeProposal['targetNode'])?.nodeName || '当前项目'
+  const nodeType = (target as RequirementChangeProposal['targetNode'])?.nodeType || 'PROJECT'
+  const targetModuleKey = (target as RequirementChangeProposal['targetNode'])?.moduleKey
+  const moduleKey = targetModuleKey ? ` / ${targetModuleKey}` : ''
+
+  return `${nodeName}${moduleKey} / ${nodeType}`
+}
+
+
+function formatArtifactTypeLabel(
+  value?: string | null,
+): string {
+  const artifactType = String(value || '').toUpperCase()
+
+  const labels: Record<string, string> = {
+    MODULE_PRD: '模块需求',
+    BUSINESS_FLOW: '业务流程',
+    PAGE_SPEC: '页面规范',
+    DATA_MODEL: '数据模型',
+    API_CONTRACT: '接口契约',
+    TEST_SPEC: '测试规格',
+    UI_CONTRACT: '交互原型',
+    DEV_HANDOFF_PACKAGE: '开发交接包',
+  }
+
+  return labels[artifactType] || value || '资产'
+}
+
+function formatAssetEditMode(
+  value?: string | null,
+): string {
+  const mode = String(value || '').toUpperCase()
+
+  if (mode.includes('UPSTREAM') || mode.includes('SYNC')) {
+    return 'AI 局部同步修订'
+  }
+
+  if (mode.includes('MANUAL')) {
+    return '人工文档编辑'
+  }
+
+  if (mode.includes('CHAT')) {
+    return '对话式资产修订'
+  }
+
+  return value || '对话式资产修订'
+}
+
+function formatAssetEditPolicy(
+  value?: string | null,
+): string {
+  const policy = String(value || '')
+
+  if (!policy) {
+    return '确认后创建新版本，旧版本保留，新版本进入“新版本待确认”。'
+  }
+
+  return policy
+    .replace(/PENDING_REVIEW/g, '新版本待确认')
+    .replace(/NEEDS_REVIEW/g, '受上游影响')
+    .replace(/artifact_version/g, '资产版本')
+}
+
+function formatAssetEditTarget(
+  proposal: AssetEditProposal,
+): string {
+  const target = isRecord(proposal.targetArtifact)
+    ? proposal.targetArtifact
+    : {}
+  const proposalRecord = proposal as unknown as Record<string, unknown>
+  const targetRecord = target as Record<string, unknown>
+
+  const artifactType = String(
+    proposalRecord['targetArtifactType'] ||
+      targetRecord['artifactType'] ||
+      targetRecord['type'] ||
+      '资产',
+  )
+
+  const title = String(
+    targetRecord['artifactTitle'] ||
+      targetRecord['title'] ||
+      proposalRecord['currentTitle'] ||
+      artifactType,
+  )
+
+  const versionValue =
+    proposalRecord['currentVersionNo'] ??
+    targetRecord['versionNo'] ??
+    targetRecord['currentVersionNo'] ??
+    null
+
+  const version = versionValue === null || versionValue === undefined || versionValue === ''
+    ? ''
+    : String(versionValue)
+
+  return `${title} / ${artifactType}${version ? ` / 当前 V${version}` : ''}`
+}
+
+function getAssetEditPatchOperations(
+  proposal: AssetEditProposal,
+): Record<string, unknown>[] {
+  const proposalRecord = proposal as unknown as Record<string, unknown>
+  const value = proposalRecord['proposedPatchOperations']
+
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.filter(isRecord)
+}
+
+function formatPatchOperationTitle(
+  operation: Record<string, unknown>,
+  index: number,
+): string {
+  const op = String(operation['op'] || operation['operation'] || 'replace')
+  const sectionTitle = String(operation['sectionTitle'] || operation['section'] || '').trim()
+  const opLabels: Record<string, string> = {
+    replace: '替换片段',
+    update: '更新片段',
+    insert_after: '在指定位置后插入',
+    insert_before: '在指定位置前插入',
+    append_section: '追加局部章节',
+    add_section: '新增局部章节',
+  }
+  const label = opLabels[op] || opLabels[op.toLowerCase()] || op
+
+  return `${index + 1}. ${label}${sectionTitle ? `：${sectionTitle}` : ''}`
+}
+
+function formatPatchOperationText(
+  operation: Record<string, unknown>,
+): string {
+  const findText = String(operation['findText'] || operation['beforeText'] || operation['anchorText'] || '').trim()
+  const replaceWith = String(operation['replaceWith'] || operation['afterText'] || operation['newText'] || '').trim()
+  const rationale = String(operation['rationale'] || operation['reason'] || '').trim()
+
+  const parts: string[] = []
+  if (findText) {
+    parts.push(`原片段：${trimProposalPreview(findText)}`)
+  }
+  if (replaceWith) {
+    parts.push(`新片段：${trimProposalPreview(replaceWith)}`)
+  }
+  if (rationale) {
+    parts.push(`原因：${rationale}`)
+  }
+
+  return parts.join('；')
+}
+
+function trimProposalPreview(value: string): string {
+  const text = String(value || '').trim()
+
+  if (text.length <= 420) {
+    return text
+  }
+
+  return `${text.slice(0, 420)}...`
+}
+
 function handleApplyProposal(
   proposal: ModuleTreePatchProposalResponse | null | undefined,
 ) {
@@ -605,6 +1237,11 @@ function buildMessagesFromHistory(
       continue
     }
 
+    const requirementChangeProposal =
+      extractRequirementChangeProposalFromHistory(historyMessage)
+    const assetEditProposal =
+      extractAssetEditProposalFromHistory(historyMessage)
+
     result.push({
       id: historyMessage.messageId ||
         `${Date.now()}_${Math.random().toString(16).slice(2)}`,
@@ -612,11 +1249,19 @@ function buildMessagesFromHistory(
       type: historyMessage.proposal ||
         historyMessage.type === 'TREE_PATCH_PROPOSAL'
         ? 'TREE_PATCH_PROPOSAL'
-        : 'TEXT',
+        : assetEditProposal ||
+            historyMessage.type === 'ASSET_EDIT_PROPOSAL'
+          ? 'ASSET_EDIT_PROPOSAL'
+          : requirementChangeProposal ||
+              historyMessage.type === 'REQUIREMENT_CHANGE_PROPOSAL'
+            ? 'REQUIREMENT_CHANGE_PROPOSAL'
+            : 'TEXT',
       text,
       createdAt: formatHistoryTime(historyMessage.createdAt),
       attachments: normalizeHistoryAttachments(historyMessage.attachments),
       proposal: historyMessage.proposal || null,
+      requirementChangeProposal,
+      assetEditProposal,
     })
   }
 
@@ -1148,12 +1793,27 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+.requirement-change-card {
+  border-color: #ddd6fe;
+  background: linear-gradient(180deg, #f5f3ff 0%, #ffffff 100%);
+}
+
+.asset-edit-card {
+  border-color: #bbf7d0;
+  background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%);
+}
+
 .proposal-title-row {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
+  align-items: flex-start;
+  gap: 10px;
   padding: 12px;
   border-bottom: 1px solid #dbeafe;
+}
+
+.proposal-title-row > div {
+  min-width: 0;
 }
 
 .proposal-title-row strong {
@@ -1169,13 +1829,45 @@ onBeforeUnmount(() => {
 }
 
 .proposal-title-row > span {
+  flex: 0 0 auto;
   align-self: flex-start;
   border-radius: 999px;
-  padding: 3px 8px;
+  padding: 4px 8px;
   background: #2563eb;
   color: #ffffff;
   font-size: 11px;
+  line-height: 1;
   font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.16);
+}
+
+
+.asset-edit-flow-hint {
+  display: grid;
+  gap: 5px;
+  margin: 10px 12px 0;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #f0fdf4;
+  color: #166534;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.asset-edit-flow-hint strong {
+  color: #14532d;
+  font-size: 12px;
+}
+
+.section-tip {
+  margin-bottom: 6px !important;
+  color: #64748b !important;
+}
+
+.downstream-section {
+  background: #f8fafc;
 }
 
 .proposal-section {
@@ -1194,6 +1886,7 @@ onBeforeUnmount(() => {
 }
 
 .proposal-section p,
+.proposal-excerpt,
 .empty-tip {
   margin: 0;
   color: #64748b;
@@ -1201,7 +1894,8 @@ onBeforeUnmount(() => {
   line-height: 1.6;
 }
 
-.proposal-section ul {
+.proposal-section ul,
+.proposal-section ol {
   margin: 0;
   padding-left: 18px;
   color: #475569;

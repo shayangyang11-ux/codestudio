@@ -15,12 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 @Service
 public class AssistantMessageService {
@@ -28,6 +23,9 @@ public class AssistantMessageService {
     private static final String INTENT_TASK_NOTIFICATION = "TASK_NOTIFICATION";
     private static final String INTENT_CONVERSATION_ARCHIVE = "CONVERSATION_ARCHIVE";
     private static final String MESSAGE_TYPE_ARCHIVE_MARKER = "CONVERSATION_ARCHIVE_MARKER";
+    private static final String INTENT_PROPOSE_REQUIREMENT_CHANGE = "PROPOSE_REQUIREMENT_CHANGE";
+    private static final String MESSAGE_TYPE_REQUIREMENT_CHANGE_PROPOSAL = "REQUIREMENT_CHANGE_PROPOSAL";
+    private static final String ACTION_REQUIREMENT_CHANGE_PROPOSAL = "REQUIREMENT_CHANGE_PROPOSAL";
 
     private final ProjectModuleService projectModuleService;
     private final ModuleTreePatchProposalService moduleTreePatchProposalService;
@@ -248,7 +246,13 @@ public class AssistantMessageService {
                         attachmentContexts
                 );
 
-        String intent = classification.getIntent();
+        String intent = resolveDialogRequirementChangeIntent(
+                classification.getIntent(),
+                messageText,
+                !moduleTree.isEmpty(),
+                request,
+                attachmentContexts
+        );
 
         AssistantMessageResponse response = route(
                 workspaceId,
@@ -383,6 +387,24 @@ public class AssistantMessageService {
             );
         }
 
+        if (AssistantIntentRouterService.INTENT_EXECUTE_UI_COMMAND.equals(intent)) {
+            return buildAssistantUiCommandResponse(
+                    request,
+                    messageText,
+                    classification
+            );
+        }
+
+        if (INTENT_PROPOSE_REQUIREMENT_CHANGE.equals(intent)) {
+            return buildRequirementChangeProposalResponse(
+                    workspaceId,
+                    projectCode,
+                    request,
+                    messageText,
+                    attachmentContexts
+            );
+        }
+
         if (AssistantIntentRouterService.INTENT_PROPOSE_MODULE_TREE_PATCH.equals(intent)) {
             return buildTreePatchProposalResponse(
                     workspaceId,
@@ -456,6 +478,1158 @@ public class AssistantMessageService {
                         )
                 )
         );
+    }
+
+
+    private AssistantMessageResponse buildAssistantUiCommandResponse(
+            AssistantMessageRequest request,
+            String messageText,
+            AssistantIntentClassificationResult classification
+    ) {
+        List<AssistantActionResponse> actions = buildAssistantUiCommandActions(
+                request,
+                messageText,
+                classification
+        );
+
+        return simpleResponse(
+                AssistantIntentRouterService.INTENT_EXECUTE_UI_COMMAND,
+                buildAssistantUiCommandReply(actions),
+                false,
+                actions
+        );
+    }
+
+    private List<AssistantActionResponse> buildAssistantUiCommandActions(
+            AssistantMessageRequest request,
+            String messageText,
+            AssistantIntentClassificationResult classification
+    ) {
+        String normalized = normalizeForIntent(messageText);
+        String artifactType = inferAssistantCommandArtifactType(
+                request,
+                messageText,
+                classification
+        );
+
+        List<AssistantActionResponse> actions = new ArrayList<>();
+
+        if (containsAny(normalized, List.of("质量检查", "质量检测"))) {
+            actions.add(AssistantActionResponse.of(
+                    "OPEN_QUALITY_CHECK",
+                    "打开质量检查",
+                    assistantCommandPayload(artifactType)
+            ));
+        }
+
+        if (containsAny(normalized, List.of("版本历史", "历史版本", "版本记录"))) {
+            actions.add(AssistantActionResponse.of(
+                    "OPEN_ARTIFACT_VERSIONS",
+                    "打开版本历史",
+                    assistantCommandPayload(artifactType)
+            ));
+        }
+
+        if (containsAny(normalized, List.of("影响分析", "下游影响", "受影响资产"))) {
+            actions.add(AssistantActionResponse.of(
+                    "OPEN_IMPACT_ANALYSIS",
+                    "打开影响分析",
+                    assistantCommandPayload(artifactType)
+            ));
+        }
+
+        if (containsAny(
+                normalized,
+                List.of(
+                        "交互预览",
+                        "预览界面",
+                        "页面预览",
+                        "交互原型预览",
+                        "ui预览",
+                        "ui_contract",
+                        "uicontract"
+                )
+        )) {
+            actions.add(AssistantActionResponse.of(
+                    "OPEN_UI_CONTRACT_PREVIEW",
+                    "打开交互预览",
+                    assistantCommandPayload("UI_CONTRACT")
+            ));
+        }
+
+        if (containsAny(normalized, List.of("准备度", "刷新准备", "刷新交互原型"))) {
+            actions.add(AssistantActionResponse.of(
+                    "REFRESH_UI_CONTRACT_READINESS",
+                    "刷新交互原型准备度",
+                    assistantCommandPayload("UI_CONTRACT")
+            ));
+        }
+
+        if (containsAny(normalized, List.of("开发agent", "开发 agent", "development"))) {
+            actions.add(AssistantActionResponse.of(
+                    "OPEN_DEVELOPMENT_TAB",
+                    "切换到开发 Agent",
+                    assistantCommandPayload(artifactType)
+            ));
+        }
+
+        if (containsAny(normalized, List.of("需求agent", "需求 agent", "需求工作区"))) {
+            actions.add(AssistantActionResponse.of(
+                    "OPEN_REQUIREMENT_TAB",
+                    "切换到需求 Agent",
+                    assistantCommandPayload(artifactType)
+            ));
+        }
+
+        if (containsAny(normalized, List.of("任务中心", "项目任务中心"))) {
+            actions.add(AssistantActionResponse.of(
+                    "OPEN_PROJECT_TASK_CENTER",
+                    "打开项目任务中心",
+                    assistantCommandPayload(artifactType)
+            ));
+        }
+
+        if (actions.isEmpty() && artifactType != null && !artifactType.isBlank()) {
+            actions.add(AssistantActionResponse.of(
+                    "VIEW_ARTIFACT",
+                    "查看资产",
+                    assistantCommandPayload(artifactType)
+            ));
+        }
+
+        if (actions.isEmpty()) {
+            actions.add(AssistantActionResponse.of(
+                    "OPEN_QUALITY_CHECK",
+                    "打开质量检查",
+                    assistantCommandPayload(artifactType)
+            ));
+        }
+
+        return actions;
+    }
+
+    private Map<String, Object> assistantCommandPayload(
+            String artifactType
+    ) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("artifactType", artifactType);
+        payload.put("source", "ASSISTANT_COMMAND_ROUTER");
+        return payload;
+    }
+
+    private String buildAssistantUiCommandReply(
+            List<AssistantActionResponse> actions
+    ) {
+        if (actions == null || actions.isEmpty()) {
+            return "我识别到你想通过聊天触发页面操作，但没有定位到可执行动作。";
+        }
+
+        List<String> labels = new ArrayList<>();
+
+        for (AssistantActionResponse action : actions) {
+            if (action != null && action.getLabel() != null && !action.getLabel().isBlank()) {
+                labels.add(action.getLabel());
+            }
+        }
+
+        return "我已识别为页面操作指令，正在为你执行：" + String.join("、", labels) + "。";
+    }
+
+    private String inferAssistantCommandArtifactType(
+            AssistantMessageRequest request,
+            String messageText,
+            AssistantIntentClassificationResult classification
+    ) {
+        if (classification != null
+                && classification.getArtifactType() != null
+                && !classification.getArtifactType().isBlank()
+                && !"FULL_CHAIN".equalsIgnoreCase(classification.getArtifactType())) {
+            return classification.getArtifactType();
+        }
+
+        if (request != null
+                && request.getSelectedArtifactType() != null
+                && !request.getSelectedArtifactType().isBlank()) {
+            return request.getSelectedArtifactType();
+        }
+
+        List<String> affectedArtifacts = inferAffectedArtifacts(messageText);
+
+        if (affectedArtifacts == null || affectedArtifacts.isEmpty()) {
+            return null;
+        }
+
+        return affectedArtifacts.get(0);
+    }
+
+
+    private AssistantMessageResponse buildRequirementChangeProposalResponse(
+            UUID workspaceId,
+            String projectCode,
+            AssistantMessageRequest request,
+            String messageText,
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        String enrichedInstruction = buildInstructionWithAttachmentContext(
+                messageText,
+                attachmentContexts
+        );
+
+        List<ProjectModuleService.ModuleTreeNode> moduleTree =
+                projectModuleService.getModuleTreeByWorkspaceAndProjectCode(
+                        workspaceId,
+                        projectCode
+                );
+
+        Map<String, Object> proposal = buildRequirementChangeProposal(
+                request,
+                enrichedInstruction,
+                moduleTree,
+                attachmentContexts
+        );
+
+        Map<String, Object> actionPayload = new LinkedHashMap<>();
+        actionPayload.put("proposal", proposal);
+
+        return simpleResponse(
+                INTENT_PROPOSE_REQUIREMENT_CHANGE,
+                buildRequirementChangeProposalReply(proposal),
+                true,
+                List.of(
+                        AssistantActionResponse.of(
+                                ACTION_REQUIREMENT_CHANGE_PROPOSAL,
+                                "查看需求变更草案",
+                                actionPayload
+                        )
+                )
+        );
+    }
+
+    private String resolveDialogRequirementChangeIntent(
+            String classifiedIntent,
+            String messageText,
+            boolean moduleTreeExists,
+            AssistantMessageRequest request,
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        if (!moduleTreeExists) {
+            return classifiedIntent;
+        }
+
+        if (request != null
+                && request.getExpectedIntent() != null
+                && !request.getExpectedIntent().isBlank()) {
+            return classifiedIntent;
+        }
+
+        /*
+         * Phase 5-I hotfix: when the user is already viewing a concrete
+         * requirement artifact, short instructions such as
+         * "登录失败 5 次后锁定 10 分钟" are usually incremental edits to the
+         * current asset, not a request to regenerate the whole artifact.
+         *
+         * Keep explicit regeneration commands on the old task path, but route
+         * asset-level amendments into Requirement Change Proposal -> Asset Edit
+         * Proposal, so no background generation task is created unexpectedly.
+         */
+        if (isCurrentAssetEditIntent(
+                messageText,
+                request,
+                attachmentContexts
+        )) {
+            return INTENT_PROPOSE_REQUIREMENT_CHANGE;
+        }
+
+        if (AssistantIntentRouterService.INTENT_GENERATE_MODULE_TREE.equals(classifiedIntent)
+                || AssistantIntentRouterService.INTENT_EXPLAIN_CURRENT_ARTIFACT.equals(classifiedIntent)) {
+            return classifiedIntent;
+        }
+
+        if (AssistantIntentRouterService.INTENT_GENERATE_REQUIREMENT_ARTIFACT.equals(classifiedIntent)
+                && isExplicitArtifactGenerationIntent(messageText)) {
+            return classifiedIntent;
+        }
+
+        if (isDialogRequirementChangeIntent(
+                messageText,
+                attachmentContexts
+        )) {
+            return INTENT_PROPOSE_REQUIREMENT_CHANGE;
+        }
+
+        return classifiedIntent;
+    }
+
+    private boolean isCurrentAssetEditIntent(
+            String messageText,
+            AssistantMessageRequest request,
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        if (request == null
+                || request.getSelectedNodeId() == null
+                || request.getSelectedArtifactType() == null
+                || request.getSelectedArtifactType().isBlank()) {
+            return false;
+        }
+
+        String artifactType = request.getSelectedArtifactType().trim().toUpperCase(Locale.ROOT);
+
+        if (!List.of(
+                "MODULE_PRD",
+                "BUSINESS_FLOW",
+                "PAGE_SPEC",
+                "TEST_SPEC",
+                "DATA_MODEL",
+                "API_CONTRACT"
+        ).contains(artifactType)) {
+            return false;
+        }
+
+        String normalized = normalizeForIntent(messageText);
+
+        if (normalized.isBlank()) {
+            return false;
+        }
+
+        if (isUiCommandLikeText(normalized) || isExplicitArtifactGenerationIntent(messageText)) {
+            return false;
+        }
+
+        if (hasParsedAttachmentContext(attachmentContexts)
+                && containsAny(normalized, List.of(
+                "根据附件修改",
+                "按附件修改",
+                "按文档修改",
+                "根据文档修改",
+                "根据图片修改",
+                "按图片修改"
+        ))) {
+            return true;
+        }
+
+        return containsAny(normalized, List.of(
+                "修改",
+                "改成",
+                "改为",
+                "调整",
+                "变成",
+                "补充",
+                "增加",
+                "新增",
+                "加入",
+                "添加",
+                "删除",
+                "移除",
+                "去掉",
+                "不要",
+                "不能",
+                "不允许",
+                "只允许",
+                "必须",
+                "需要",
+                "限制",
+                "禁止",
+                "锁定",
+                "校验",
+                "验证",
+                "失败",
+                "成功",
+                "次数",
+                "分钟",
+                "小时",
+                "字段",
+                "按钮",
+                "提示",
+                "状态",
+                "流程",
+                "权限",
+                "角色",
+                "规则",
+                "异常",
+                "错误",
+                "手机号",
+                "邮箱",
+                "验证码",
+                "退款",
+                "库存",
+                "订单",
+                "支付",
+                "登录",
+                "注册",
+                "unlock",
+                "lock",
+                "required",
+                "optional",
+                "disable",
+                "enable",
+                "change",
+                "update",
+                "remove",
+                "add"
+        ));
+    }
+
+    private boolean isExplicitArtifactGenerationIntent(
+            String messageText
+    ) {
+        String normalized = normalizeForIntent(messageText);
+
+        if (normalized.isBlank()) {
+            return false;
+        }
+
+        if (containsAny(normalized, List.of(
+                "重新生成",
+                "重生成",
+                "再生成",
+                "重新跑",
+                "重跑",
+                "重新创建",
+                "生成任务",
+                "创建生成任务",
+                "regenerate",
+                "rerun"
+        ))) {
+            return true;
+        }
+
+        boolean hasGenerateVerb = containsAny(normalized, List.of(
+                "生成",
+                "创建",
+                "写一份",
+                "出一份",
+                "generate",
+                "create"
+        ));
+
+        if (!hasGenerateVerb) {
+            return false;
+        }
+
+        return containsAny(normalized, List.of(
+                "页面需求",
+                "页面规范",
+                "模块prd",
+                "prd",
+                "业务流程",
+                "数据模型",
+                "接口契约",
+                "测试规格",
+                "交互原型",
+                "开发交接包",
+                "核心资产",
+                "全链路",
+                "当前资产",
+                "需求资产",
+                "artifact",
+                "page_spec",
+                "module_prd",
+                "business_flow",
+                "data_model",
+                "api_contract",
+                "test_spec",
+                "ui_contract"
+        ));
+    }
+
+    private boolean isUiCommandLikeText(
+            String normalized
+    ) {
+        return containsAny(normalized, List.of(
+                "打开",
+                "查看",
+                "预览",
+                "刷新",
+                "版本历史",
+                "影响分析",
+                "质量检查",
+                "任务中心",
+                "切到",
+                "进入开发",
+                "open",
+                "show",
+                "preview",
+                "refresh"
+        ));
+    }
+
+    private boolean isDialogRequirementChangeIntent(
+            String messageText,
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        String normalized = normalizeForIntent(messageText);
+
+        if (normalized.isBlank()) {
+            return false;
+        }
+
+        if (containsAny(
+                normalized,
+                List.of(
+                        "改需求",
+                        "修改需求",
+                        "调整需求",
+                        "变更需求",
+                        "需求变更",
+                        "新增需求",
+                        "补充需求",
+                        "客户改",
+                        "甲方要求",
+                        "客户要求",
+                        "产品要求"
+                )
+        )) {
+            return true;
+        }
+
+        boolean hasChangeVerb = containsAny(
+                normalized,
+                List.of(
+                        "新增",
+                        "增加",
+                        "加一个",
+                        "加上",
+                        "添加",
+                        "补充",
+                        "去掉",
+                        "删除",
+                        "取消",
+                        "不要",
+                        "改成",
+                        "改为",
+                        "调整",
+                        "拆成",
+                        "拆分",
+                        "合并",
+                        "增加一个",
+                        "改一下"
+                )
+        );
+
+        boolean hasRequirementObject = containsAny(
+                normalized,
+                List.of(
+                        "页面",
+                        "页",
+                        "功能",
+                        "流程",
+                        "模块",
+                        "子模块",
+                        "业务",
+                        "接口",
+                        "字段",
+                        "按钮",
+                        "权限",
+                        "角色",
+                        "状态",
+                        "表单",
+                        "表格",
+                        "卡片",
+                        "列表",
+                        "验证码",
+                        "退款",
+                        "支付",
+                        "审批",
+                        "审核",
+                        "登录",
+                        "注册"
+                )
+        );
+
+        if (hasChangeVerb && hasRequirementObject) {
+            return true;
+        }
+
+        return hasParsedAttachmentContext(attachmentContexts)
+                && containsAny(
+                normalized,
+                List.of(
+                        "根据附件修改",
+                        "按附件修改",
+                        "根据文档修改",
+                        "按文档修改",
+                        "根据图片修改",
+                        "按截图修改"
+                )
+        );
+    }
+
+    private Map<String, Object> buildRequirementChangeProposal(
+            AssistantMessageRequest request,
+            String instruction,
+            List<ProjectModuleService.ModuleTreeNode> moduleTree,
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        Map<String, Object> selectedNode = resolveSelectedNodeContext(
+                request == null ? null : request.getSelectedNodeId(),
+                moduleTree
+        );
+
+        Map<String, Object> proposal = new LinkedHashMap<>();
+        proposal.put("proposalId", UUID.randomUUID().toString());
+        proposal.put("source", hasParsedAttachmentContext(attachmentContexts)
+                ? "ASSISTANT_DIALOG_WITH_ATTACHMENTS"
+                : "ASSISTANT_DIALOG");
+        proposal.put("status", "DRAFT");
+        proposal.put("phase", "Phase 5-C/D");
+        proposal.put("originalInstruction", instruction);
+        proposal.put("summary", buildRequirementChangeSummary(instruction, selectedNode));
+        proposal.put("changeType", inferRequirementChangeType(instruction));
+        proposal.put("scopeType", inferRequirementChangeScope(instruction));
+        proposal.put("targetNode", selectedNode);
+        proposal.put("affectedNodeIds", inferAffectedNodeIds(selectedNode, instruction, moduleTree));
+        proposal.put("affectedArtifacts", inferAffectedArtifacts(instruction));
+        proposal.put("riskNotes", inferRequirementChangeRiskNotes(instruction));
+        proposal.put("recommendedSteps", buildRequirementChangeRecommendedSteps());
+        proposal.put("requiresUserConfirmation", true);
+        proposal.put("executionPolicy", "用户确认后，系统会进入当前阶段可用的执行链路；模块树类变更会转为可审查 Patch，资产内容改写会进入后续资产编辑提案。");
+        proposal.put("executionMode", inferRequirementChangeExecutionMode(instruction));
+        proposal.put("executionAction", inferRequirementChangeExecutionAction(instruction));
+        proposal.put("executionActions", inferRequirementChangeExecutionActions(instruction));
+        proposal.put("nextPhase", "Phase 5-E/F 将接入资产编辑提案和新版本保存；Phase 6 将接入 ModuleTreePatchAgent 正式执行模块树 Patch。");
+
+        if (hasParsedAttachmentContext(attachmentContexts)) {
+            proposal.put("attachmentSummary", buildAttachmentSummaryForRequirementChange(attachmentContexts));
+        }
+
+        return proposal;
+    }
+
+    private Map<String, Object> resolveSelectedNodeContext(
+            UUID selectedNodeId,
+            List<ProjectModuleService.ModuleTreeNode> moduleTree
+    ) {
+        Map<String, Object> fallback = new LinkedHashMap<>();
+        fallback.put("nodeId", selectedNodeId == null ? null : selectedNodeId.toString());
+        fallback.put("nodeName", "当前项目");
+        fallback.put("nodeType", "PROJECT");
+        fallback.put("moduleKey", null);
+        fallback.put("modulePath", null);
+
+        if (selectedNodeId == null || moduleTree == null || moduleTree.isEmpty()) {
+            return fallback;
+        }
+
+        Map<String, Object> matched = findNodeAsMap(
+                selectedNodeId.toString(),
+                moduleTree
+        );
+
+        if (matched == null || matched.isEmpty()) {
+            return fallback;
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("nodeId", textValue(
+                firstPresent(matched, "id", "moduleId", "nodeId")
+        ));
+        result.put("nodeName", firstNonBlank(
+                textValue(firstPresent(matched, "moduleName", "name", "title")),
+                "当前节点"
+        ));
+        result.put("nodeType", firstNonBlank(
+                textValue(firstPresent(matched, "moduleType", "type", "nodeType")),
+                "MODULE"
+        ));
+        result.put("moduleKey", textValue(firstPresent(matched, "moduleKey", "key")));
+        result.put("modulePath", textValue(firstPresent(matched, "modulePath", "path")));
+
+        return result;
+    }
+
+    private Map<String, Object> findNodeAsMap(
+            String targetNodeId,
+            List<ProjectModuleService.ModuleTreeNode> nodes
+    ) {
+        if (targetNodeId == null || targetNodeId.isBlank() || nodes == null) {
+            return null;
+        }
+
+        for (ProjectModuleService.ModuleTreeNode node : nodes) {
+            Map<String, Object> nodeMap = objectMapper.convertValue(
+                    node,
+                    new TypeReference<Map<String, Object>>() {
+                    }
+            );
+
+            String currentId = textValue(
+                    firstPresent(nodeMap, "id", "moduleId", "nodeId")
+            );
+
+            if (targetNodeId.equals(currentId)) {
+                return nodeMap;
+            }
+
+            Map<String, Object> matched = findNodeAsMap(
+                    targetNodeId,
+                    convertNodeChildren(firstPresent(nodeMap, "children"))
+            );
+
+            if (matched != null) {
+                return matched;
+            }
+        }
+
+        return null;
+    }
+
+    private List<ProjectModuleService.ModuleTreeNode> convertNodeChildren(
+            Object childrenValue
+    ) {
+        if (!(childrenValue instanceof List<?> children) || children.isEmpty()) {
+            return List.of();
+        }
+
+        List<ProjectModuleService.ModuleTreeNode> result = new ArrayList<>();
+
+        for (Object child : children) {
+            try {
+                result.add(
+                        objectMapper.convertValue(
+                                child,
+                                ProjectModuleService.ModuleTreeNode.class
+                        )
+                );
+            } catch (IllegalArgumentException ignored) {
+                // Ignore malformed child node in assistant context building.
+            }
+        }
+
+        return result;
+    }
+
+    private List<String> inferAffectedNodeIds(
+            Map<String, Object> selectedNode,
+            String instruction,
+            List<ProjectModuleService.ModuleTreeNode> moduleTree
+    ) {
+        List<String> result = new ArrayList<>();
+
+        String selectedNodeId = textValue(selectedNode.get("nodeId"));
+
+        if (!selectedNodeId.isBlank()) {
+            result.add(selectedNodeId);
+        }
+
+        String normalized = normalizeForIntent(instruction);
+
+        if (moduleTree != null) {
+            for (ProjectModuleService.ModuleTreeNode node : moduleTree) {
+                collectMentionedNodeIds(
+                        node,
+                        normalized,
+                        result
+                );
+            }
+        }
+
+        return deduplicate(result);
+    }
+
+    private void collectMentionedNodeIds(
+            ProjectModuleService.ModuleTreeNode node,
+            String normalizedInstruction,
+            List<String> result
+    ) {
+        if (node == null) {
+            return;
+        }
+
+        Map<String, Object> nodeMap = objectMapper.convertValue(
+                node,
+                new TypeReference<Map<String, Object>>() {
+                }
+        );
+
+        String nodeId = textValue(firstPresent(nodeMap, "id", "moduleId", "nodeId"));
+        String nodeName = normalizeForIntent(
+                textValue(firstPresent(nodeMap, "moduleName", "name", "title"))
+        );
+        String nodeKey = normalizeForIntent(
+                textValue(firstPresent(nodeMap, "moduleKey", "key"))
+        );
+
+        if (!nodeId.isBlank()
+                && (
+                (!nodeName.isBlank() && normalizedInstruction.contains(nodeName)) ||
+                        (!nodeKey.isBlank() && normalizedInstruction.contains(nodeKey))
+        )) {
+            result.add(nodeId);
+        }
+
+        for (ProjectModuleService.ModuleTreeNode child : convertNodeChildren(
+                firstPresent(nodeMap, "children")
+        )) {
+            collectMentionedNodeIds(
+                    child,
+                    normalizedInstruction,
+                    result
+            );
+        }
+    }
+
+    private List<String> inferAffectedArtifacts(
+            String instruction
+    ) {
+        String normalized = normalizeForIntent(instruction);
+        List<String> artifacts = new ArrayList<>();
+
+        if (containsAny(normalized, List.of("页面", "页", "按钮", "表单", "表格", "卡片", "字段", "交互", "原型", "ui"))) {
+            artifacts.add("PAGE_SPEC");
+            artifacts.add("UI_CONTRACT");
+            artifacts.add("TEST_SPEC");
+        }
+
+        if (containsAny(normalized, List.of("流程", "状态", "审批", "审核", "退款", "支付", "下单", "注册", "登录"))) {
+            artifacts.add("BUSINESS_FLOW");
+            artifacts.add("TEST_SPEC");
+        }
+
+        if (containsAny(normalized, List.of("数据", "字段", "表", "实体", "模型", "状态"))) {
+            artifacts.add("DATA_MODEL");
+        }
+
+        if (containsAny(normalized, List.of("接口", "api", "提交", "查询", "回调", "权限", "验证码"))) {
+            artifacts.add("API_CONTRACT");
+            artifacts.add("TEST_SPEC");
+        }
+
+        if (artifacts.isEmpty()) {
+            artifacts.add("MODULE_PRD");
+            artifacts.add("BUSINESS_FLOW");
+            artifacts.add("PAGE_SPEC");
+        } else {
+            artifacts.add(0, "MODULE_PRD");
+        }
+
+        artifacts.add("DEV_HANDOFF_PACKAGE");
+
+        return deduplicate(artifacts);
+    }
+
+    private List<String> inferRequirementChangeRiskNotes(
+            String instruction
+    ) {
+        String normalized = normalizeForIntent(instruction);
+        List<String> risks = new ArrayList<>();
+
+        risks.add("该草案尚未执行，当前不会修改模块树或覆盖任何需求资产。");
+
+        if (containsAny(normalized, List.of("删除", "去掉", "取消", "不要"))) {
+            risks.add("删除/取消类变更可能影响已有页面、接口、测试和开发交接包，需要确认是否保留历史资产版本。");
+        }
+
+        if (containsAny(normalized, List.of("权限", "角色", "审批", "审核"))) {
+            risks.add("权限/审批类变更通常会同时影响业务流程、接口契约和测试规格。");
+        }
+
+        if (containsAny(normalized, List.of("支付", "退款", "订单", "库存"))) {
+            risks.add("交易链路类变更需要重点确认数据一致性、异常流程和幂等接口。");
+        }
+
+        if (containsAny(normalized, List.of("页面", "表单", "字段", "按钮", "卡片", "表格"))) {
+            risks.add("页面交互类变更需要重新确认 UI_CONTRACT，并触发页面相关资产影响分析。");
+        }
+
+        return deduplicate(risks);
+    }
+
+    private List<String> buildRequirementChangeRecommendedSteps() {
+        return List.of(
+                "用户先在 Assistant 面板确认该变更草案的范围是否正确。",
+                "Phase 6 将把草案交给 ModuleTreePatchAgent，生成可执行模块树 Patch。",
+                "应用 Patch 后进入 Phase 8，分析受影响资产并选择性重生成。",
+                "重生成后的 UI_CONTRACT 和 Development Plan 需要重新确认，避免旧交接包继续被使用。"
+        );
+    }
+
+    private Map<String, Object> buildAttachmentSummaryForRequirementChange(
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        List<Map<String, Object>> items = new ArrayList<>();
+
+        for (AssistantAttachmentParsedContext context : attachmentContexts) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("attachmentId", context.getAttachmentId());
+            item.put("fileName", context.getFileName());
+            item.put("mimeType", context.getMimeType());
+            item.put("parseStatus", context.getParseStatus());
+            item.put("parsedTextExcerpt", context.getParsedTextExcerpt());
+            item.put("metadata", context.getMetadata());
+            items.add(item);
+        }
+
+        summary.put("count", items.size());
+        summary.put("items", items);
+
+        return summary;
+    }
+
+    private String buildRequirementChangeProposalReply(
+            Map<String, Object> proposal
+    ) {
+        return "我已把你的描述识别为“需求变更”，并生成了一份可审查的变更草案。"
+                + "你可以点击“确认执行”进入当前可用的执行链路；如果草案不符合预期，可以点击“放弃并继续说明”，然后直接在聊天里补充你的真实意图。"
+                + "\n\n变更摘要："
+                + firstNonBlank(textValue(proposal.get("summary")), "待确认变更范围。");
+    }
+
+    private String buildRequirementChangeSummary(
+            String instruction,
+            Map<String, Object> selectedNode
+    ) {
+        String nodeName = firstNonBlank(
+                textValue(selectedNode.get("nodeName")),
+                "当前项目"
+        );
+
+        return "围绕“" + nodeName + "”处理对话式需求变更：" + trimForSummary(
+                instruction,
+                160
+        );
+    }
+
+    private String inferRequirementChangeType(
+            String instruction
+    ) {
+        String normalized = normalizeForIntent(instruction);
+
+        if (containsAny(normalized, List.of("删除", "去掉", "取消", "不要"))) {
+            return "REMOVE";
+        }
+
+        if (containsAny(normalized, List.of("新增", "增加", "添加", "加一个", "加上", "补充"))) {
+            return "ADD";
+        }
+
+        if (containsAny(normalized, List.of("拆成", "拆分"))) {
+            return "SPLIT";
+        }
+
+        if (containsAny(normalized, List.of("合并"))) {
+            return "MERGE";
+        }
+
+        if (containsAny(normalized, List.of("改成", "改为", "修改", "调整", "替换"))) {
+            return "UPDATE";
+        }
+
+        return "CHANGE";
+    }
+
+    private String inferRequirementChangeScope(
+            String instruction
+    ) {
+        String normalized = normalizeForIntent(instruction);
+
+        if (containsAny(normalized, List.of("页面", "页", "按钮", "表单", "表格", "卡片", "字段", "交互", "原型"))) {
+            return "PAGE_OR_UI";
+        }
+
+        if (containsAny(normalized, List.of("流程", "状态", "审批", "审核", "退款", "支付", "下单"))) {
+            return "BUSINESS_FLOW";
+        }
+
+        if (containsAny(normalized, List.of("接口", "api", "提交", "查询", "回调"))) {
+            return "API";
+        }
+
+        if (containsAny(normalized, List.of("数据", "字段", "表", "实体", "模型"))) {
+            return "DATA_MODEL";
+        }
+
+        if (containsAny(normalized, List.of("模块", "子模块", "功能"))) {
+            return "MODULE_TREE";
+        }
+
+        return "GENERAL_REQUIREMENT";
+    }
+
+    private String inferRequirementChangeExecutionMode(
+            String instruction
+    ) {
+        String scope = inferRequirementChangeScope(instruction);
+
+        if ("MODULE_TREE".equals(scope)) {
+            return "TREE_PATCH_CONFIRMATION";
+        }
+
+        if ("PAGE_OR_UI".equals(scope)) {
+            return "ASSET_EDIT_AND_UI_REGENERATION";
+        }
+
+        if ("API".equals(scope) || "DATA_MODEL".equals(scope)) {
+            return "STRUCTURED_ASSET_EDIT_PROPOSAL";
+        }
+
+        if ("BUSINESS_FLOW".equals(scope)) {
+            return "ASSET_EDIT_WITH_IMPACT_ANALYSIS";
+        }
+
+        return "REQUIREMENT_CHANGE_REVIEW";
+    }
+
+    private String inferRequirementChangeExecutionAction(
+            String instruction
+    ) {
+        String scope = inferRequirementChangeScope(instruction);
+
+        if ("MODULE_TREE".equals(scope)) {
+            return "CONFIRM_TO_MODULE_TREE_PATCH";
+        }
+
+        if ("PAGE_OR_UI".equals(scope)) {
+            return "CONFIRM_TO_PAGE_SPEC_AND_UI_CONTRACT_CHANGE";
+        }
+
+        if ("API".equals(scope)) {
+            return "CONFIRM_TO_API_CONTRACT_CHANGE";
+        }
+
+        if ("DATA_MODEL".equals(scope)) {
+            return "CONFIRM_TO_DATA_MODEL_CHANGE";
+        }
+
+        if ("BUSINESS_FLOW".equals(scope)) {
+            return "CONFIRM_TO_BUSINESS_FLOW_CHANGE";
+        }
+
+        return "CONFIRM_TO_REQUIREMENT_CHANGE_REVIEW";
+    }
+
+    private List<String> inferRequirementChangeExecutionActions(
+            String instruction
+    ) {
+        String scope = inferRequirementChangeScope(instruction);
+
+        if ("MODULE_TREE".equals(scope)) {
+            return List.of(
+                    "生成可审查模块树 Patch",
+                    "用户确认后应用 Patch",
+                    "标记受影响资产"
+            );
+        }
+
+        if ("PAGE_OR_UI".equals(scope)) {
+            return List.of(
+                    "生成 PAGE_SPEC 资产编辑提案",
+                    "确认后创建 PAGE_SPEC 新版本",
+                    "重生成 UI_CONTRACT 并重新确认页面效果"
+            );
+        }
+
+        if ("API".equals(scope)) {
+            return List.of(
+                    "生成 API_CONTRACT 结构化编辑提案",
+                    "确认后创建 API_CONTRACT 新版本",
+                    "触发下游 TEST_SPEC / UI_CONTRACT 影响分析"
+            );
+        }
+
+        if ("DATA_MODEL".equals(scope)) {
+            return List.of(
+                    "生成 DATA_MODEL 结构化编辑提案",
+                    "确认后创建 DATA_MODEL 新版本",
+                    "触发 API_CONTRACT / TEST_SPEC / UI_CONTRACT 影响分析"
+            );
+        }
+
+        return List.of(
+                "确认变更范围",
+                "定位受影响资产",
+                "生成资产编辑提案或模块树 Patch"
+        );
+    }
+
+
+    private Object firstPresent(
+            Map<String, Object> map,
+            String... keys
+    ) {
+        if (map == null || map.isEmpty()) {
+            return null;
+        }
+
+        for (String key : keys) {
+            if (map.containsKey(key)) {
+                return map.get(key);
+            }
+        }
+
+        return null;
+    }
+
+    private boolean hasParsedAttachmentContext(
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        return hasAttachmentContext(attachmentContexts);
+    }
+
+    private String normalizeForIntent(
+            String value
+    ) {
+        if (value == null) {
+            return "";
+        }
+
+        return value
+                .trim()
+                .toLowerCase()
+                .replaceAll("\\s+", "");
+    }
+
+    private boolean containsAny(
+            String text,
+            List<String> keywords
+    ) {
+        if (text == null || text.isBlank() || keywords == null || keywords.isEmpty()) {
+            return false;
+        }
+
+        for (String keyword : keywords) {
+            if (keyword != null && !keyword.isBlank() && text.contains(keyword.toLowerCase())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private List<String> deduplicate(
+            List<String> values
+    ) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+
+        Set<String> seen = new LinkedHashSet<>();
+        List<String> result = new ArrayList<>();
+
+        for (String value : values) {
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+
+            if (seen.add(value)) {
+                result.add(value);
+            }
+        }
+
+        return result;
+    }
+
+    private String trimForSummary(
+            String value,
+            int maxLength
+    ) {
+        String text = value == null ? "" : value.trim();
+
+        if (text.length() <= maxLength) {
+            return text;
+        }
+
+        return text.substring(0, Math.max(0, maxLength - 1)) + "…";
     }
 
     private AssistantMessageResponse buildTreePatchProposalResponse(
@@ -796,15 +1970,81 @@ public class AssistantMessageService {
     ) {
         Map<String, Object> content = new LinkedHashMap<>();
 
+        Map<String, Object> requirementChangeProposal =
+                extractRequirementChangeProposalFromActions(response.getActions());
+
         content.put("reply", nullToEmpty(response.getReply()));
-        content.put("messageType", response.getProposal() == null ? "TEXT" : "TREE_PATCH_PROPOSAL");
+        content.put("messageType", resolveAssistantMessageType(response, requirementChangeProposal));
         content.put("intent", nullToEmpty(response.getIntent()));
         content.put("requiresUserConfirmation", response.isRequiresUserConfirmation());
         content.put("actions", response.getActions());
         content.put("proposal", response.getProposal() == null ? Map.of() : response.getProposal());
+        content.put("requirementChangeProposal", requirementChangeProposal);
         content.put("classification", classification);
 
         return content;
+    }
+
+
+    private String resolveAssistantMessageType(
+            AssistantMessageResponse response,
+            Map<String, Object> requirementChangeProposal
+    ) {
+        if (response != null && response.getProposal() != null) {
+            return "TREE_PATCH_PROPOSAL";
+        }
+
+        if (requirementChangeProposal != null && !requirementChangeProposal.isEmpty()) {
+            return MESSAGE_TYPE_REQUIREMENT_CHANGE_PROPOSAL;
+        }
+
+        return "TEXT";
+    }
+
+    private Map<String, Object> extractRequirementChangeProposalFromActions(
+            List<AssistantActionResponse> actions
+    ) {
+        if (actions == null || actions.isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+
+        List<Map<String, Object>> actionMaps = objectMapper.convertValue(
+                actions,
+                new TypeReference<List<Map<String, Object>>>() {
+                }
+        );
+
+        for (Map<String, Object> action : actionMaps) {
+            if (!ACTION_REQUIREMENT_CHANGE_PROPOSAL.equals(textValue(action.get("type")))) {
+                continue;
+            }
+
+            Map<String, Object> payload = asStringObjectMap(action.get("payload"));
+            Map<String, Object> proposal = asStringObjectMap(payload.get("proposal"));
+
+            return proposal.isEmpty() ? payload : proposal;
+        }
+
+        return new LinkedHashMap<>();
+    }
+
+    private Map<String, Object> asStringObjectMap(
+            Object value
+    ) {
+        if (!(value instanceof Map<?, ?> source)) {
+            return new LinkedHashMap<>();
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        for (Map.Entry<?, ?> entry : source.entrySet()) {
+            result.put(
+                    String.valueOf(entry.getKey()),
+                    entry.getValue()
+            );
+        }
+
+        return result;
     }
 
     private AssistantConversationMessageResponse toConversationMessage(
@@ -1127,6 +2367,17 @@ public class AssistantMessageService {
         }
 
         return fallback;
+    }
+
+
+    private String textValue(
+            Object value
+    ) {
+        if (value == null) {
+            return "";
+        }
+
+        return String.valueOf(value).trim();
     }
 
     private String stringValue(

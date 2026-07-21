@@ -1,4 +1,3 @@
-
 <template>
   <main class="workspace-panel">
     <section class="workspace-card">
@@ -227,18 +226,24 @@
           v-else-if="selectedArtifactType === 'MODULE_PRD' && (prdArtifact?.content || modulePrdMarkdown)"
           :artifact="prdArtifact"
           :markdown="modulePrdMarkdown"
+          :manual-edit-saving="manualEditSaving"
+          @save-manual-edit="$emit('save-manual-artifact-edit', $event)"
         />
 
         <BusinessFlowView
           v-else-if="selectedArtifactType === 'BUSINESS_FLOW' && (businessFlowArtifact?.content || businessFlowMarkdown)"
           :artifact="businessFlowArtifact"
           :markdown="businessFlowMarkdown"
+          :manual-edit-saving="manualEditSaving"
+          @save-manual-edit="$emit('save-manual-artifact-edit', $event)"
         />
 
         <PageSpecView
           v-else-if="selectedArtifactType === 'PAGE_SPEC' && (pageSpecArtifact?.content || pageSpecMarkdown)"
           :artifact="pageSpecArtifact"
           :markdown="pageSpecMarkdown"
+          :manual-edit-saving="manualEditSaving"
+          @save-manual-edit="$emit('save-manual-artifact-edit', $event)"
         />
 
         <DataModelView
@@ -257,6 +262,8 @@
           v-else-if="selectedArtifactType === 'TEST_SPEC' && (testSpecArtifact?.content || testSpecMarkdown)"
           :artifact="testSpecArtifact"
           :markdown="testSpecMarkdown"
+          :manual-edit-saving="manualEditSaving"
+          @save-manual-edit="$emit('save-manual-artifact-edit', $event)"
         />
 
         <div
@@ -322,6 +329,7 @@ import type {
   ModuleArtifactTaskItem,
   ModuleTreeNode,
   UiContractGenerationReadinessResponse,
+  ManualArtifactEditPayload,
 } from '../types/codemind'
 import { getModuleDisplayName, getModuleStableKey } from '../api'
 import ApiContractView from './ApiContractView.vue'
@@ -359,6 +367,7 @@ const props = defineProps<{
     level: 'info' | 'success' | 'error'
     message: string
   } | null
+  manualEditSaving?: boolean
 
   isGeneratingPrd: boolean
   isGeneratingBusinessFlow: boolean
@@ -417,6 +426,7 @@ const emit = defineEmits<{
   'generate-ui-contract': []
   'refresh-ui-contract-readiness': []
   'preview-ui-contract': []
+  'save-manual-artifact-edit': [payload: ManualArtifactEditPayload]
 }>()
 
 const selectedModulePanelExpanded = ref(false)
@@ -545,7 +555,10 @@ function buildAssetStatusItems(
     const isTaskRunning = ['QUEUED', 'RUNNING', 'RETRYING'].includes(
       taskStatus || '',
     )
-    const isNeedsReview = taskItem?.artifactStatus === 'NEEDS_REVIEW'
+    const artifactStatus = artifact?.status || taskItem?.artifactStatus || null
+    const isPendingReview = artifactStatus === 'PENDING_REVIEW'
+    const isNeedsReview = artifactStatus === 'NEEDS_REVIEW'
+    const isApproved = artifactStatus === 'APPROVED'
     const exists = Boolean(
       artifact?.content ||
       artifact?.contentMarkdown ||
@@ -565,20 +578,28 @@ function buildAssetStatusItems(
         ? 'blocked'
         : isTaskRunning
           ? 'running'
-          : isNeedsReview
+          : isPendingReview
             ? 'review'
-            : exists
-              ? 'generated'
-              : 'missing',
+            : isNeedsReview
+              ? 'affected'
+              : isApproved
+                ? 'generated'
+                : exists
+                  ? 'generated'
+                  : 'missing',
       statusText: isTaskBlocked
         ? '等待依赖'
         : isTaskRunning
           ? '生成中'
-          : isNeedsReview
-            ? '需复核'
-            : exists
-              ? '已生成'
-              : '未生成',
+          : isPendingReview
+            ? '新版本待确认'
+            : isNeedsReview
+              ? '受上游影响'
+              : isApproved
+                ? '已确认'
+                : exists
+                  ? '已生成'
+                  : '未生成',
     }
   })
 }
@@ -1038,6 +1059,10 @@ function handleOpenImpactAnalysis() {
   background: #f59e0b;
 }
 
+.asset-status-dot.affected {
+  background: #f97316;
+}
+
 .asset-status-dot.running {
   background: #2563eb;
 }
@@ -1177,3 +1202,7 @@ function handleOpenImpactAnalysis() {
   color: #334155;
 }
 </style>
+
+
+
+

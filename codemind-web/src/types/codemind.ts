@@ -1,3 +1,4 @@
+
 export interface ModuleTreeNode {
   id?: string
   parentId?: string | null
@@ -81,9 +82,101 @@ export interface ModuleTreePatchProposalResponse {
   requiresUserConfirmation: boolean
 }
 
+export interface RequirementChangeTargetNode {
+  nodeId?: string | null
+  nodeName?: string | null
+  nodeType?: string | null
+  moduleKey?: string | null
+  modulePath?: string | null
+}
+
+export interface RequirementChangeAttachmentSummary {
+  count: number
+  items: Array<Record<string, unknown>>
+}
+
+export interface RequirementChangeProposal {
+  proposalId?: string | null
+  source?: string | null
+  status?: string | null
+  phase?: string | null
+  originalInstruction?: string | null
+  summary?: string | null
+  changeType?: string | null
+  scopeType?: string | null
+  targetNode?: RequirementChangeTargetNode | null
+  affectedNodeIds?: string[]
+  affectedArtifacts?: string[]
+  riskNotes?: string[]
+  recommendedSteps?: string[]
+  requiresUserConfirmation?: boolean
+  executionPolicy?: string | null
+  executionMode?: string | null
+  executionAction?: string | null
+  executionActions?: string[]
+  nextPhase?: string | null
+  attachmentSummary?: RequirementChangeAttachmentSummary | null
+  [key: string]: unknown
+}
+
+
+export interface AssetEditTargetArtifact {
+  artifactId?: string | null
+  artifactType: string
+  artifactTitle?: string | null
+  versionNo?: number | null
+  status?: string | null
+}
+
+export interface AssetEditProposal {
+  proposalId?: string | null
+  source?: string | null
+  status?: string | null
+  originalInstruction?: string | null
+  summary?: string | null
+  editMode?: string | null
+  editPolicy?: string | null
+  targetNode?: RequirementChangeTargetNode | null
+  targetArtifact?: AssetEditTargetArtifact | null
+  targetArtifactType?: string | null
+  targetArtifactId?: string | null
+  currentVersionNo?: number | null
+  currentTitle?: string | null
+  beforeExcerpt?: string | null
+  proposedContentMarkdown?: string | null
+  proposedPatchSummary?: string[]
+  affectedArtifacts?: string[]
+  downstreamArtifacts?: string[]
+  riskNotes?: string[]
+  recommendedSteps?: string[]
+  requiresUserConfirmation?: boolean
+  createdAt?: string | null
+  sourceRequirementChangeProposal?: RequirementChangeProposal | null
+  [key: string]: unknown
+}
+
+export interface ConfirmAssistantAssetEditProposalResponse {
+  artifactId: string
+  projectId?: string | null
+  moduleId?: string | null
+  artifactType: string
+  versionNo: number
+  title?: string | null
+  status?: string | null
+  previousArtifactId?: string | null
+  previousVersionNo?: number | null
+  affectedArtifacts: string[]
+  downstreamMarkedReviewCount: number
+  message: string
+}
+
 export type AssistantIntent =
   | 'GENERATE_MODULE_TREE'
   | 'PROPOSE_MODULE_TREE_PATCH'
+  | 'PROPOSE_REQUIREMENT_CHANGE'
+  | 'PROPOSE_ASSET_EDIT'
+  | 'CONFIRM_ASSET_EDIT'
+  | 'EXECUTE_UI_COMMAND'
   | 'GENERATE_REQUIREMENT_ARTIFACT'
   | 'EXPLAIN_CURRENT_ARTIFACT'
   | 'ANALYZE_ATTACHMENT'
@@ -137,6 +230,8 @@ export interface AssistantMessageResponse {
   reply: string
   requiresUserConfirmation: boolean
   proposal?: ModuleTreePatchProposalResponse | null
+  requirementChangeProposal?: RequirementChangeProposal | null
+  assetEditProposal?: AssetEditProposal | null
   actions: AssistantActionResponse[]
 }
 
@@ -146,10 +241,12 @@ export interface AssistantConversationMessageResponse {
   intent?: AssistantIntent | null
   selectedNodeId?: string | null
   selectedArtifactType?: string | null
-  type?: 'TEXT' | 'TREE_PATCH_PROPOSAL' | 'TASK_NOTIFICATION' | string
+  type?: 'TEXT' | 'TREE_PATCH_PROPOSAL' | 'REQUIREMENT_CHANGE_PROPOSAL' | 'ASSET_EDIT_PROPOSAL' | 'TASK_NOTIFICATION' | string
   text?: string | null
   attachments?: AssistantAttachmentRef[]
   proposal?: ModuleTreePatchProposalResponse | null
+  requirementChangeProposal?: RequirementChangeProposal | null
+  assetEditProposal?: AssetEditProposal | null
   content?: Record<string, unknown>
   createdAt?: string | null
 }
@@ -283,6 +380,40 @@ export interface ArtifactVersionDetailResponse extends PromptTemplateMetadata{
   createdBy?: string | null
   createdAt?: string | null
   updatedAt?: string | null
+}
+
+
+export interface ManualArtifactEditPayload {
+  artifactId?: string | null
+  artifactType: string
+  contentMarkdown: string
+  reason?: string | null
+}
+
+export interface ManualArtifactEditRequest {
+  artifactId?: string | null
+  artifactType: string
+  contentMarkdown: string
+  reason?: string | null
+}
+
+export interface ManualArtifactEditResponse extends PromptTemplateMetadata {
+  artifactId: string
+  projectId?: string | null
+  moduleId?: string | null
+  artifactType: string
+  versionNo: number
+  title?: string | null
+  status?: string | null
+  current?: boolean | null
+  content?: Record<string, unknown> | null
+  contentMarkdown?: string | null
+  createdBy?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+  downstreamArtifactTypes?: string[]
+  downstreamMarkedCount?: number
+  message?: string | null
 }
 
 export interface ArtifactVersionListResponse {
@@ -753,3 +884,4 @@ export interface ArtifactQualityCheckRecordResponse {
   checkedBy?: string | null
   checkedAt: string
 }
+

@@ -1,3 +1,4 @@
+
 <template>
   <section class="module-prd-view">
     <div class="prd-view-toolbar">
@@ -34,7 +35,14 @@
       </div>
     </div>
 
-    <div v-if="activeView === 'cards'" class="prd-card-view">
+    <ManualDocumentCardView
+      v-if="activeView === 'cards' && isManualDocumentEdited"
+      title="页面规范"
+      :artifact="artifact"
+      :markdown="markdown"
+    />
+
+    <div v-else-if="activeView === 'cards'" class="prd-card-view">
       <section class="prd-summary-grid">
         <div class="summary-card">
           <span class="summary-label">页面名称</span>
@@ -306,32 +314,40 @@
       </section>
     </div>
 
-    <article
+    <ArtifactDocumentEditor
       v-else
-      class="prd-document"
-      v-html="renderedMarkdown"
+      title="页面规范"
+      artifact-type="PAGE_SPEC"
+      :artifact="artifact"
+      :markdown="markdown"
+      :editable="true"
+      :saving="manualEditSaving"
+      @save="$emit('save-manual-edit', $event)"
     />
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import MarkdownIt from 'markdown-it'
-import DOMPurify from 'dompurify'
-import type { ArtifactResponse } from '../types/codemind'
+import ArtifactDocumentEditor from './ArtifactDocumentEditor.vue'
+import ManualDocumentCardView from './ManualDocumentCardView.vue'
+import type {
+  ArtifactResponse,
+  ManualArtifactEditPayload,
+} from '../types/codemind'
 
 const props = defineProps<{
   artifact: ArtifactResponse | null
   markdown: string
+  manualEditSaving?: boolean
+}>()
+
+defineEmits<{
+  'save-manual-edit': [payload: ManualArtifactEditPayload]
 }>()
 
 const activeView = ref<'cards' | 'markdown'>('cards')
 
-const markdownRenderer = new MarkdownIt({
-  html: false,
-  linkify: true,
-  breaks: true,
-})
 
 const spec = computed<any>(() => props.artifact?.content || {})
 const basicInfo = computed<any>(() => spec.value.basic_info || {})
@@ -347,9 +363,15 @@ const permissionSpecs = computed<any[]>(() => asArray(spec.value.permission_spec
 const exceptionSpecs = computed<any[]>(() => asArray(spec.value.exception_specs))
 const acceptanceCriteria = computed<any[]>(() => asArray(spec.value.acceptance_criteria))
 
-const renderedMarkdown = computed(() => {
-  const rawHtml = markdownRenderer.render(props.markdown || '')
-  return DOMPurify.sanitize(rawHtml)
+
+const isManualDocumentEdited = computed(() => {
+  const content = props.artifact?.content
+
+  if (!content || typeof content !== 'object') {
+    return false
+  }
+
+  return Boolean((content as Record<string, unknown>)['_manual_document_edit'])
 })
 
 function asArray(value: unknown): any[] {

@@ -1,8 +1,11 @@
+
 import type {
   ArtifactQualityCheckRecordResponse,
   ArtifactResponse,
   ArtifactVersionDetailResponse,
   ArtifactVersionListResponse,
+  ManualArtifactEditRequest,
+  ManualArtifactEditResponse,
 } from '../types/codemind'
 import { authBlobFetch, authFetch } from './httpClient'
 
@@ -213,6 +216,32 @@ export async function fetchLatestModuleArtifactQualityCheck(
       `/artifacts/quality-checks/latest`,
   )
 }
+
+
+export async function saveManualArtifactEdit(
+  workspaceId: string,
+  projectCode: string,
+  moduleId: string,
+  payload: ManualArtifactEditRequest,
+): Promise<ManualArtifactEditResponse> {
+  return authFetch<ManualArtifactEditResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}` +
+      `/projects/${encodeURIComponent(projectCode)}` +
+      `/modules/${encodeURIComponent(moduleId)}` +
+      `/artifacts/manual-edits`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        artifactId: payload.artifactId || null,
+        artifactType: payload.artifactType,
+        contentMarkdown: payload.contentMarkdown,
+        reason: payload.reason || '',
+      }),
+    },
+  )
+}
+
 
 export function buildModuleArtifactExportZipUrl(
   workspaceId: string,

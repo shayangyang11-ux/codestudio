@@ -1,334 +1,534 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Literal, TypedDict
+
+from pydantic import BaseModel, Field
+
+try:
+    from langgraph.graph import END, StateGraph
+except Exception:  # pragma: no cover - import fallback for static checking only
+    END = "__end__"
+    StateGraph = None  # type: ignore[assignment]
 
 from app.schemas.agent_protocol import AgentTaskRequest
-from app.schemas.artifact_review import (
-    ASSISTANT_ARTIFACT_REVIEW_JSON_SCHEMA,
-    AssistantArtifactReviewArtifact,
-    ArtifactConsistencyCheck,
-    ArtifactReviewIssue,
-    ArtifactReviewSuggestion,
-)
 from app.services.llm_service import LlmService
 
 
+ASSET_CHANGE_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "targetArtifactType": {"type": "string"},
+        "proposedContentMarkdown": {"type": "string"},
+        "proposedPatchOperations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "op": {"type": "string"},
+                    "sectionTitle": {"type": "string"},
+                    "findText": {"type": "string"},
+                    "replaceWith": {"type": "string"},
+                    "insertAfter": {"type": "string"},
+                    "insertBefore": {"type": "string"},
+                    "rationale": {"type": "string"},
+                    "confidence": {"type": "number"}
+                },
+                "required": ["op", "sectionTitle", "rationale"],
+                "additionalProperties": True,
+            },
+        },
+        "proposedPatchSummary": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "changedSections": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "sectionTitle": {"type": "string"},
+                    "changeType": {"type": "string"},
+                    "beforeSummary": {"type": "string"},
+                    "afterSummary": {"type": "string"},
+                },
+                "required": ["sectionTitle", "changeType", "beforeSummary", "afterSummary"],
+                "additionalProperties": True,
+            },
+        },
+        "downstreamArtifacts": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "riskNotes": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "reviewChecklist": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "confidence": {"type": "number"},
+    },
+    "required": [
+        "summary",
+        "targetArtifactType",
+        "proposedPatchOperations",
+        "proposedPatchSummary",
+        "changedSections",
+        "downstreamArtifacts",
+        "riskNotes",
+        "reviewChecklist",
+        "confidence",
+    ],
+    "additionalProperties": True,
+}
+
+
+class AssistantArtifactReviewArtifact(BaseModel):
+    artifact_type: str = "ASSISTANT_ARTIFACT_REVIEW"
+    summary: str = ""
+    riskLevel: str = "MEDIUM"
+    conclusion: str = ""
+    issues: list[dict[str, Any]] = Field(default_factory=list)
+    consistencyChecks: list[dict[str, Any]] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
+    nextActions: list[str] = Field(default_factory=list)
+
+    targetArtifactType: str | None = None
+    proposedContentMarkdown: str | None = None
+    proposedPatchOperations: list[dict[str, Any]] = Field(default_factory=list)
+    proposedPatchSummary: list[str] = Field(default_factory=list)
+    changedSections: list[dict[str, Any]] = Field(default_factory=list)
+    downstreamArtifacts: list[str] = Field(default_factory=list)
+    riskNotes: list[str] = Field(default_factory=list)
+    reviewChecklist: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+    markdown: str | None = None
+
+
+class ArtifactChangeState(TypedDict, total=False):
+    request: AgentTaskRequest
+    review_input: dict[str, Any]
+    instruction: str
+    target_artifact_type: str
+    current_markdown: str
+    current_content: dict[str, Any]
+    system_prompt: str
+    user_prompt: str
+    llm_result: dict[str, Any]
+    error: str
+    artifact: AssistantArtifactReviewArtifact
+
+
 class AssistantArtifactReviewAgent:
+    """
+    LangGraph-based generic asset change agent.
+
+    It is used by the Java AssistantAssetEditProposalService to turn a natural
+    language requirement change into patch-first local edits.
+    The model should return small patch operations and metadata. Java applies
+    those operations to the current full artifact markdown, then stores a full
+    artifact_version snapshot for traceability.
+    """
+
     def __init__(self) -> None:
-        self.llm_service = LlmService()
+        self.llm = LlmService()
+        self.graph = self._build_graph()
 
-    async def run(
-        self,
-        request: AgentTaskRequest,
-    ) -> AssistantArtifactReviewArtifact:
-        review_input = self._extract_review_input(request)
-        target_artifact = review_input.get("targetArtifact") or {}
-
-        if not target_artifact:
-            return self._fallback_no_artifact()
-
-        system_prompt = self._build_system_prompt()
-        user_prompt = self._build_user_prompt(review_input)
-
-        try:
-            llm_result = await self.llm_service.generate_structured_json(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                output_schema_name="assistant_artifact_review",
-                output_json_schema=ASSISTANT_ARTIFACT_REVIEW_JSON_SCHEMA,
-            )
-            data = json.loads(self._strip_code_fence(llm_result.text))
-            artifact = AssistantArtifactReviewArtifact.model_validate(
-                {
-                    **data,
-                    "artifact_type": "ASSISTANT_ARTIFACT_REVIEW",
-                }
-            )
-            artifact.markdown = self._build_markdown(artifact)
-            return artifact
-        except Exception as exc:
-            return self._heuristic_review(
-                review_input=review_input,
-                reason=f"LLM 资产审查失败，已使用 Python 规则兜底：{exc}",
-            )
-
-    def _build_system_prompt(self) -> str:
-        return "\n".join(
-            [
-                "你是 CodeMind Studio 的企业级需求资产审查 Agent。",
-                "你的任务是审查一个当前节点上的需求工程资产，并结合相关上下游资产、附件解析内容和节点上下文给出可执行结论。",
-                "不要编造上下文中不存在的业务事实；如果依据不足，要明确说明依据不足。",
-                "不要输出 Markdown，只输出严格符合 JSON Schema 的 JSON 对象。",
-                "审查重点：",
-                "1. 完整性：目标、范围、角色、规则、字段、接口、异常、验收是否缺失。",
-                "2. 可执行性：开发 Agent 是否能据此实现，测试 Agent 是否能据此写测试。",
-                "3. 一致性：与需求、页面规范、接口契约、测试规格、附件材料是否冲突或遗漏。",
-                "4. 层级职责：DOMAIN/MODULE/SUBMODULE/PAGE/FEATURE 资产是否写越界或写得过泛。",
-                "5. 风险：把真正会阻塞后续开发/测试/交付的问题标为 BLOCKER，不要滥用阻塞级别。",
-                "输出的 issues、consistencyChecks、suggestions 必须短而具体，能直接指导下一步修改。",
-            ]
-        )
-
-    def _build_user_prompt(
-        self,
-        review_input: dict[str, Any],
-    ) -> str:
-        compact_input = {
-            "instruction": review_input.get("instruction"),
-            "currentNode": review_input.get("currentNode"),
-            "targetArtifact": self._compact_artifact(review_input.get("targetArtifact") or {}, 18000),
-            "relatedArtifacts": [
-                self._compact_artifact(item, 6000)
-                for item in (review_input.get("relatedArtifacts") or [])[:8]
-                if isinstance(item, dict)
-            ],
-            "attachmentContexts": self._compact_attachment_contexts(
-                review_input.get("attachmentContexts") or []
-            ),
-            "reviewPolicy": review_input.get("reviewPolicy") or {},
+    async def run(self, request: AgentTaskRequest) -> AssistantArtifactReviewArtifact:
+        initial_state: ArtifactChangeState = {
+            "request": request,
         }
 
-        return "\n".join(
+        if self.graph is None:
+            state = await self._fallback(initial_state)
+        else:
+            state = await self.graph.ainvoke(initial_state)
+
+        artifact = state.get("artifact")
+        if isinstance(artifact, AssistantArtifactReviewArtifact):
+            return artifact
+
+        return self._build_safe_fallback_artifact(
+            request=request,
+            reason="LangGraph workflow did not return an artifact.",
+        )
+
+    def _build_graph(self):
+        if StateGraph is None:
+            return None
+
+        workflow = StateGraph(ArtifactChangeState)
+        workflow.add_node("prepare_context", self._prepare_context)
+        workflow.add_node("build_prompt", self._build_prompt)
+        workflow.add_node("llm_generate", self._llm_generate)
+        workflow.add_node("schema_validate", self._schema_validate)
+        workflow.add_node("fallback", self._fallback)
+
+        workflow.set_entry_point("prepare_context")
+        workflow.add_edge("prepare_context", "build_prompt")
+        workflow.add_edge("build_prompt", "llm_generate")
+        workflow.add_conditional_edges(
+            "llm_generate",
+            self._route_after_llm,
+            {
+                "schema_validate": "schema_validate",
+                "fallback": "fallback",
+            },
+        )
+        workflow.add_edge("schema_validate", END)
+        workflow.add_edge("fallback", END)
+        return workflow.compile()
+
+    async def _prepare_context(self, state: ArtifactChangeState) -> ArtifactChangeState:
+        request = state["request"]
+        review_input = self._as_dict(
+            (request.context_package or {}).get("review_input")
+            or request.input
+            or {}
+        )
+
+        instruction = str(
+            review_input.get("instruction")
+            or request.requirement_text
+            or "请根据用户变更要求修订当前资产。"
+        ).strip()
+
+        target_artifact_type = str(
+            review_input.get("targetArtifactType")
+            or review_input.get("selected_artifact_type")
+            or request.input.get("selected_artifact_type")
+            or "MODULE_PRD"
+        ).strip().upper()
+
+        current_markdown = str(
+            review_input.get("currentMarkdown")
+            or review_input.get("contentMarkdown")
+            or ""
+        ).strip()
+
+        current_content = self._as_dict(review_input.get("currentContent"))
+
+        state.update(
+            {
+                "review_input": review_input,
+                "instruction": instruction,
+                "target_artifact_type": target_artifact_type,
+                "current_markdown": current_markdown,
+                "current_content": current_content,
+            }
+        )
+        return state
+
+    async def _build_prompt(self, state: ArtifactChangeState) -> ArtifactChangeState:
+        review_input = state.get("review_input", {})
+        current_markdown = self._trim(state.get("current_markdown", ""), 18000)
+        current_content = self._trim_json(state.get("current_content", {}), 6000)
+        requirement_change = self._trim_json(
+            review_input.get("requirementChangeProposal") or {},
+            5000,
+        )
+        target_node = self._trim_json(review_input.get("targetNode") or {}, 2000)
+        current_artifact = self._trim_json(review_input.get("currentArtifact") or {}, 2000)
+        related_artifacts = self._trim_json(review_input.get("relatedArtifacts") or [], 12000)
+
+        system_prompt = "\n".join(
             [
-                "请审查下面的需求资产，并只输出 JSON。",
-                json.dumps(compact_input, ensure_ascii=False, default=str),
+                "你是 CodeMind Studio 的 LangGraph 资产变更 Agent。",
+                "当前使用 Patch-first 局部修订模式。你的首要任务不是重写整份资产，而是输出可由 Java 后端应用的局部 patch operations。",
+                "每个 patch operation 应尽量包含 findText 和 replaceWith，findText 必须来自当前资产 Markdown 上下文中的原文片段。",
+                "只有当无法稳定表达为局部 patch 时，才允许附带 proposedContentMarkdown 作为兜底全文草案。",
+                "保持原文结构、标题层级和工程语气，尽量只修改必要段落。",
+                "如果 relatedArtifacts 中提供了上游资产，请只同步上游变化影响到当前资产的相关段落。",
+                "不要编造不存在的业务事实；不确定时在风险提示和确认清单中说明。",
+                "输出必须是 JSON 对象，不要输出 Markdown 代码块。",
             ]
         )
 
-    def _extract_review_input(
-        self,
-        request: AgentTaskRequest,
-    ) -> dict[str, Any]:
-        input_payload = request.input or {}
-        context_package = request.context_package or {}
+        user_prompt = "\n\n".join(
+            [
+                f"目标资产类型：{state.get('target_artifact_type', '')}",
+                f"用户修改指令：\n{state.get('instruction', '')}",
+                f"当前节点上下文：\n{target_node}",
+                f"当前资产信息：\n{current_artifact}",
+                f"上游/相关资产上下文：\n{related_artifacts}",
+                f"需求变更草案：\n{requirement_change}",
+                f"当前资产结构化内容 JSON 摘要：\n{current_content}",
+                f"当前资产 Markdown 局部上下文：\n{current_markdown}",
+                "请输出：summary、targetArtifactType、proposedPatchOperations、proposedPatchSummary、changedSections、downstreamArtifacts、riskNotes、reviewChecklist、confidence。",
+                "proposedPatchOperations 是必填数组；优先使用 replace 操作，字段示例：{op, sectionTitle, findText, replaceWith, rationale, confidence}。",
+                "不要输出整份资产全文；只有 patch 无法表达时才附带 proposedContentMarkdown 兜底。",
+            ]
+        )
 
-        if isinstance(context_package.get("review_input"), dict):
-            merged = dict(context_package["review_input"])
-            merged.update(input_payload)
-            return merged
+        state["system_prompt"] = system_prompt
+        state["user_prompt"] = user_prompt
+        return state
 
-        return input_payload
-
-    def _compact_artifact(
-        self,
-        artifact: dict[str, Any],
-        max_chars: int,
-    ) -> dict[str, Any]:
-        result = dict(artifact)
-        markdown = str(result.get("contentMarkdown") or "")
-        if len(markdown) > max_chars:
-            result["contentMarkdown"] = markdown[:max_chars] + "\n...【内容已截断】"
-        return result
-
-    def _compact_attachment_contexts(
-        self,
-        contexts: Any,
-    ) -> list[dict[str, Any]]:
-        if not isinstance(contexts, list):
-            return []
-
-        result: list[dict[str, Any]] = []
-        for item in contexts[:5]:
-            if not isinstance(item, dict):
-                continue
-            excerpt = str(item.get("parsedTextExcerpt") or "")
-            result.append(
-                {
-                    "attachmentId": item.get("attachmentId"),
-                    "fileName": item.get("fileName"),
-                    "mimeType": item.get("mimeType"),
-                    "parseStatus": item.get("parseStatus"),
-                    "parsedTextExcerpt": excerpt[:6000],
-                    "metadata": item.get("metadata") or {},
-                }
+    async def _llm_generate(self, state: ArtifactChangeState) -> ArtifactChangeState:
+        try:
+            result = await self.llm.generate_structured_json(
+                system_prompt=state.get("system_prompt", ""),
+                user_prompt=state.get("user_prompt", ""),
+                output_schema_name="asset_change_proposal_output",
+                output_json_schema=ASSET_CHANGE_OUTPUT_SCHEMA,
+                validate_json=True,
             )
-        return result
+            state["llm_result"] = json.loads(result.text)
+        except Exception as exc:
+            state["error"] = str(exc)
+        return state
 
-    def _heuristic_review(
+    def _route_after_llm(self, state: ArtifactChangeState) -> Literal["schema_validate", "fallback"]:
+        value = state.get("llm_result")
+        if isinstance(value, dict) and (value.get("proposedPatchOperations") or value.get("proposedContentMarkdown")):
+            return "schema_validate"
+        return "fallback"
+
+    async def _schema_validate(self, state: ArtifactChangeState) -> ArtifactChangeState:
+        result = self._as_dict(state.get("llm_result"))
+        proposed_markdown = str(result.get("proposedContentMarkdown") or "").strip()
+        patch_operations = self._object_list(result.get("proposedPatchOperations"))
+
+        if not patch_operations and not proposed_markdown:
+            return await self._fallback(state)
+
+        patch_summary = self._string_list(result.get("proposedPatchSummary"))
+        if not patch_summary:
+            patch_summary = ["根据用户指令输出 Patch-first 局部修订操作。"]
+
+        risk_notes = self._string_list(result.get("riskNotes"))
+        review_checklist = self._string_list(result.get("reviewChecklist"))
+        downstream = self._normalize_artifact_list(result.get("downstreamArtifacts"))
+        changed_sections = self._object_list(result.get("changedSections"))
+
+        confidence = self._float_value(result.get("confidence"), 0.7)
+        target_artifact_type = str(
+            result.get("targetArtifactType") or state.get("target_artifact_type") or "MODULE_PRD"
+        ).upper()
+
+        summary = str(result.get("summary") or "已生成资产局部修订草案。")
+
+        markdown = self._build_markdown_summary(
+            summary=summary,
+            target_artifact_type=target_artifact_type,
+            patch_summary=patch_summary,
+            risk_notes=risk_notes,
+            review_checklist=review_checklist,
+        )
+
+        state["artifact"] = AssistantArtifactReviewArtifact(
+            summary=summary,
+            riskLevel="MEDIUM" if risk_notes else "LOW",
+            conclusion="已基于 LangGraph 资产变更 Agent 生成 Patch-first 局部修订操作。",
+            issues=[],
+            consistencyChecks=changed_sections,
+            suggestions=patch_summary,
+            nextActions=review_checklist,
+            targetArtifactType=target_artifact_type,
+            proposedContentMarkdown=proposed_markdown or None,
+            proposedPatchOperations=patch_operations,
+            proposedPatchSummary=patch_summary,
+            changedSections=changed_sections,
+            downstreamArtifacts=downstream,
+            riskNotes=risk_notes,
+            reviewChecklist=review_checklist,
+            confidence=confidence,
+            markdown=markdown,
+        )
+        return state
+
+    async def _fallback(self, state: ArtifactChangeState) -> ArtifactChangeState:
+        request = state.get("request")
+        if request is None:
+            raise RuntimeError("Missing AgentTaskRequest")
+
+        state["artifact"] = self._build_safe_fallback_artifact(
+            request=request,
+            review_input=state.get("review_input") or {},
+            reason=state.get("error") or "LLM did not return usable proposedPatchOperations.",
+        )
+        return state
+
+    def _build_safe_fallback_artifact(
         self,
         *,
-        review_input: dict[str, Any],
+        request: AgentTaskRequest,
+        review_input: dict[str, Any] | None = None,
         reason: str,
     ) -> AssistantArtifactReviewArtifact:
-        target = review_input.get("targetArtifact") or {}
-        artifact_type = str(target.get("artifactType") or "UNKNOWN")
-        markdown = str(target.get("contentMarkdown") or "")
-        related = review_input.get("relatedArtifacts") or []
-        attachments = review_input.get("attachmentContexts") or []
-
-        issues: list[ArtifactReviewIssue] = []
-        checks: list[ArtifactConsistencyCheck] = []
-        suggestions: list[ArtifactReviewSuggestion] = []
-
-        if len(markdown.strip()) < 120:
-            issues.append(
-                ArtifactReviewIssue(
-                    code="CONTENT_TOO_THIN",
-                    severity="BLOCKER",
-                    title="资产内容不足",
-                    description="当前资产正文为空或过短，无法支撑正式开发、测试或评审。",
-                    suggestion="重新生成该资产，并确保包含目标、规则、异常、字段/接口/测试点和验收标准。",
-                    artifactType=artifact_type,
-                )
-            )
-
-        if artifact_type in {"API_CONTRACT", "TEST_SPEC"} and not self._has_related(related, "MODULE_PRD"):
-            issues.append(
-                ArtifactReviewIssue(
-                    code="MISSING_REQUIREMENT_CONTEXT",
-                    severity="WARNING",
-                    title="缺少需求说明上下文",
-                    description="当前审查的接口或测试资产缺少需求说明作为直接依据。",
-                    suggestion="先补齐或确认当前节点需求说明，再复核接口/测试是否覆盖业务规则。",
-                    artifactType="MODULE_PRD",
-                )
-            )
-
-        if artifact_type == "UI_CONTRACT" and not self._has_related(related, "PAGE_SPEC"):
-            issues.append(
-                ArtifactReviewIssue(
-                    code="MISSING_PAGE_SPEC_CONTEXT",
-                    severity="WARNING",
-                    title="交互原型缺少页面规范依据",
-                    description="未发现页面规范，UI 契约可能缺少字段、布局、状态和交互来源。",
-                    suggestion="先生成页面规范，再生成或审查 UI_CONTRACT。",
-                    artifactType="PAGE_SPEC",
-                )
-            )
-
-        if attachments:
-            checks.append(
-                ArtifactConsistencyCheck(
-                    dimension="附件对照",
-                    level="WARNING",
-                    result="本次请求包含附件，需要人工或 LLM 逐项核对附件要求是否全部进入资产。",
-                    evidence="检测到 attachmentContexts。",
-                    recommendation="重点核对附件中的页面、字段、流程、异常、权限和验收要求是否遗漏。",
-                )
-            )
-
-        if not issues:
-            issues.append(
-                ArtifactReviewIssue(
-                    code="NO_OBVIOUS_BLOCKER",
-                    severity="INFO",
-                    title="未发现明显阻塞问题",
-                    description="Python 兜底规则未发现明显阻塞项，但未完成深度语义审查。",
-                    suggestion="建议在 LLM 可用时重新执行资产审查，或进入人工审核。",
-                    artifactType=artifact_type,
-                )
-            )
-
-        suggestions.append(
-            ArtifactReviewSuggestion(
-                code="REVIEW_NEXT_STEP",
-                severity="INFO",
-                title="继续做上下游一致性复核",
-                description="将当前资产与需求、页面规范、接口、测试规格进行交叉检查。",
-                suggestion="如果有上游资产更新，重新生成当前资产或进行影响分析。",
-                artifactType=artifact_type,
-            )
+        review_input = review_input or self._as_dict(
+            (request.context_package or {}).get("review_input")
+            or request.input
+            or {}
         )
+        instruction = str(
+            review_input.get("instruction")
+            or request.requirement_text
+            or "请根据用户变更要求修订当前资产。"
+        ).strip()
+        target_artifact_type = str(
+            review_input.get("targetArtifactType")
+            or review_input.get("selected_artifact_type")
+            or "MODULE_PRD"
+        ).strip().upper()
+        current_markdown = str(
+            review_input.get("currentMarkdown")
+            or review_input.get("contentMarkdown")
+            or "# 需求资产"
+        ).strip()
 
-        risk_level = "HIGH" if any(item.severity == "BLOCKER" for item in issues) else "MEDIUM"
+        fallback_section = "\n".join(
+            [
+                "## AI Assistant 需求变更补充",
+                f"**用户要求**：{instruction}",
+                "**处理方式**：LangGraph 资产变更 Agent 未能返回稳定 patch，本版本采用安全补充方式，不执行不可验证的关键词替换。",
+                "**建议动作**：优先在文档视图中基于上游变化进行局部修订；只有差异过大时再重生成整份资产。",
+                "**待人工确认**：请在文档视图中核对并细化具体修改位置。",
+            ]
+        )
+        patch_operations = [
+            {
+                "op": "append_section",
+                "sectionTitle": "AI Assistant 需求变更补充",
+                "replaceWith": fallback_section,
+                "rationale": "LLM 未返回稳定局部 patch，采用追加补充区的保守策略。",
+                "confidence": 0.25,
+            }
+        ]
 
-        artifact = AssistantArtifactReviewArtifact(
-            summary="已完成资产审查；LLM 未成功调用，因此采用规则兜底。",
-            riskLevel=risk_level,  # type: ignore[arg-type]
-            conclusion=(
-                "当前资产存在阻塞风险，需要先修复。"
-                if risk_level == "HIGH"
-                else "当前资产未发现明显阻塞问题，但建议继续做一致性复核。"
+        patch_summary = [
+            "保留原资产正文，追加用户需求变更补充说明。",
+            "未执行不可验证的自动替换，避免误改业务语义。",
+            "需要人工核对后再确认新版本。",
+        ]
+        risk_notes = [
+            "LangGraph 资产变更 Agent 进入安全兜底：" + reason,
+            "本次输出不代表最终业务事实，需人工确认。",
+        ]
+        checklist = [
+            "检查补充说明是否准确表达用户意图。",
+            "必要时在文档视图中继续手动精修。",
+            "确认后再选择性重生成下游资产。",
+        ]
+
+        return AssistantArtifactReviewArtifact(
+            summary="已生成安全兜底型资产编辑提案。",
+            riskLevel="MEDIUM",
+            conclusion="LangGraph Agent 未能完成稳定 patch，已生成可审查的保守补充 patch。",
+            issues=[{"type": "AGENT_FALLBACK", "message": reason}],
+            consistencyChecks=[],
+            suggestions=patch_summary,
+            nextActions=checklist,
+            targetArtifactType=target_artifact_type,
+            proposedContentMarkdown=None,
+            proposedPatchOperations=patch_operations,
+            proposedPatchSummary=patch_summary,
+            changedSections=[],
+            downstreamArtifacts=self._default_downstream(target_artifact_type),
+            riskNotes=risk_notes,
+            reviewChecklist=checklist,
+            confidence=0.25,
+            markdown=self._build_markdown_summary(
+                summary="已生成安全兜底型资产编辑提案。",
+                target_artifact_type=target_artifact_type,
+                patch_summary=patch_summary,
+                risk_notes=risk_notes,
+                review_checklist=checklist,
             ),
-            issues=issues,
-            consistencyChecks=checks,
-            suggestions=suggestions,
-            nextActions=[
-                "修复阻塞问题后重新生成或重新审查",
-                "打开质量检查查看完整资产链路",
-                "必要时基于附件补充遗漏需求",
-            ],
-            markdown="",
         )
-        artifact.markdown = self._build_markdown(artifact, note=reason)
-        return artifact
 
-    def _fallback_no_artifact(self) -> AssistantArtifactReviewArtifact:
-        artifact = AssistantArtifactReviewArtifact(
-            summary="没有检测到可审查的目标资产。",
-            riskLevel="HIGH",
-            conclusion="请先生成或选择一个当前资产，再执行资产审查。",
-            issues=[
-                ArtifactReviewIssue(
-                    code="NO_TARGET_ARTIFACT",
-                    severity="BLOCKER",
-                    title="缺少目标资产",
-                    description="本次请求没有提供 targetArtifact。",
-                    suggestion="先选择左侧节点和资产，或生成当前节点核心资产。",
-                    artifactType=None,
-                )
-            ],
-            nextActions=["选择具体资产", "生成当前节点核心资产"],
-        )
-        artifact.markdown = self._build_markdown(artifact)
-        return artifact
-
-    def _has_related(
+    def _build_markdown_summary(
         self,
-        related: Any,
-        artifact_type: str,
-    ) -> bool:
-        if not isinstance(related, list):
-            return False
-        return any(
-            isinstance(item, dict) and str(item.get("artifactType")) == artifact_type
-            for item in related
-        )
-
-    def _build_markdown(
-        self,
-        artifact: AssistantArtifactReviewArtifact,
-        note: str | None = None,
+        *,
+        summary: str,
+        target_artifact_type: str,
+        patch_summary: list[str],
+        risk_notes: list[str],
+        review_checklist: list[str],
     ) -> str:
         lines = [
-            "# AI 资产审查结果",
+            "# 资产编辑提案",
             "",
-            f"- 风险等级：{artifact.riskLevel}",
-            f"- 结论：{artifact.conclusion}",
+            f"目标资产：{target_artifact_type}",
             "",
-            "## 概要",
-            artifact.summary or "-",
+            f"摘要：{summary}",
+            "",
+            "## 拟局部修改内容",
         ]
-        if note:
-            lines.extend(["", "## 运行说明", note])
-        if artifact.issues:
-            lines.extend(["", "## 主要问题"])
-            for issue in artifact.issues:
-                lines.append(f"- 【{issue.severity}】{issue.title}：{issue.description} 建议：{issue.suggestion}")
-        if artifact.consistencyChecks:
-            lines.extend(["", "## 一致性检查"])
-            for check in artifact.consistencyChecks:
-                lines.append(f"- 【{check.level}】{check.dimension}：{check.result} 建议：{check.recommendation}")
-        if artifact.suggestions:
-            lines.extend(["", "## 修改建议"])
-            for suggestion in artifact.suggestions:
-                lines.append(f"- {suggestion.title}：{suggestion.suggestion or suggestion.description}")
-        if artifact.nextActions:
-            lines.extend(["", "## 下一步"])
-            for action in artifact.nextActions:
-                lines.append(f"- {action}")
+        lines.extend([f"- {item}" for item in patch_summary])
+        lines.extend(["", "## 风险提示"])
+        lines.extend([f"- {item}" for item in (risk_notes or ["暂无明显风险。"] )])
+        lines.extend(["", "## 确认清单"])
+        lines.extend([f"- {item}" for item in (review_checklist or ["人工确认新版本内容。"] )])
         return "\n".join(lines)
 
-    def _strip_code_fence(
-        self,
-        text: str,
-    ) -> str:
-        cleaned = text.strip()
-        if cleaned.startswith("```json"):
-            cleaned = cleaned.removeprefix("```json").strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.removeprefix("```").strip()
-        if cleaned.endswith("```"):
-            cleaned = cleaned.removesuffix("```").strip()
-        return cleaned.strip()
+    def _default_downstream(self, artifact_type: str) -> list[str]:
+        mapping = {
+            "MODULE_PRD": ["BUSINESS_FLOW", "PAGE_SPEC", "DATA_MODEL", "API_CONTRACT", "TEST_SPEC", "UI_CONTRACT", "DEV_HANDOFF_PACKAGE"],
+            "BUSINESS_FLOW": ["PAGE_SPEC", "DATA_MODEL", "API_CONTRACT", "TEST_SPEC", "UI_CONTRACT", "DEV_HANDOFF_PACKAGE"],
+            "PAGE_SPEC": ["DATA_MODEL", "API_CONTRACT", "TEST_SPEC", "UI_CONTRACT", "DEV_HANDOFF_PACKAGE"],
+            "DATA_MODEL": ["API_CONTRACT", "TEST_SPEC", "UI_CONTRACT", "DEV_HANDOFF_PACKAGE"],
+            "API_CONTRACT": ["TEST_SPEC", "UI_CONTRACT", "DEV_HANDOFF_PACKAGE"],
+            "TEST_SPEC": ["UI_CONTRACT", "DEV_HANDOFF_PACKAGE"],
+        }
+        return mapping.get(artifact_type, ["DEV_HANDOFF_PACKAGE"])
+
+    def _normalize_artifact_list(self, value: Any) -> list[str]:
+        allowed = {
+            "MODULE_PRD",
+            "BUSINESS_FLOW",
+            "PAGE_SPEC",
+            "DATA_MODEL",
+            "API_CONTRACT",
+            "TEST_SPEC",
+            "UI_CONTRACT",
+            "DEV_HANDOFF_PACKAGE",
+        }
+        result = []
+        for item in self._string_list(value):
+            normalized = item.strip().upper()
+            if normalized in allowed and normalized not in result:
+                result.append(normalized)
+        return result
+
+    def _object_list(self, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+        result: list[dict[str, Any]] = []
+        for item in value:
+            if isinstance(item, dict):
+                result.append(dict(item))
+        return result
+
+    def _string_list(self, value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, str) and value.strip():
+            return [value.strip()]
+        return []
+
+    def _as_dict(self, value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        return {}
+
+    def _float_value(self, value: Any, default: float) -> float:
+        try:
+            return float(value)
+        except Exception:
+            return default
+
+    def _trim_json(self, value: Any, max_chars: int) -> str:
+        try:
+            return self._trim(json.dumps(value or {}, ensure_ascii=False, default=str), max_chars)
+        except Exception:
+            return self._trim(str(value), max_chars)
+
+    def _trim(self, value: str, max_chars: int) -> str:
+        text = value or ""
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars] + "\n...[TRUNCATED]"

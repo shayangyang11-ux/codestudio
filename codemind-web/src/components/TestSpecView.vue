@@ -1,3 +1,4 @@
+
 <template>
   <div class="module-prd-view">
     <div class="prd-view-toolbar">
@@ -27,7 +28,14 @@
       </div>
     </div>
 
-    <div v-if="activeView === 'cards'" class="prd-card-view">
+    <ManualDocumentCardView
+      v-if="activeView === 'cards' && isManualDocumentEdited"
+      title="测试规格"
+      :artifact="artifact"
+      :markdown="markdown"
+    />
+
+    <div v-else-if="activeView === 'cards'" class="prd-card-view">
       <section class="prd-summary-grid">
         <div class="summary-card">
           <span>测试规格</span>
@@ -340,32 +348,40 @@
       </section>
     </div>
 
-    <article
+    <ArtifactDocumentEditor
       v-else
-      class="prd-document"
-      v-html="renderedMarkdown"
+      title="测试规格"
+      artifact-type="TEST_SPEC"
+      :artifact="artifact"
+      :markdown="markdown"
+      :editable="true"
+      :saving="manualEditSaving"
+      @save="$emit('save-manual-edit', $event)"
     />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import MarkdownIt from 'markdown-it'
-import DOMPurify from 'dompurify'
-import type { ArtifactResponse } from '../types/codemind'
+import ArtifactDocumentEditor from './ArtifactDocumentEditor.vue'
+import ManualDocumentCardView from './ManualDocumentCardView.vue'
+import type {
+  ArtifactResponse,
+  ManualArtifactEditPayload,
+} from '../types/codemind'
 
 const props = defineProps<{
   artifact: ArtifactResponse | null
   markdown: string
+  manualEditSaving?: boolean
+}>()
+
+defineEmits<{
+  'save-manual-edit': [payload: ManualArtifactEditPayload]
 }>()
 
 const activeView = ref<'cards' | 'markdown'>('cards')
 
-const markdown = new MarkdownIt({
-  html: false,
-  linkify: true,
-  breaks: true,
-})
 
 const spec = computed<any>(() => props.artifact?.content || {})
 const basicInfo = computed<any>(() => spec.value.basic_info || {})
@@ -393,9 +409,15 @@ const totalCaseCount = computed(() => {
   )
 })
 
-const renderedMarkdown = computed(() => {
-  const html = markdown.render(props.markdown || '')
-  return DOMPurify.sanitize(html)
+
+const isManualDocumentEdited = computed(() => {
+  const content = props.artifact?.content
+
+  if (!content || typeof content !== 'object') {
+    return false
+  }
+
+  return Boolean((content as Record<string, unknown>)['_manual_document_edit'])
 })
 
 function asArray(value: unknown): any[] {

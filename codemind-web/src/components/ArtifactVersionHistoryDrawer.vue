@@ -55,7 +55,7 @@
                                     当前版本
                                 </span>
 
-                                <span v-else :class="['status-chip', statusClass(version.status)]">
+                                <span :class="['status-chip', statusClass(version.status)]">
                                     {{ statusText(version.status) }}
                                 </span>
                             </div>
@@ -102,7 +102,7 @@
                                     :disabled="rollbackLoading"
                                     @click="$emit('submit-review', selectedVersion.artifactId)"
                                 >
-                                    提交审核
+                                    提交确认
                                 </button>
 
                                 <button
@@ -142,7 +142,16 @@
                                 </button>
 
                                 <button
-                                    v-if="selectedVersion.current && !canSubmitReview(selectedVersion) && !canApprove(selectedVersion) && !canReject(selectedVersion)"
+                                    v-if="canSyncAffected(selectedVersion)"
+                                    class="primary-button sync-button"
+                                    :disabled="rollbackLoading"
+                                    @click="$emit('sync-affected-version', selectedVersion.artifactId)"
+                                >
+                                    AI 局部同步修订
+                                </button>
+
+                                <button
+                                    v-if="selectedVersion.current && !canSubmitReview(selectedVersion) && !canApprove(selectedVersion) && !canReject(selectedVersion) && !canSyncAffected(selectedVersion)"
                                     class="disabled-button"
                                     disabled
                                 >
@@ -176,6 +185,22 @@
                                     更新时间
                                     <span>{{ formatTime(selectedVersion.updatedAt) }}</span>
                                 </label>
+                            </div>
+
+                            <div
+                                v-if="isPendingReview(selectedVersion)"
+                                class="review-hint pending-review"
+                            >
+                                <strong>当前版本待确认</strong>
+                                <span>这是真正需要人工确认的新版本。确认无误后，点击右上角“确认通过”；不满意则点击“退回修改”。确认通过后，该资产才算进入稳定可交接状态。</span>
+                            </div>
+
+                            <div
+                                v-else-if="isNeedsReview(selectedVersion)"
+                                class="review-hint needs-review"
+                            >
+                                <strong>受上游影响</strong>
+                                <span>这个状态不是“等待确认”的新版本，而是表示该资产可能落后于上游资产。优先点击右上角“AI 局部同步修订”，让 LangGraph Agent 根据上游变化生成局部修订提案；差异过大时再打开影响分析选择重生成。</span>
                             </div>
 
                             <section
@@ -244,6 +269,7 @@ defineEmits<{
     'approve-version': [artifactId: string]
     'reject-version': [artifactId: string]
     'archive-version': [artifactId: string]
+    'sync-affected-version': [artifactId: string]
 }>()
 
 function formatTime(value?: string | null): string {
@@ -270,6 +296,7 @@ function statusClass(status?: string | null): string {
     if (status === 'ACTIVE') return 'status-active'
     if (status === 'DRAFT') return 'status-draft'
     if (status === 'PENDING_REVIEW') return 'status-review'
+    if (status === 'NEEDS_REVIEW') return 'status-needs-review'
     if (status === 'APPROVED') return 'status-approved'
     if (status === 'REJECTED') return 'status-rejected'
     if (status === 'ARCHIVED') return 'status-archived'
@@ -379,14 +406,33 @@ function escapeHtml(value: string): string {
 }
 
 function statusText(status?: string | null): string {
-    if (status === 'ACTIVE') return '可编辑'
-    if (status === 'DRAFT') return '草稿'
-    if (status === 'PENDING_REVIEW') return '待审核'
+    if (status === 'ACTIVE') return '未确认'
+    if (status === 'DRAFT') return '草稿未确认'
+    if (status === 'PENDING_REVIEW') return '新版本待确认'
+    if (status === 'NEEDS_REVIEW') return '受上游影响'
     if (status === 'APPROVED') return '已确认'
     if (status === 'REJECTED') return '已退回'
     if (status === 'ARCHIVED') return '已归档'
     if (status === 'SUPERSEDED') return '已被替代'
     return status || '-'
+}
+
+function isPendingReview(
+    version: ArtifactVersionDetailResponse | null,
+): boolean {
+    return Boolean(version?.current && version.status === 'PENDING_REVIEW')
+}
+
+function isNeedsReview(
+    version: ArtifactVersionDetailResponse | null,
+): boolean {
+    return Boolean(version?.current && version.status === 'NEEDS_REVIEW')
+}
+
+function canSyncAffected(
+    version: ArtifactVersionDetailResponse | null,
+): boolean {
+    return Boolean(version?.current && version.status === 'NEEDS_REVIEW')
 }
 
 function canSubmitReview(
@@ -715,6 +761,34 @@ function canArchive(
     color: #e2e8f0;
 }
 
+.review-hint {
+    display: grid;
+    gap: 6px;
+    margin: 0 0 16px;
+    border-radius: 14px;
+    padding: 12px 14px;
+    font-size: 13px;
+    line-height: 1.65;
+}
+
+.review-hint strong {
+    color: #0f172a;
+}
+
+.review-hint span {
+    color: #475569;
+}
+
+.review-hint.pending-review {
+    border: 1px solid #fde68a;
+    background: #fffbeb;
+}
+
+.review-hint.needs-review {
+    border: 1px solid #fed7aa;
+    background: #fff7ed;
+}
+
 .primary-button,
 .secondary-button,
 .disabled-button {
@@ -756,6 +830,10 @@ function canArchive(
 .primary-button:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+}
+
+.sync-button {
+    box-shadow: 0 8px 20px rgba(37, 99, 235, 0.18);
 }
 
 .empty-box,
@@ -853,6 +931,11 @@ function canArchive(
     color: #92400e;
 }
 
+.status-needs-review {
+    background: #fffbeb;
+    color: #b45309;
+}
+
 .status-approved {
     background: #dcfce7;
     color: #166534;
@@ -910,3 +993,7 @@ function canArchive(
     word-break: break-all;
 }
 </style>
+
+
+
+

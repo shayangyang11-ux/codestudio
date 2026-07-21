@@ -1,4 +1,3 @@
-
 <template>
   <div class="app-shell">
     <AppHeader :active-tab="activeTab" :project-code="project.projectCode" @change-tab="handleChangeAgentTab" />
@@ -68,6 +67,7 @@
         :artifact-task-feedback="artifactTaskFeedback"
         :dev-handoff-package-markdown="devHandoffPackageMarkdown"
         :dev-handoff-package-artifact="devHandoffPackageArtifact" :artifact-task-items="moduleArtifactTaskItems"
+        :manual-edit-saving="manualArtifactEditSaving"
         @view-artifact="handleViewArtifact" @generate-full-chain="handleGenerateFullChain"
         @generate-module-prd="handleGenerateModulePrd" @generate-business-flow="handleGenerateBusinessFlow"
         @generate-page-spec="handleGeneratePageSpec" @generate-data-model="handleGenerateDataModel"
@@ -79,7 +79,8 @@
         @export-artifacts-docx="handleExportArtifactsDocx" @open-quality-check="handleOpenQualityCheck"
         @generate-ui-contract="handleGenerateUiContract"
         @refresh-ui-contract-readiness="handleRefreshUiContractReadiness"
-        @preview-ui-contract="handlePreviewUiContract" />
+        @preview-ui-contract="handlePreviewUiContract"
+        @save-manual-artifact-edit="handleSaveManualArtifactEdit" />
 
       <RightAiAssistantPanel v-model:collapsed="aiAssistantCollapsed" :module-tree-exists="moduleTreeExists"
         :is-generating-tree="isGeneratingTree" :is-sending-message="isSendingAssistantMessage"
@@ -87,7 +88,10 @@
         :history-messages="assistantHistoryMessages"
         :upload-attachment="handleUploadAssistantAttachment" @send="handleAssistantSend"
         @clear-conversation="handleClearAssistantConversation"
-        @clear-proposal="treePatchProposal = null" @apply-proposal="handleApplyTreePatchProposal" />
+        @clear-proposal="treePatchProposal = null"
+        @apply-proposal="handleApplyTreePatchProposal"
+        @confirm-requirement-change="handleConfirmRequirementChangeProposal"
+        @confirm-asset-edit-proposal="handleConfirmAssetEditProposal" />
 
       <ArtifactVersionHistoryDrawer :visible="artifactVersionDrawerVisible" :loading="artifactVersionLoading"
         :rollback-loading="artifactVersionRollbackLoading" :artifact-title="artifactVersionTitle"
@@ -95,13 +99,16 @@
         @close="closeArtifactVersionDrawer" @refresh="loadArtifactVersionHistory"
         @view-version="handleViewArtifactVersion" @rollback-version="handleRollbackArtifactVersion"
         @submit-review="handleSubmitArtifactReview" @approve-version="handleApproveArtifactVersion"
-        @reject-version="handleRejectArtifactVersion" @archive-version="handleArchiveArtifactVersion" />
+        @reject-version="handleRejectArtifactVersion" @archive-version="handleArchiveArtifactVersion"
+        @sync-affected-version="handleSyncAffectedArtifactVersion" />
 
       <ArtifactImpactAnalysisDrawer :visible="impactAnalysisDrawerVisible" :submitting="impactAnalysisSubmitting"
         :source-title="impactAnalysisSourceTitle" :source-artifact-type="impactAnalysisSourceArtifactType"
         :items="impactAnalysisItems" :selected-artifact-types="impactAnalysisSelectedTypes" :error="impactAnalysisError"
         @close="closeImpactAnalysisDrawer" @select-all="selectAllImpactedArtifacts"
-        @toggle-artifact="handleToggleImpactedArtifact" @regenerate="handleRegenerateImpactedArtifacts" />
+        @toggle-artifact="handleToggleImpactedArtifact"
+        @sync-selected="handleSyncSelectedImpactedArtifact"
+        @regenerate="handleRegenerateImpactedArtifacts" />
 
       <ArtifactQualityCheckDrawer :visible="qualityCheckDrawerVisible"
         :module-name="selectedModule ? getModuleDisplayName(selectedModule) : '当前模块'"
@@ -191,6 +198,8 @@ import {
   fetchAssistantMessages,
   sendAssistantMessage,
   uploadAssistantAttachment,
+  proposeAssistantAssetEdit,
+  confirmAssistantAssetEditProposal,
 } from '../api'
 import {
   fetchUiContractReadiness,
@@ -214,6 +223,7 @@ import {
   rejectModuleArtifactVersion,
   rollbackModuleArtifactVersion,
   submitModuleArtifactReview,
+  saveManualArtifactEdit,
 } from '../api/artifactApi'
 
 import {
@@ -223,6 +233,7 @@ import {
   type RequirementArtifactType,
 } from '../domain/requirementArtifactDefinitions'
 import {
+  getNodeAwareDownstreamArtifactTypes,
   isFeatureNode,
   isPageNode,
 } from '../domain/requirementNodePolicy'
@@ -245,10 +256,14 @@ import type {
   ArtifactVersionDetailResponse,
   ArtifactVersionSummaryResponse,
   AgentTaskSummary,
+  AssistantActionResponse,
   AssistantAttachmentRef,
   AssistantConversationMessageResponse,
   AssistantMessageResponse,
+  AssetEditProposal,
+  ManualArtifactEditPayload,
   ModuleTreeNode,
+  RequirementChangeProposal,
   ModuleTreePatchProposalResponse,
   ProjectSummary,
   UiContractGenerationReadinessResponse,
@@ -277,6 +292,7 @@ const assistantHistoryMessages = ref<AssistantConversationMessageResponse[]>([])
 const treePatchProposal = ref<ModuleTreePatchProposalResponse | null>(null)
 const isSendingAssistantMessage = ref(false)
 const isApplyingTreePatch = ref(false)
+const manualArtifactEditSaving = ref(false)
 
 const moduleTreeExists = computed(() => modules.value.length > 0)
 const requirementText = ref('我要做一个电商系统，包含用户、订单、支付、库存、后台管理、权限控制等模块。')
@@ -316,6 +332,16 @@ const impactAnalysisSubmitting = ref(false)
 const impactAnalysisError = ref('')
 const impactAnalysisSourceArtifactType = ref<RequirementArtifactType | null>(null)
 const impactAnalysisSelectedTypes = ref<RequirementArtifactType[]>([])
+
+const impactAnalysisAgentSyncSupportedTypes: RequirementArtifactType[] = [
+  'MODULE_PRD',
+  'BUSINESS_FLOW',
+  'PAGE_SPEC',
+  'DATA_MODEL',
+  'API_CONTRACT',
+  'TEST_SPEC',
+]
+
 
 const nodeEditorVisible = ref(false)
 const nodeEditorMode = ref<'create-root' | 'create-child' | 'edit'>('create-root')
@@ -930,6 +956,11 @@ async function handleAssistantSend(payload: {
     latestAssistantResponse.value = response
     await loadAssistantMessageHistory()
 
+    if (response.intent === 'EXECUTE_UI_COMMAND') {
+      await executeAssistantActions(response.actions || [])
+      return
+    }
+
     if (response.intent === 'GENERATE_MODULE_TREE') {
       await handleGenerateModuleTree(
         resolveAssistantActionRequirementText(response) || trimmedText,
@@ -1032,6 +1063,484 @@ function resolveAssistantDispatchedArtifactType(
   return selectedArtifactType.value
 }
 
+async function handleConfirmRequirementChangeProposal(
+  proposal: RequirementChangeProposal,
+) {
+  if (!proposal) {
+    return
+  }
+
+  const originalInstruction = String(proposal.originalInstruction || '').trim()
+
+  if (shouldConvertRequirementChangeToTreePatch(proposal)) {
+    await dispatchAssistantFollowup({
+      message:
+        '用户已确认以下需求变更草案，请将其转换为可审查的模块树变更提案，不要直接应用：' +
+        '\n\n变更摘要：' +
+        (proposal.summary || originalInstruction || '未提供') +
+        '\n\n原始要求：' +
+        (originalInstruction || proposal.summary || '未提供'),
+      expectedIntent: 'PROPOSE_MODULE_TREE_PATCH',
+    })
+    return
+  }
+
+  await proposeAssetEditFromRequirementChange(proposal)
+}
+
+async function proposeAssetEditFromRequirementChange(
+  proposal: RequirementChangeProposal,
+) {
+  if (!selectedModule.value?.id) {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message: '请先在模块树中选择一个节点，再确认资产编辑类需求变更。',
+    }
+    return
+  }
+
+  latestAssistantResponse.value = null
+  isSendingAssistantMessage.value = true
+
+  try {
+    const response = await proposeAssistantAssetEdit(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      {
+        requirementChangeProposal: proposal,
+        instruction: String(proposal.originalInstruction || proposal.summary || ''),
+        selectedNodeId: selectedModule.value.id || null,
+        selectedArtifactType: resolvePrimaryAffectedArtifactType(proposal) || selectedArtifactType.value,
+      },
+    )
+
+    latestAssistantResponse.value = response
+
+    const targetArtifactType = resolveAssetEditProposalArtifactType(response)
+
+    if (targetArtifactType) {
+      await handleViewArtifact(targetArtifactType)
+    }
+
+    artifactTaskFeedback.value = {
+      level: 'info',
+      message: '已根据确认后的需求变更生成资产编辑提案。请在右侧 Assistant 卡片中确认是否生成“新版本待确认”。',
+    }
+  } catch (error) {
+    window.alert(resolveErrorMessage(error, '生成资产编辑提案失败。'))
+  } finally {
+    isSendingAssistantMessage.value = false
+  }
+}
+
+
+async function handleSaveManualArtifactEdit(
+  payload: ManualArtifactEditPayload,
+) {
+  if (!selectedModule.value?.id) {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message: '请先选择一个模块树节点，再保存资产文档新版本。',
+    }
+    return
+  }
+
+  if (!isRequirementArtifactType(payload.artifactType)) {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message: '当前资产类型不支持保存。',
+    }
+    return
+  }
+
+  const confirmed = window.confirm(
+    '确认将文档视图的修改保存为新的资产版本吗？\n\n' +
+      '旧版本会保留，新版本会成为当前版本并进入“新版本待确认”；相关下游资产会标记为“受上游影响”。',
+  )
+
+  if (!confirmed) {
+    return
+  }
+
+  manualArtifactEditSaving.value = true
+
+  try {
+    const response = await saveManualArtifactEdit(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      selectedModule.value.id,
+      {
+        artifactId: payload.artifactId || null,
+        artifactType: payload.artifactType,
+        contentMarkdown: payload.contentMarkdown,
+        reason: payload.reason || '',
+      },
+    )
+
+    const artifactType = response.artifactType
+
+    if (isRequirementArtifactType(artifactType)) {
+      selectedArtifactType.value = artifactType
+
+      await loadCurrentArtifactByType(
+        selectedModule.value,
+        artifactType,
+      )
+
+      await Promise.allSettled([
+        loadAllCurrentModuleArtifacts(selectedModule.value),
+        loadCurrentModuleAgentTasks(),
+        loadUiContractReadiness(),
+        loadDevelopmentHandoffReadiness(),
+      ])
+
+      const downstream = getNodeAwareDownstreamArtifactTypes(
+        artifactType,
+        selectedModule.value,
+      )
+
+      if (downstream.length > 0) {
+        handleOpenImpactAnalysis(artifactType)
+      }
+
+      await saveCurrentWorkspaceState({
+        selectedModuleId: selectedModule.value.id,
+        selectedArtifactType: artifactType,
+        selectedArtifactId: response.artifactId || null,
+        activeAgentTab: activeTab.value,
+        uiState: {
+          lastAction: 'manual-artifact-document-edit',
+          artifactType,
+          versionNo: response.versionNo,
+        },
+      })
+    }
+
+    artifactTaskFeedback.value = {
+      level: 'success',
+      message:
+        response.message ||
+        `文档修改已保存为 ${response.artifactType} 新版本 V${response.versionNo}。`,
+    }
+  } catch (error) {
+    window.alert(resolveErrorMessage(error, '保存文档编辑版本失败。'))
+  } finally {
+    manualArtifactEditSaving.value = false
+  }
+}
+
+
+async function handleConfirmAssetEditProposal(
+  proposal: AssetEditProposal,
+) {
+  if (!proposal) {
+    return
+  }
+
+  const confirmed = window.confirm(
+    '确认保存这次局部修订吗？\n\n系统只会应用本次局部 Patch，保存为新的待确认版本；旧版本会保留，受影响下游资产会标记为“受上游影响”。',
+  )
+
+  if (!confirmed) {
+    return
+  }
+
+  isSendingAssistantMessage.value = true
+
+  try {
+    const response = await confirmAssistantAssetEditProposal(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      proposal,
+      '',
+    )
+
+    const artifactType = response.artifactType
+
+    if (isRequirementArtifactType(artifactType) && selectedModule.value) {
+      await loadCurrentArtifactByType(
+        selectedModule.value,
+        artifactType,
+      )
+      selectedArtifactType.value = artifactType
+
+      const downstream = getNodeAwareDownstreamArtifactTypes(
+        artifactType,
+        selectedModule.value,
+      )
+
+      if (downstream.length > 0) {
+        handleOpenImpactAnalysis(artifactType)
+      }
+    }
+
+    await Promise.allSettled([
+      selectedModule.value ? loadAllCurrentModuleArtifacts(selectedModule.value) : Promise.resolve(),
+      loadCurrentModuleAgentTasks(),
+      loadUiContractReadiness(),
+      loadDevelopmentHandoffReadiness(),
+    ])
+
+    const savedMessage =
+      response.message ||
+      `已保存 ${response.artifactType} 局部修订版本 V${response.versionNo}。`
+
+    artifactTaskFeedback.value = {
+      level: 'success',
+      message: savedMessage,
+    }
+
+    latestAssistantResponse.value = {
+      messageId: `asset_edit_saved_${Date.now()}`,
+      intent: 'CONFIRM_ASSET_EDIT',
+      reply: `${savedMessage} 新版本状态为“新版本待确认”；旧版本已保留。下游若显示“受上游影响”，后续可在影响分析中逐个使用 AI 局部同步修订。`,
+      requiresUserConfirmation: false,
+      proposal: null,
+      requirementChangeProposal: null,
+      assetEditProposal: null,
+      actions: [],
+    }
+  } catch (error) {
+    window.alert(resolveErrorMessage(error, '确认资产编辑提案失败。'))
+  } finally {
+    isSendingAssistantMessage.value = false
+  }
+}
+
+function resolveAssetEditProposalArtifactType(
+  response: AssistantMessageResponse,
+): RequirementArtifactType | null {
+  const action = response.actions?.find((item) =>
+    item.type === 'ASSET_EDIT_PROPOSAL' || item.type === 'OPEN_ASSET_EDIT_PROPOSAL',
+  )
+
+  const payload = action?.payload || {}
+  const proposal = payload.proposal as AssetEditProposal | undefined
+  const artifactType = proposal?.targetArtifactType || proposal?.targetArtifact?.artifactType
+
+  if (typeof artifactType === 'string' && isRequirementArtifactType(artifactType)) {
+    return artifactType
+  }
+
+  return null
+}
+
+async function dispatchAssistantFollowup(payload: {
+  message: string
+  expectedIntent: string
+}) {
+  const text = payload.message.trim()
+
+  if (!text) {
+    return
+  }
+
+  latestAssistantResponse.value = null
+  isSendingAssistantMessage.value = true
+
+  try {
+    const response = await sendAssistantMessage(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      {
+        message: text,
+        selectedNodeId: selectedModule.value?.id || null,
+        selectedArtifactType: selectedArtifactType.value || null,
+        expectedIntent: payload.expectedIntent,
+        attachments: [],
+      },
+    )
+
+    latestAssistantResponse.value = response
+    await loadAssistantMessageHistory()
+
+    if (response.intent === 'PROPOSE_MODULE_TREE_PATCH' && response.proposal) {
+      treePatchProposal.value = response.proposal
+      return
+    }
+
+    if (response.intent === 'EXECUTE_UI_COMMAND') {
+      await executeAssistantActions(response.actions || [])
+      return
+    }
+
+    if (response.intent === 'GENERATE_REQUIREMENT_ARTIFACT') {
+      await refreshAfterAssistantTaskDispatch()
+    }
+  } catch (error) {
+    window.alert(resolveErrorMessage(error, 'AI Assistant 后续执行失败。'))
+  } finally {
+    isSendingAssistantMessage.value = false
+  }
+}
+
+function shouldConvertRequirementChangeToTreePatch(
+  proposal: RequirementChangeProposal,
+): boolean {
+  const instruction = String(proposal.originalInstruction || proposal.summary || '')
+  const scopeType = String(proposal.scopeType || '').toUpperCase()
+
+  if (scopeType === 'MODULE_TREE') {
+    return true
+  }
+
+  const changeType = String(proposal.changeType || '').toUpperCase()
+
+  if (!['ADD', 'REMOVE', 'SPLIT', 'MERGE'].includes(changeType)) {
+    return false
+  }
+
+  return containsAnyText(
+    instruction,
+    [
+      '模块',
+      '子模块',
+      '页面',
+      '新页面',
+      '功能点',
+      '节点',
+      '路由',
+      '放在',
+      '移动到',
+      '归到',
+    ],
+  )
+}
+
+function resolvePrimaryAffectedArtifactType(
+  proposal: RequirementChangeProposal,
+): RequirementArtifactType | null {
+  const affectedArtifacts = proposal.affectedArtifacts || []
+
+  for (const artifact of affectedArtifacts) {
+    if (isRequirementArtifactType(artifact)) {
+      return artifact
+    }
+  }
+
+  if (selectedArtifactType.value) {
+    return selectedArtifactType.value
+  }
+
+  return null
+}
+
+async function executeAssistantActions(
+  actions: AssistantActionResponse[],
+) {
+  if (!actions?.length) {
+    return
+  }
+
+  for (const action of actions) {
+    await executeAssistantAction(action)
+  }
+}
+
+async function executeAssistantAction(
+  action: AssistantActionResponse,
+) {
+  const actionType = String(action.type || '').toUpperCase()
+  const artifactType = resolveArtifactTypeFromAction(action)
+
+  if (actionType === 'VIEW_ARTIFACT') {
+    if (!artifactType) {
+      artifactTaskFeedback.value = {
+        level: 'error',
+        message: 'AI Assistant 已识别为查看资产指令，但没有定位到资产类型。',
+      }
+      return
+    }
+
+    await handleViewArtifact(artifactType)
+    return
+  }
+
+  if (actionType === 'OPEN_QUALITY_CHECK') {
+    handleOpenQualityCheck()
+    return
+  }
+
+  if (actionType === 'OPEN_ARTIFACT_VERSIONS') {
+    if (!artifactType) {
+      artifactTaskFeedback.value = {
+        level: 'error',
+        message: '请先选择一个资产，再通过聊天打开版本历史。',
+      }
+      return
+    }
+
+    await handleOpenArtifactVersions(artifactType)
+    return
+  }
+
+  if (actionType === 'OPEN_IMPACT_ANALYSIS') {
+    if (!artifactType) {
+      artifactTaskFeedback.value = {
+        level: 'error',
+        message: '请先选择一个资产，再通过聊天打开影响分析。',
+      }
+      return
+    }
+
+    handleOpenImpactAnalysis(artifactType)
+    return
+  }
+
+  if (actionType === 'OPEN_UI_CONTRACT_PREVIEW') {
+    await handlePreviewUiContract()
+    return
+  }
+
+  if (actionType === 'REFRESH_UI_CONTRACT_READINESS') {
+    await handleRefreshUiContractReadiness()
+    artifactTaskFeedback.value = {
+      level: 'info',
+      message: '已根据聊天指令刷新交互原型生成准备度。',
+    }
+    return
+  }
+
+  if (actionType === 'OPEN_DEVELOPMENT_TAB') {
+    await handleChangeAgentTab('development')
+    return
+  }
+
+  if (actionType === 'OPEN_REQUIREMENT_TAB') {
+    await handleChangeAgentTab('requirement')
+    return
+  }
+
+  if (actionType === 'OPEN_PROJECT_TASK_CENTER') {
+    await openProjectTaskCenter()
+    return
+  }
+}
+
+function resolveArtifactTypeFromAction(
+  action: AssistantActionResponse,
+): RequirementArtifactType | null {
+  const payload = action.payload || {}
+  const rawArtifactType = payload.artifactType
+
+  if (
+    typeof rawArtifactType === 'string' &&
+    isRequirementArtifactType(rawArtifactType)
+  ) {
+    return rawArtifactType
+  }
+
+  return selectedArtifactType.value
+}
+
+function containsAnyText(
+  text: string,
+  keywords: string[],
+): boolean {
+  return keywords.some((keyword) => text.includes(keyword))
+}
+
+
 async function handleApplyTreePatchProposal(
   proposalFromMessage?: ModuleTreePatchProposalResponse,
 ) {
@@ -1046,6 +1555,10 @@ async function handleApplyTreePatchProposal(
 
   try {
     const currentSelectedModuleId = selectedModule.value?.id || null
+    const preferredArtifactType = resolveTreePatchAssetEditTarget(
+      proposal,
+      selectedArtifactType.value,
+    )
 
     const response = await applyModuleTreePatch(
       props.workspace.workspaceId,
@@ -1072,11 +1585,152 @@ async function handleApplyTreePatchProposal(
         clearSelectedModuleAndArtifacts()
       }
     }
+
+    await proposeAssetEditAfterTreePatch(
+      proposal,
+      preferredArtifactType,
+    )
   } catch (error) {
     window.alert(resolveErrorMessage(error, '应用 AI 模块树变更提案失败。'))
   } finally {
     isApplyingTreePatch.value = false
   }
+}
+
+async function proposeAssetEditAfterTreePatch(
+  proposal: ModuleTreePatchProposalResponse,
+  preferredArtifactType: RequirementArtifactType | null,
+) {
+  if (!selectedModule.value?.id || !preferredArtifactType) {
+    artifactTaskFeedback.value = {
+      level: 'info',
+      message: '模块树提案已应用。当前没有可直接同步编辑的文档资产，请在受影响资产中选择重生成或手动编辑。',
+    }
+    return
+  }
+
+  const instruction = buildTreePatchAssetEditInstruction(proposal)
+
+  try {
+    const response = await proposeAssistantAssetEdit(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      {
+        requirementChangeProposal: {
+          proposalId: null,
+          source: proposal.source || proposal.proposal.source || 'AI_TREE_PATCH',
+          status: 'PATCH_APPLIED',
+          originalInstruction: instruction,
+          summary: proposal.description || proposal.proposal.description || instruction,
+          changeType: 'UPDATE',
+          scopeType: 'ASSET_AFTER_TREE_PATCH',
+          targetNode: {
+            nodeId: selectedModule.value.id,
+            nodeName: getModuleDisplayName(selectedModule.value),
+            nodeType: selectedModule.value.moduleType || null,
+            moduleKey: selectedModule.value.moduleKey || null,
+          },
+          affectedArtifacts: [
+            preferredArtifactType,
+            ...resolveTreePatchAffectedArtifacts(proposal),
+          ],
+          riskNotes: proposal.proposal.impact?.riskNotes || [],
+          recommendedSteps: [
+            '根据已应用的模块树变更，生成正式资产的新版本编辑提案。',
+            '确认新版本后，再通过影响分析选择性重生成下游资产。',
+          ],
+        },
+        instruction,
+        selectedNodeId: selectedModule.value.id,
+        selectedArtifactType: preferredArtifactType,
+      },
+    )
+
+    latestAssistantResponse.value = response
+
+    const targetArtifactType = resolveAssetEditProposalArtifactType(response) || preferredArtifactType
+
+    if (targetArtifactType) {
+      await handleViewArtifact(targetArtifactType)
+    }
+
+    artifactTaskFeedback.value = {
+      level: 'info',
+      message: '模块树提案已应用，并已继续生成正式资产编辑提案。请在右侧 Assistant 中确认是否生成新资产版本。',
+    }
+  } catch (error) {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message: resolveErrorMessage(error, '模块树已应用，但生成资产编辑提案失败。'),
+    }
+  }
+}
+
+function resolveTreePatchAssetEditTarget(
+  proposal: ModuleTreePatchProposalResponse,
+  currentArtifactType: RequirementArtifactType | null,
+): RequirementArtifactType | null {
+  const documentEditableTypes: RequirementArtifactType[] = [
+    'PAGE_SPEC',
+    'MODULE_PRD',
+    'BUSINESS_FLOW',
+    'TEST_SPEC',
+  ]
+
+  if (currentArtifactType && documentEditableTypes.includes(currentArtifactType)) {
+    return currentArtifactType
+  }
+
+  const affectedArtifacts = resolveTreePatchAffectedArtifacts(proposal)
+
+  for (const artifactType of documentEditableTypes) {
+    if (affectedArtifacts.includes(artifactType) && getArtifactByType(artifactType)?.artifactId) {
+      return artifactType
+    }
+  }
+
+  for (const artifactType of documentEditableTypes) {
+    if (getArtifactByType(artifactType)?.artifactId) {
+      return artifactType
+    }
+  }
+
+  return null
+}
+
+function resolveTreePatchAffectedArtifacts(
+  proposal: ModuleTreePatchProposalResponse,
+): RequirementArtifactType[] {
+  const rawArtifacts = proposal.proposal.impact?.affectedArtifacts || []
+  const result: RequirementArtifactType[] = []
+
+  for (const rawArtifact of rawArtifacts) {
+    if (isRequirementArtifactType(rawArtifact) && !result.includes(rawArtifact)) {
+      result.push(rawArtifact)
+    }
+  }
+
+  return result
+}
+
+function buildTreePatchAssetEditInstruction(
+  proposal: ModuleTreePatchProposalResponse,
+): string {
+  const description = proposal.description || proposal.proposal.description || 'AI 模块树变更提案已应用。'
+  const operations = proposal.proposal.operations || []
+  const operationSummary = operations
+    .map((operation) => `${operation.op}: ${operation.moduleName || operation.nodeId || operation.parentId || ''}`.trim())
+    .filter(Boolean)
+    .join('；')
+
+  const impactSummary = proposal.proposal.impact?.summary || ''
+
+  return [
+    '模块树变更提案已应用，请把该变更同步落地到当前正式需求资产正文中。',
+    `变更说明：${description}`,
+    operationSummary ? `操作摘要：${operationSummary}` : '',
+    impactSummary ? `影响摘要：${impactSummary}` : '',
+  ].filter(Boolean).join('\n')
 }
 
 
@@ -1712,9 +2366,9 @@ function handleOpenImpactAnalysis(
 
   impactAnalysisError.value = ''
   impactAnalysisSourceArtifactType.value = artifactType
-  impactAnalysisSelectedTypes.value = sourceDefinition
-    ? [...sourceDefinition.downstreamArtifactTypes]
-    : []
+  // 受上游影响后，不默认勾选任何下游资产，避免误触发整份重生成。
+  // 用户可以直接“暂不处理下游”，也可以显式选择一个资产交给 LangGraph Agent 局部同步修订。
+  impactAnalysisSelectedTypes.value = []
   impactAnalysisDrawerVisible.value = true
 }
 
@@ -2138,11 +2792,151 @@ function selectAllImpactedArtifacts() {
   )
 }
 
+async function handleSyncSelectedImpactedArtifact() {
+  if (!selectedModule.value?.id) {
+    impactAnalysisError.value = '请先选择一个模块树节点，再执行 AI 局部同步修订。'
+    return
+  }
+
+  if (impactAnalysisSelectedTypes.value.length === 0) {
+    impactAnalysisError.value = '请先选择 1 个需要同步修订的下游资产；也可以点击“暂不处理下游”直接关闭。'
+    return
+  }
+
+  if (impactAnalysisSelectedTypes.value.length > 1) {
+    impactAnalysisError.value = 'AI 局部同步修订建议一次处理 1 个资产，避免多个编辑提案混在一起。请只勾选 1 项。'
+    return
+  }
+
+  const artifactType = impactAnalysisSelectedTypes.value[0]
+
+  if (!impactAnalysisAgentSyncSupportedTypes.includes(artifactType)) {
+    impactAnalysisError.value = `${artifactType} 暂不支持在影响分析中直接做通用资产同步修订。请先同步修订 PAGE_SPEC、DATA_MODEL、API_CONTRACT 或 TEST_SPEC 等上游正式资产，再按专用流程处理该资产。`
+    return
+  }
+
+  const targetItem = impactAnalysisItems.value.find(
+    (item) => item.artifactType === artifactType,
+  )
+
+  if (!targetItem?.artifactExists) {
+    impactAnalysisError.value = '选中的下游资产尚未生成，无法做局部同步修订。请先生成该资产的初始版本。'
+    return
+  }
+
+  const sourceTitle = impactAnalysisSourceTitle.value
+  const targetTitle = targetItem.title || artifactType
+
+  const confirmed = window.confirm(
+    [
+      `将使用 LangGraph 资产变更 Agent 局部同步修订：${targetTitle}`,
+      `同步依据：${sourceTitle} 的上游变更。`,
+      '系统只会先生成“资产编辑提案”，不会直接覆盖当前版本；确认提案后才会创建新版本。是否继续？',
+    ].join('\n\n'),
+  )
+
+  if (!confirmed) {
+    return
+  }
+
+  impactAnalysisSubmitting.value = true
+  impactAnalysisError.value = ''
+  latestAssistantResponse.value = null
+  isSendingAssistantMessage.value = true
+  aiAssistantCollapsed.value = false
+
+  try {
+    const response = await proposeAssistantAssetEdit(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      {
+        requirementChangeProposal: {
+          proposalId: null,
+          source: 'IMPACT_ANALYSIS_AGENT_SYNC',
+          status: 'CONFIRMED',
+          originalInstruction:
+            `上游资产 ${sourceTitle} 已发生修改，请基于最新上游内容，对下游资产 ${targetTitle} 做局部同步修订。要求尽量只修改受影响段落，不要整份重写，也不要创建重新生成任务。`,
+          summary:
+            `根据 ${sourceTitle} 的变更，使用 LangGraph Agent 局部同步修订 ${targetTitle}。`,
+          changeType: 'SYNC_WITH_UPSTREAM',
+          scopeType: 'DOWNSTREAM_ASSET_SYNC',
+          targetNode: {
+            nodeId: selectedModule.value.id,
+            nodeName: getModuleDisplayName(selectedModule.value),
+            nodeType: selectedModule.value.moduleType || null,
+            moduleKey: selectedModule.value.moduleKey || null,
+          },
+          affectedArtifacts: [artifactType],
+          riskNotes: [
+            '本操作只生成资产编辑提案，不会直接覆盖当前版本。',
+            '请重点核对 Agent 是否只同步了与上游变更相关的内容。',
+          ],
+          recommendedSteps: [
+            '查看右侧 Assistant 中的资产编辑提案。',
+            '确认后生成新的待确认版本。',
+            '再根据新的影响分析继续同步更下游资产。',
+          ],
+        },
+        instruction:
+          `请基于上游资产 ${sourceTitle} 的最新变更，对当前下游资产 ${targetTitle} 进行局部同步修订，生成资产编辑提案，不要整份重生成。`,
+        selectedNodeId: selectedModule.value.id,
+        selectedArtifactType: artifactType,
+      },
+    )
+
+    const hasAssetEditProposal =
+      Boolean(response.assetEditProposal) ||
+      Boolean(
+        response.actions?.some((action) =>
+          action.type === 'ASSET_EDIT_PROPOSAL' ||
+          action.type === 'OPEN_ASSET_EDIT_PROPOSAL',
+        ),
+      )
+
+    latestAssistantResponse.value = {
+      ...response,
+      messageId: response.messageId
+        ? `${response.messageId}_${Date.now()}`
+        : `impact_sync_${Date.now()}`,
+    }
+
+    if (!hasAssetEditProposal) {
+      impactAnalysisError.value =
+        'AI 局部同步修订请求已返回，但没有生成资产编辑提案。请查看后端或 Python Agent 日志。'
+      window.alert(impactAnalysisError.value)
+      return
+    }
+
+    selectedArtifactType.value = artifactType
+    await handleViewArtifact(artifactType)
+
+    artifactTaskFeedback.value = {
+      level: 'info',
+      message:
+        '已生成下游资产局部同步修订提案，请在右侧 AI Assistant 中确认是否生成“新版本待确认”。',
+    }
+
+    impactAnalysisDrawerVisible.value = false
+  } catch (error) {
+    const message = resolveErrorMessage(
+      error,
+      'AI 局部同步修订失败，请查看后端或 Python Agent 日志。',
+    )
+
+    impactAnalysisError.value = message
+    window.alert(message)
+  } finally {
+    impactAnalysisSubmitting.value = false
+    isSendingAssistantMessage.value = false
+  }
+}
+
 async function handleRegenerateImpactedArtifacts() {
   if (
     !selectedModule.value?.id ||
     impactAnalysisSelectedTypes.value.length === 0
   ) {
+    impactAnalysisError.value = '请先选择需要重新生成的下游资产；不想处理下游时可以直接点击“暂不处理下游”。'
     return
   }
 
@@ -2160,7 +2954,11 @@ async function handleRegenerateImpactedArtifacts() {
     .join('、')
 
   const confirmed = window.confirm(
-    `确定要按链路顺序重生成以下受影响资产吗？\n\n${selectedTitles}\n\n系统会创建新的异步任务，已有历史版本不会删除。`,
+    [
+      '确认要重新生成选中的下游资产吗？',
+      selectedTitles,
+      '注意：重新生成是备选动作。优先建议使用“AI 局部同步修订”，只同步上游改动影响到的内容。',
+    ].join('\n\n'),
   )
 
   if (!confirmed) {
@@ -2334,6 +3132,135 @@ async function handleRollbackArtifactVersion(
         : '版本回滚失败，请稍后重试。'
   } finally {
     artifactVersionRollbackLoading.value = false
+  }
+}
+
+async function handleSyncAffectedArtifactVersion(
+  artifactId: string,
+) {
+  if (
+    !selectedModule.value?.id ||
+    !artifactVersionArtifactType.value ||
+    !artifactId
+  ) {
+    window.alert('缺少当前模块、资产类型或资产版本，无法执行 AI 局部同步修订。')
+    return
+  }
+
+  if (!isRequirementArtifactType(artifactVersionArtifactType.value)) {
+    artifactVersionError.value = '当前资产类型不支持 AI 局部同步修订。'
+    window.alert(artifactVersionError.value)
+    return
+  }
+
+  const artifactType = artifactVersionArtifactType.value
+
+  if (!impactAnalysisAgentSyncSupportedTypes.includes(artifactType)) {
+    artifactVersionError.value =
+      '该资产暂不支持通用资产同步修订。请先同步修订 PAGE_SPEC、DATA_MODEL、API_CONTRACT 或 TEST_SPEC 等上游正式资产，再按专用流程处理该资产。'
+    window.alert(artifactVersionError.value)
+    return
+  }
+
+  const confirmed = window.confirm(
+    [
+      '将使用 LangGraph 资产变更 Agent 同步修订当前受上游影响的资产。',
+      '系统会先生成“资产编辑提案”，不会直接覆盖当前版本。确认提案后才会创建新版本。是否继续？',
+    ].join('\n\n'),
+  )
+
+  if (!confirmed) {
+    return
+  }
+
+  artifactVersionRollbackLoading.value = true
+  artifactVersionError.value = ''
+  latestAssistantResponse.value = null
+  isSendingAssistantMessage.value = true
+  aiAssistantCollapsed.value = false
+
+  try {
+    const response = await proposeAssistantAssetEdit(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      {
+        requirementChangeProposal: {
+          proposalId: null,
+          source: 'UPSTREAM_IMPACT_SYNC',
+          status: 'CONFIRMED',
+          originalInstruction:
+            '当前资产状态为受上游影响。请基于最新上游资产内容，使用 LangGraph 资产变更 Agent 对当前资产进行局部同步修订，尽量只修改受影响段落，不要整篇重写。',
+          summary:
+            '同步修订受上游影响的资产，生成可人工确认的资产编辑提案。',
+          changeType: 'SYNC_WITH_UPSTREAM',
+          scopeType: 'ASSET_SYNC_FROM_UPSTREAM',
+          targetNode: {
+            nodeId: selectedModule.value.id,
+            nodeName: getModuleDisplayName(selectedModule.value),
+            nodeType: selectedModule.value.moduleType || null,
+            moduleKey: selectedModule.value.moduleKey || null,
+          },
+          affectedArtifacts: [artifactType],
+          riskNotes: [
+            '当前资产受上游资产变化影响，需要先由 Agent 局部同步修订，再由人工确认新版本。',
+          ],
+          recommendedSteps: [
+            '由 LangGraph Agent 生成资产编辑提案。',
+            '人工确认提案后生成新的待确认版本。',
+            '新版本进入“新版本待确认”状态。',
+          ],
+        },
+        instruction:
+          '当前资产受上游影响，请基于上游最新资产进行局部同步修订，生成资产编辑提案，不要重新生成整份资产。',
+        selectedNodeId: selectedModule.value.id,
+        selectedArtifactType: artifactType,
+      },
+    )
+
+    const hasAssetEditProposal =
+      Boolean(response.assetEditProposal) ||
+      Boolean(
+        response.actions?.some((action) =>
+          action.type === 'ASSET_EDIT_PROPOSAL' ||
+          action.type === 'OPEN_ASSET_EDIT_PROPOSAL',
+        ),
+      )
+
+    latestAssistantResponse.value = {
+      ...response,
+      messageId: response.messageId
+        ? `${response.messageId}_${Date.now()}`
+        : `asset_sync_${Date.now()}`,
+    }
+
+    if (!hasAssetEditProposal) {
+      artifactVersionError.value =
+        'AI 局部同步修订请求已返回，但没有生成资产编辑提案。请查看后端或 Python Agent 日志。'
+      window.alert(artifactVersionError.value)
+      return
+    }
+
+    selectedArtifactType.value = artifactType
+    await handleViewArtifact(artifactType)
+
+    artifactTaskFeedback.value = {
+      level: 'info',
+      message:
+        '已生成资产编辑提案，请在右侧 AI Assistant 中确认是否生成“新版本待确认”。',
+    }
+
+    artifactVersionDrawerVisible.value = false
+  } catch (error) {
+    const message = resolveErrorMessage(
+      error,
+      'AI 局部同步修订失败，请查看后端或 Python Agent 日志。',
+    )
+
+    artifactVersionError.value = message
+    window.alert(message)
+  } finally {
+    artifactVersionRollbackLoading.value = false
+    isSendingAssistantMessage.value = false
   }
 }
 
@@ -2665,5 +3592,4 @@ function handleLogout() {
 }
 
 </style>
-
 

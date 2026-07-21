@@ -16,6 +16,7 @@ public class AssistantIntentRouterService {
 
     public static final String INTENT_GENERATE_MODULE_TREE = "GENERATE_MODULE_TREE";
     public static final String INTENT_PROPOSE_MODULE_TREE_PATCH = "PROPOSE_MODULE_TREE_PATCH";
+    public static final String INTENT_EXECUTE_UI_COMMAND = "EXECUTE_UI_COMMAND";
     public static final String INTENT_GENERATE_REQUIREMENT_ARTIFACT = "GENERATE_REQUIREMENT_ARTIFACT";
     public static final String INTENT_EXPLAIN_CURRENT_ARTIFACT = "EXPLAIN_CURRENT_ARTIFACT";
     public static final String INTENT_ANALYZE_ATTACHMENT = "ANALYZE_ATTACHMENT";
@@ -110,6 +111,18 @@ public class AssistantIntentRouterService {
     ) {
         boolean hasAttachment = request.getAttachments() != null && !request.getAttachments().isEmpty();
         boolean hasParsedAttachmentText = hasParsedAttachmentText(attachmentContexts);
+
+        if (isUiCommandIntent(messageText)) {
+            AssistantIntentClassificationResult result = AssistantIntentClassificationResult.of(
+                    INTENT_EXECUTE_UI_COMMAND,
+                    "RULE",
+                    0.94,
+                    "用户要求通过聊天触发页面已有操作。"
+            );
+            result.setNormalizedMessage(messageText);
+            applyRuleArtifactHints(result, messageText);
+            return result;
+        }
 
         if (isModuleTreePatchIntent(messageText)) {
             if (hasAttachment && !hasParsedAttachmentText) {
@@ -295,6 +308,7 @@ public class AssistantIntentRouterService {
         return List.of(
                 INTENT_GENERATE_MODULE_TREE,
                 INTENT_PROPOSE_MODULE_TREE_PATCH,
+                INTENT_EXECUTE_UI_COMMAND,
                 INTENT_GENERATE_REQUIREMENT_ARTIFACT,
                 INTENT_EXPLAIN_CURRENT_ARTIFACT,
                 INTENT_ANALYZE_ATTACHMENT,
@@ -319,11 +333,76 @@ public class AssistantIntentRouterService {
     ) {
         return INTENT_GENERATE_MODULE_TREE.equals(value)
                 || INTENT_PROPOSE_MODULE_TREE_PATCH.equals(value)
+                || INTENT_EXECUTE_UI_COMMAND.equals(value)
                 || INTENT_GENERATE_REQUIREMENT_ARTIFACT.equals(value)
                 || INTENT_EXPLAIN_CURRENT_ARTIFACT.equals(value)
                 || INTENT_ANALYZE_ATTACHMENT.equals(value)
                 || INTENT_GENERAL_QA.equals(value);
     }
+
+    private boolean isUiCommandIntent(
+            String messageText
+    ) {
+        if (messageText == null || messageText.isBlank()) {
+            return false;
+        }
+
+        String text = messageText.trim();
+
+        boolean hasOpenVerb = containsAny(
+                text,
+                List.of(
+                        "打开",
+                        "查看",
+                        "看一下",
+                        "看看",
+                        "显示",
+                        "展开",
+                        "切到",
+                        "进入",
+                        "跳到",
+                        "预览",
+                        "刷新"
+                )
+        );
+
+        boolean hasUiObject = containsAny(
+                text,
+                List.of(
+                        "质量检查",
+                        "质量检测",
+                        "版本历史",
+                        "历史版本",
+                        "影响分析",
+                        "交互预览",
+                        "预览界面",
+                        "页面预览",
+                        "交互原型预览",
+                        "UI预览",
+                        "UI 预览",
+                        "交互原型",
+                        "UI_CONTRACT",
+                        "UI CONTRACT",
+                        "准备度",
+                        "开发 Agent",
+                        "开发Agent",
+                        "需求 Agent",
+                        "需求Agent",
+                        "任务中心",
+                        "项目任务中心",
+                        "当前资产",
+                        "页面规范",
+                        "业务流程",
+                        "数据模型",
+                        "接口契约",
+                        "测试规格",
+                        "开发交接包"
+                )
+        );
+
+        return hasOpenVerb && hasUiObject;
+    }
+
 
     private boolean isModuleTreePatchIntent(
             String messageText

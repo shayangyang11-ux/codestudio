@@ -1,3 +1,4 @@
+
 <template>
   <div class="module-prd-view">
     <div class="prd-view-toolbar">
@@ -346,18 +347,20 @@
       </section>
     </div>
 
-    <article
+    <ArtifactDocumentEditor
       v-else
-      class="prd-document"
-      v-html="renderedMarkdown"
+      title="开发交接包"
+      artifact-type="DEV_HANDOFF_PACKAGE"
+      :artifact="artifact"
+      :markdown="markdown"
+      :editable="false"
     />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import MarkdownIt from 'markdown-it'
-import DOMPurify from 'dompurify'
+import ArtifactDocumentEditor from './ArtifactDocumentEditor.vue'
 import type { ArtifactResponse } from '../types/codemind'
 
 const props = defineProps<{
@@ -367,11 +370,6 @@ const props = defineProps<{
 
 const activeView = ref<'cards' | 'markdown'>('cards')
 
-const markdown = new MarkdownIt({
-  html: false,
-  linkify: true,
-  breaks: true,
-})
 
 const packageData = computed<any>(() => props.artifact?.content || {})
 const basicInfo = computed<any>(() => packageData.value.basic_info || {})
@@ -394,10 +392,6 @@ const developmentSequence = computed<any[]>(() => {
 const testAndAcceptanceHandoff = computed<any[]>(() => asArray(packageData.value.test_and_acceptance_handoff))
 const risksAndAttention = computed<any[]>(() => asArray(packageData.value.risks_and_attention))
 
-const renderedMarkdown = computed(() => {
-  const html = markdown.render(props.markdown || '')
-  return DOMPurify.sanitize(html)
-})
 
 function asArray(value: unknown): any[] {
   return Array.isArray(value) ? value : []

@@ -5,6 +5,9 @@ import type {
   AssistantMessageRequest,
   AssistantMessageResponse,
   AssistantTaskNotificationRequest,
+  AssetEditProposal,
+  ConfirmAssistantAssetEditProposalResponse,
+  RequirementChangeProposal,
 } from '../types/codemind'
 import { authFetch } from './httpClient'
 
@@ -91,6 +94,54 @@ export async function uploadAssistantAttachment(
     {
       method: 'POST',
       body: formData,
+    },
+  )
+}
+
+export async function proposeAssistantAssetEdit(
+  workspaceId: string,
+  projectCode: string,
+  payload: {
+    requirementChangeProposal?: RequirementChangeProposal | null
+    instruction?: string | null
+    selectedNodeId?: string | null
+    selectedArtifactType?: string | null
+  },
+): Promise<AssistantMessageResponse> {
+  return authFetch<AssistantMessageResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}` +
+      `/projects/${encodeURIComponent(projectCode)}` +
+      `/assistant/asset-edit-proposals/propose`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requirementChangeProposal: payload.requirementChangeProposal || null,
+        instruction: payload.instruction || null,
+        selectedNodeId: payload.selectedNodeId || null,
+        selectedArtifactType: payload.selectedArtifactType || null,
+      }),
+    },
+  )
+}
+
+export async function confirmAssistantAssetEditProposal(
+  workspaceId: string,
+  projectCode: string,
+  proposal: AssetEditProposal,
+  confirmationNote = '',
+): Promise<ConfirmAssistantAssetEditProposalResponse> {
+  return authFetch<ConfirmAssistantAssetEditProposalResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}` +
+      `/projects/${encodeURIComponent(projectCode)}` +
+      `/assistant/asset-edit-proposals/confirm`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        proposal,
+        confirmationNote,
+      }),
     },
   )
 }
