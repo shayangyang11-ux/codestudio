@@ -1,4 +1,3 @@
-
 package com.codemind.platform.module;
 
 import java.util.ArrayList;
@@ -14,6 +13,8 @@ public class ProposeModuleTreePatchRequest {
     private UUID baseArtifactId;
     private Integer baseVersionNo;
     private String baseChecksum;
+    private String baseModuleTreeHash;
+    private Integer baseModuleTreeNodeCount;
     private List<String> selectedDiffItemIds = new ArrayList<>();
     private List<Map<String, Object>> selectedDiffItems = new ArrayList<>();
     private List<Map<String, Object>> attachmentContexts = new ArrayList<>();
@@ -57,6 +58,22 @@ public class ProposeModuleTreePatchRequest {
 
     public void setBaseChecksum(String baseChecksum) {
         this.baseChecksum = baseChecksum;
+    }
+
+    public String getBaseModuleTreeHash() {
+        return baseModuleTreeHash;
+    }
+
+    public void setBaseModuleTreeHash(String baseModuleTreeHash) {
+        this.baseModuleTreeHash = baseModuleTreeHash;
+    }
+
+    public Integer getBaseModuleTreeNodeCount() {
+        return baseModuleTreeNodeCount;
+    }
+
+    public void setBaseModuleTreeNodeCount(Integer baseModuleTreeNodeCount) {
+        this.baseModuleTreeNodeCount = baseModuleTreeNodeCount;
     }
 
     public List<String> getSelectedDiffItemIds() {

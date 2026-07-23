@@ -62,6 +62,8 @@ export async function sendAssistantMessage(
         baseArtifactId: payload.baseArtifactId || null,
         baseVersionNo: payload.baseVersionNo ?? null,
         baseChecksum: payload.baseChecksum || null,
+        baseModuleTreeHash: payload.baseModuleTreeHash || null,
+        baseModuleTreeNodeCount: payload.baseModuleTreeNodeCount ?? null,
       }),
     },
   )
@@ -116,6 +118,8 @@ export async function proposeAssistantAssetEdit(
     baseArtifactId?: string | null
     baseVersionNo?: number | null
     baseChecksum?: string | null
+    baseModuleTreeHash?: string | null
+    baseModuleTreeNodeCount?: number | null
   },
 ): Promise<AssistantMessageResponse> {
   return authFetch<AssistantMessageResponse>(
@@ -135,6 +139,8 @@ export async function proposeAssistantAssetEdit(
         baseArtifactId: payload.baseArtifactId || null,
         baseVersionNo: payload.baseVersionNo ?? null,
         baseChecksum: payload.baseChecksum || null,
+        baseModuleTreeHash: payload.baseModuleTreeHash || null,
+        baseModuleTreeNodeCount: payload.baseModuleTreeNodeCount ?? null,
       }),
     },
   )

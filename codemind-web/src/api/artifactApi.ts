@@ -4,6 +4,8 @@ import type {
   ArtifactResponse,
   ArtifactVersionDetailResponse,
   ArtifactVersionListResponse,
+  DevHandoffPackageResponse,
+  GenerateDevHandoffPackageAssetRequest,
   ManualArtifactEditRequest,
   ManualArtifactEditResponse,
 } from '../types/codemind'
@@ -242,6 +244,30 @@ export async function saveManualArtifactEdit(
   )
 }
 
+
+
+export async function generateDevHandoffPackageAsset(
+  workspaceId: string,
+  projectCode: string,
+  moduleId: string,
+  payload: GenerateDevHandoffPackageAssetRequest = {},
+): Promise<DevHandoffPackageResponse> {
+  return authFetch<DevHandoffPackageResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}` +
+      `/projects/${encodeURIComponent(projectCode)}` +
+      `/modules/${encodeURIComponent(moduleId)}` +
+      `/artifacts/dev-handoff-package`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        forceGenerate: Boolean(payload.forceGenerate),
+        includeUnapproved: payload.includeUnapproved ?? true,
+        note: payload.note || '',
+      }),
+    },
+  )
+}
 
 export function buildModuleArtifactExportZipUrl(
   workspaceId: string,

@@ -6,6 +6,7 @@ import com.codemind.platform.agent.common.client.PythonAgentClient;
 import com.codemind.platform.identity.CurrentUserProvider;
 import com.codemind.platform.module.ProjectModuleEntity;
 import com.codemind.platform.module.ProjectModuleRepository;
+import com.codemind.platform.module.ModuleTreeBaselineSupport;
 import com.codemind.platform.project.ProjectAccessService;
 import com.codemind.platform.project.ProjectAccessService.ProjectAccess;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -121,6 +122,12 @@ public class AssistantAssetEditProposalService {
                 "当前资产已经发生变化，请重新执行附件差异分析后再生成资产局部修订提案。"
         );
 
+        validateModuleTreeBaseline(
+                requirementChangeProposal,
+                project.projectId(),
+                "模块树已经发生变化，请重新执行附件差异分析后再生成资产局部修订提案。"
+        );
+
         Map<String, Object> proposal = buildAssetEditProposal(
                 requirementChangeProposal,
                 instruction,
@@ -193,6 +200,12 @@ public class AssistantAssetEditProposalService {
                 proposal,
                 previous,
                 "当前资产已经发生变化，请重新执行附件差异分析后再生成新的资产局部修订提案。"
+        );
+
+        validateModuleTreeBaseline(
+                proposal,
+                project.projectId(),
+                "模块树已经发生变化，请重新执行附件差异分析后再生成新的资产局部修订提案。"
         );
 
         String proposedContentMarkdown = firstNonBlank(
@@ -386,7 +399,13 @@ public class AssistantAssetEditProposalService {
         proposal.put("baseArtifactId", currentArtifact.getId().toString());
         proposal.put("baseVersionNo", currentArtifact.getVersionNo());
         proposal.put("baseChecksum", currentArtifact.getChecksum());
-        proposal.put("baselineValidationPolicy", "BLOCK_IF_CURRENT_ARTIFACT_CHANGED");
+
+        ModuleTreeBaselineSupport.ModuleTreeBaselineSnapshot moduleTreeBaseline =
+                captureModuleTreeBaseline(project.projectId());
+        proposal.put("baseModuleTreeHash", moduleTreeBaseline.hash());
+        proposal.put("baseModuleTreeNodeCount", moduleTreeBaseline.nodeCount());
+        proposal.put("baseModuleTreeSummary", moduleTreeBaseline.summary());
+        proposal.put("baselineValidationPolicy", "BLOCK_IF_CURRENT_ARTIFACT_OR_MODULE_TREE_CHANGED");
         proposal.put("currentTitle", currentArtifact.getTitle());
         proposal.put("beforeExcerpt", trimForSummary(beforeMarkdown, 520));
         proposal.put("proposedPatchOperations", proposedPatchOperations);
@@ -1035,6 +1054,12 @@ public class AssistantAssetEditProposalService {
         if (request != null && request.getBaseChecksum() != null && !request.getBaseChecksum().isBlank()) {
             proposal.put("baseChecksum", request.getBaseChecksum().trim());
         }
+        if (request != null && request.getBaseModuleTreeHash() != null && !request.getBaseModuleTreeHash().isBlank()) {
+            proposal.put("baseModuleTreeHash", request.getBaseModuleTreeHash().trim());
+        }
+        if (request != null && request.getBaseModuleTreeNodeCount() != null) {
+            proposal.put("baseModuleTreeNodeCount", request.getBaseModuleTreeNodeCount());
+        }
 
         Map<String, Object> targetArtifact = toMap(proposal.get("targetArtifact"));
 
@@ -1056,8 +1081,10 @@ public class AssistantAssetEditProposalService {
 
         if (proposal.containsKey("baseArtifactId")
                 || proposal.containsKey("baseVersionNo")
-                || proposal.containsKey("baseChecksum")) {
-            proposal.put("baselineValidationPolicy", "BLOCK_IF_CURRENT_ARTIFACT_CHANGED");
+                || proposal.containsKey("baseChecksum")
+                || proposal.containsKey("baseModuleTreeHash")
+                || proposal.containsKey("baseModuleTreeNodeCount")) {
+            proposal.put("baselineValidationPolicy", "BLOCK_IF_CURRENT_ARTIFACT_OR_MODULE_TREE_CHANGED");
         }
     }
 
@@ -1270,6 +1297,63 @@ public class AssistantAssetEditProposalService {
         return EDITABLE_ARTIFACTS.contains(artifactType)
                 || STRUCTURED_EDIT_ARTIFACTS.contains(artifactType);
     }
+
+    private void validateModuleTreeBaseline(
+            Map<String, Object> proposal,
+            UUID projectId,
+            String staleMessage
+    ) {
+        if (proposal == null || proposal.isEmpty() || projectId == null) {
+            return;
+        }
+
+        String expectedHash = firstNonBlank(
+                textValue(proposal.get("baseModuleTreeHash")),
+                textValue(deepGet(proposal, "sourceRequirementChangeProposal", "baseModuleTreeHash"))
+        );
+        Integer expectedNodeCount = firstInteger(
+                proposal.get("baseModuleTreeNodeCount"),
+                deepGet(proposal, "sourceRequirementChangeProposal", "baseModuleTreeNodeCount")
+        );
+
+        if (!ModuleTreeBaselineSupport.hasBaseline(expectedHash, expectedNodeCount)) {
+            return;
+        }
+
+        ModuleTreeBaselineSupport.ModuleTreeBaselineSnapshot current =
+                captureModuleTreeBaseline(projectId);
+
+        List<String> mismatches = new ArrayList<>();
+
+        if (!expectedHash.isBlank() && !Objects.equals(expectedHash, current.hash())) {
+            mismatches.add("moduleTreeHash");
+        }
+
+        if (expectedNodeCount != null && !Objects.equals(expectedNodeCount, current.nodeCount())) {
+            mismatches.add("moduleTreeNodeCount");
+        }
+
+        if (!mismatches.isEmpty()) {
+            throw new IllegalArgumentException(
+                    ModuleTreeBaselineSupport.buildMismatchMessage(
+                            staleMessage,
+                            expectedHash,
+                            expectedNodeCount,
+                            current
+                    )
+                            + "；不一致字段：" + String.join(", ", mismatches)
+            );
+        }
+    }
+
+    private ModuleTreeBaselineSupport.ModuleTreeBaselineSnapshot captureModuleTreeBaseline(
+            UUID projectId
+    ) {
+        return ModuleTreeBaselineSupport.capture(
+                projectModuleRepository.findByProjectIdOrderByLevelNoAscSortOrderAsc(projectId)
+        );
+    }
+
 
     private void validateCurrentArtifactBaseline(
             Map<String, Object> proposal,

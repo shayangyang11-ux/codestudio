@@ -131,6 +131,7 @@ class UiContractGenerationHardener:
             components,
             api_bindings,
             navigation_candidates,
+            page_states,
         )
         navigation_targets = self._harden_navigation_targets(
             source.get("navigationTargets") or source.get("navigation_targets"),
@@ -227,29 +228,634 @@ class UiContractGenerationHardener:
         original: UiContractArtifact,
         value: dict[str, Any],
     ) -> UiContractArtifact:
+        """Rebuild a strict ``UiContractArtifact`` after deterministic hardening.
+
+        ``BaseModel.model_copy(update=...)`` does not validate nested update
+        values in Pydantic v2.  The old fallback path could therefore place
+        plain ``dict`` values into fields such as ``page`` or
+        ``qualitySummary``.  Downstream code then failed with errors like
+        ``'dict' object has no attribute 'model_copy'``.
+
+        Keep the original happy path unchanged, but if direct validation fails
+        because the hardener added legacy/helper fields, coerce the enriched
+        payload back to the current strict UI_CONTRACT schema before returning.
+        If even that fails, return the original validated artifact instead of a
+        partially validated model.
+        """
         try:
             return original.__class__.model_validate(value)
         except Exception:
-            update = {
-                key: value[key]
-                for key in [
-                    "pages",
-                    "page",
-                    "mockData",
-                    "apiBindings",
-                    "developmentRules",
-                    "interactions",
-                    "navigationTargets",
-                    "featureCoverage",
-                    "pageStates",
-                    "mockScenarios",
-                    "qualitySummary",
-                    "developmentHandoff",
-                    "analysisSummary",
-                ]
-                if key in value
-            }
-            return original.model_copy(update=update)
+            pass
+
+        try:
+            coerced = self._coerce_current_schema_payload(original, value)
+            return original.__class__.model_validate(coerced)
+        except Exception:
+            return original
+
+    def _coerce_current_schema_payload(
+        self,
+        original: UiContractArtifact,
+        value: dict[str, Any],
+    ) -> dict[str, Any]:
+        base = original.model_dump(
+            mode="python",
+            by_alias=True,
+            exclude_none=False,
+        )
+
+        component_index = self._collect_component_index(base.get("page"))
+        component_ids = list(component_index.keys())
+
+        base["artifactType"] = "UI_CONTRACT"
+        base["schemaVersion"] = "1.0"
+        base["page"] = self._coerce_page(
+            base.get("page"),
+            value.get("page"),
+        )
+        component_index = self._collect_component_index(base.get("page"))
+        component_ids = list(component_index.keys())
+
+        base["pageStates"] = self._coerce_page_states(
+            value.get("pageStates") or base.get("pageStates"),
+            component_ids,
+        )
+        base["apiBindings"] = self._coerce_api_bindings(
+            value.get("apiBindings") or base.get("apiBindings"),
+        )
+        base["interactions"] = self._coerce_interactions(
+            value.get("interactions") or base.get("interactions"),
+            component_index,
+            base.get("apiBindings") or [],
+            base.get("pageStates") or [],
+            base.get("navigationTargets") or [],
+        )
+        base["navigationTargets"] = self._coerce_navigation_targets(
+            value.get("navigationTargets") or base.get("navigationTargets"),
+        )
+        base["featureCoverage"] = self._coerce_feature_coverage(
+            value.get("featureCoverage") or base.get("featureCoverage"),
+        )
+        base["mockScenarios"] = self._coerce_mock_scenarios(
+            value.get("mockScenarios") or base.get("mockScenarios"),
+            base.get("interactions") or [],
+            base.get("pageStates") or [],
+        )
+        base["mockData"] = (
+            dict(value.get("mockData"))
+            if isinstance(value.get("mockData"), dict)
+            else base.get("mockData") or {}
+        )
+        base["developmentRules"] = self._coerce_development_rules(
+            value.get("developmentRules") or base.get("developmentRules"),
+        )
+        base["qualitySummary"] = self._coerce_quality_summary(
+            value.get("qualitySummary") or base.get("qualitySummary"),
+        )
+
+        analysis_summary = str(
+            value.get("analysisSummary")
+            or base.get("analysisSummary")
+            or "已生成页面级 UI_CONTRACT。"
+        ).strip()
+        base["analysisSummary"] = analysis_summary or "已生成页面级 UI_CONTRACT。"
+
+        # Do not carry legacy helper fields such as pages/developmentHandoff into
+        # the strict schema model.
+        base.pop("pages", None)
+        base.pop("developmentHandoff", None)
+
+        return base
+
+    def _coerce_page(
+        self,
+        base_page: Any,
+        candidate_page: Any,
+    ) -> dict[str, Any]:
+        page = dict(base_page) if isinstance(base_page, dict) else {}
+
+        if isinstance(candidate_page, dict):
+            for key in [
+                "pageId",
+                "pageKey",
+                "pageName",
+                "route",
+                "title",
+                "description",
+                "pageKind",
+            ]:
+                value = candidate_page.get(key)
+                if value not in (None, ""):
+                    page[key] = value
+
+            layout = candidate_page.get("layout")
+            if isinstance(layout, dict):
+                layout_type = str(layout.get("type") or "").strip().upper()
+                if layout_type in {
+                    "CENTERED_FORM",
+                    "FORM_DETAIL",
+                    "TABLE_LIST",
+                    "DETAIL_TABS",
+                    "APPROVAL_WORKBENCH",
+                    "DASHBOARD",
+                    "SETTINGS",
+                    "CUSTOM_GRID",
+                }:
+                    page["layout"] = layout
+
+            component_tree = candidate_page.get("componentTree")
+            if isinstance(component_tree, list) and component_tree:
+                page["componentTree"] = component_tree
+
+        page.setdefault("pageId", "current_page")
+        page.setdefault("pageKey", "current_page")
+        page.setdefault("pageName", "当前页面")
+        page.setdefault("route", f"/mock/{page.get('pageKey') or 'page'}")
+        page.setdefault("title", page.get("pageName") or "当前页面")
+        page.setdefault("description", "页面级交互原型。")
+        page.setdefault("pageKind", "PAGE")
+        page.setdefault("layout", {"type": "FORM_DETAIL", "columns": 1, "regions": []})
+        page.setdefault("componentTree", [])
+
+        if not isinstance(page.get("layout"), dict):
+            page["layout"] = {"type": "FORM_DETAIL", "columns": 1, "regions": []}
+
+        return page
+
+    def _coerce_page_states(
+        self,
+        raw_states: Any,
+        component_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for item in self._as_list(raw_states):
+            if not isinstance(item, dict):
+                continue
+
+            state_key = str(
+                item.get("stateKey")
+                or item.get("key")
+                or item.get("name")
+                or item.get("pageStateKey")
+                or ""
+            ).strip().upper()
+            if not state_key or state_key in seen:
+                continue
+
+            state_type = state_key if state_key in {
+                "DEFAULT",
+                "LOADING",
+                "EMPTY",
+                "ERROR",
+                "SUCCESS",
+                "DISABLED",
+            } else "DEFAULT"
+
+            result.append(
+                {
+                    "stateKey": state_key,
+                    "type": state_type,
+                    "title": str(
+                        item.get("title")
+                        or item.get("stateName")
+                        or item.get("name")
+                        or self._state_label(state_key)
+                    ),
+                    "message": str(
+                        item.get("message")
+                        or item.get("description")
+                        or self._state_description(state_key)
+                    ),
+                    "visibleComponentIds": self._filter_known_ids(
+                        item.get("visibleComponentIds"),
+                        component_ids,
+                    ),
+                    "disabledComponentIds": self._filter_known_ids(
+                        item.get("disabledComponentIds"),
+                        component_ids,
+                    ),
+                }
+            )
+            seen.add(state_key)
+
+        if not result:
+            result.append(
+                {
+                    "stateKey": "DEFAULT",
+                    "type": "DEFAULT",
+                    "title": "默认态",
+                    "message": "页面正常展示状态。",
+                    "visibleComponentIds": component_ids,
+                    "disabledComponentIds": [],
+                }
+            )
+
+        return result
+
+    def _coerce_api_bindings(
+        self,
+        raw_bindings: Any,
+    ) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for index, item in enumerate(self._as_list(raw_bindings)):
+            if not isinstance(item, dict):
+                continue
+
+            binding_key = str(
+                item.get("bindingKey")
+                or item.get("binding_key")
+                or item.get("id")
+                or item.get("key")
+                or f"binding_{index + 1}"
+            ).strip()
+            if not binding_key or binding_key in seen:
+                continue
+
+            method = str(item.get("method") or "POST").strip().upper()
+            if method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+                method = "POST"
+
+            status = str(item.get("status") or "PLANNED").strip().upper()
+            if status not in {"MOCK", "PLANNED", "BOUND"}:
+                status = "PLANNED"
+
+            result.append(
+                {
+                    "bindingKey": binding_key,
+                    "method": method,
+                    "path": str(item.get("path") or item.get("url") or f"/api/planned/{index + 1}"),
+                    "status": status,
+                    "requestSchema": dict(item.get("requestSchema")) if isinstance(item.get("requestSchema"), dict) else {},
+                    "responseSchema": dict(item.get("responseSchema")) if isinstance(item.get("responseSchema"), dict) else {},
+                    "usedByActionIds": self._normalize_str_list(item.get("usedByActionIds")),
+                }
+            )
+            seen.add(binding_key)
+
+        return result
+
+    def _coerce_interactions(
+        self,
+        raw_interactions: Any,
+        component_index: dict[str, dict[str, Any]],
+        api_bindings: list[dict[str, Any]],
+        page_states: list[dict[str, Any]],
+        navigation_targets: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        component_ids = list(component_index.keys())
+        first_component_id = component_ids[0] if component_ids else None
+        state_keys = {
+            str(item.get("stateKey") or "").upper()
+            for item in page_states
+            if isinstance(item, dict) and item.get("stateKey")
+        }
+        navigation_target_ids = {
+            str(item.get("targetPageId") or "")
+            for item in navigation_targets
+            if isinstance(item, dict) and item.get("targetPageId")
+        }
+        api_binding_keys = {
+            str(item.get("bindingKey"))
+            for item in api_bindings
+            if isinstance(item, dict) and item.get("bindingKey")
+        }
+
+        type_map = {
+            "QUERY": "QUERY_DATA",
+            "SEARCH": "QUERY_DATA",
+            "LIST": "QUERY_DATA",
+            "SUBMIT": "SUBMIT_FORM",
+            "VALIDATE": "SUBMIT_FORM",
+            "APPROVE": "SUBMIT_FORM",
+            "REJECT": "SUBMIT_FORM",
+            "EXPORT": "SUBMIT_FORM",
+            "IMPORT": "SUBMIT_FORM",
+            "DELETE": "DELETE_ROW",
+        }
+        allowed_types = {
+            "SET_VALUE",
+            "RESET_FORM",
+            "SUBMIT_FORM",
+            "OPEN_MODAL",
+            "CLOSE_MODAL",
+            "SWITCH_TAB",
+            "NAVIGATE",
+            "SHOW_TOAST",
+            "OPEN_CONFIRM",
+            "CONFIRM_ACTION",
+            "CANCEL_ACTION",
+            "SET_PAGE_STATE",
+            "QUERY_DATA",
+            "DELETE_ROW",
+        }
+
+        for index, item in enumerate(self._as_list(raw_interactions)):
+            if not isinstance(item, dict):
+                continue
+
+            action_id = str(item.get("actionId") or item.get("id") or f"action_{index + 1}").strip()
+            if not action_id:
+                action_id = f"action_{index + 1}"
+            if action_id in seen:
+                action_id = f"{action_id}_{index + 1}"
+            seen.add(action_id)
+
+            raw_type = str(item.get("type") or "SUBMIT_FORM").strip().upper()
+            action_type = type_map.get(raw_type, raw_type)
+            if action_type not in allowed_types:
+                action_type = "SUBMIT_FORM"
+
+            label = str(item.get("label") or item.get("title") or "")
+            target_id = str(
+                item.get("targetId")
+                or item.get("componentId")
+                or item.get("sourceComponentId")
+                or ""
+            ).strip()
+            source_component_id = str(
+                item.get("sourceComponentId")
+                or item.get("componentId")
+                or item.get("targetId")
+                or first_component_id
+                or ""
+            ).strip()
+
+            action_type, target_id, source_component_id = self._normalize_action_target(
+                action_id,
+                action_type,
+                label,
+                target_id,
+                source_component_id,
+                component_index,
+                state_keys,
+                bool(item.get("targetPageId")),
+            )
+
+            target_page_id = str(item.get("targetPageId") or "").strip()
+            if action_type == "NAVIGATE" and target_page_id not in navigation_target_ids:
+                action_type = "SHOW_TOAST"
+                target_page_id = ""
+
+            data_binding_key = str(
+                item.get("dataBindingKey")
+                or item.get("apiBinding")
+                or item.get("bindingKey")
+                or ""
+            ).strip()
+            if data_binding_key and api_binding_keys and data_binding_key not in api_binding_keys:
+                data_binding_key = ""
+
+            result.append(
+                {
+                    "actionId": action_id,
+                    "type": action_type,
+                    "label": label,
+                    "sourceComponentId": source_component_id or None,
+                    "targetId": target_id or None,
+                    "targetPageId": target_page_id or None,
+                    "targetTabKey": str(item.get("targetTabKey") or "") or None,
+                    "dataBindingKey": data_binding_key or None,
+                    "scenarioKey": str(item.get("scenarioKey") or "") or None,
+                    "payload": dict(item.get("payload")) if isinstance(item.get("payload"), dict) else {},
+                    "successActionIds": self._normalize_str_list(item.get("successActionIds")),
+                    "failureActionIds": self._normalize_str_list(item.get("failureActionIds")),
+                    "featureIds": self._normalize_str_list(item.get("featureIds")),
+                    "confirmationMessage": str(item.get("confirmationMessage") or ""),
+                }
+            )
+
+        return result
+
+    def _coerce_navigation_targets(
+        self,
+        raw_targets: Any,
+    ) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for index, item in enumerate(self._as_list(raw_targets)):
+            if not isinstance(item, dict):
+                continue
+
+            target_id = str(item.get("targetPageId") or item.get("pageId") or f"target_{index + 1}").strip()
+            if not target_id or target_id in seen:
+                continue
+
+            status = str(item.get("status") or "PLANNED").strip().upper()
+            if status not in {"RESOLVED", "PLANNED"}:
+                status = "PLANNED"
+
+            result.append(
+                {
+                    "targetPageId": target_id,
+                    "targetPageKey": str(item.get("targetPageKey") or item.get("pageKey") or target_id),
+                    "targetPageName": str(item.get("targetPageName") or item.get("pageName") or target_id),
+                    "route": str(item.get("route") or item.get("path") or ""),
+                    "status": status,
+                }
+            )
+            seen.add(target_id)
+
+        return result
+
+    def _coerce_feature_coverage(
+        self,
+        raw_coverage: Any,
+    ) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        for index, item in enumerate(self._as_list(raw_coverage)):
+            if not isinstance(item, dict):
+                continue
+
+            feature_id = str(item.get("featureId") or item.get("id") or f"feature_{index + 1}").strip()
+            if not feature_id or feature_id in seen:
+                continue
+
+            status = str(item.get("status") or "PARTIAL").strip().upper()
+            if status not in {"FULL", "PARTIAL", "MISSING", "NOT_APPLICABLE"}:
+                status = "PARTIAL"
+
+            notes = self._normalize_str_list(item.get("notes"))
+            notes.extend(self._normalize_str_list(item.get("warnings")))
+
+            result.append(
+                {
+                    "featureId": feature_id,
+                    "featureKey": str(item.get("featureKey") or item.get("key") or feature_id),
+                    "featureName": str(item.get("featureName") or item.get("name") or feature_id),
+                    "status": status,
+                    "componentIds": self._normalize_str_list(item.get("componentIds")),
+                    "actionIds": self._normalize_str_list(item.get("actionIds")),
+                    "notes": notes,
+                }
+            )
+            seen.add(feature_id)
+
+        return result
+
+    def _coerce_mock_scenarios(
+        self,
+        raw_scenarios: Any,
+        interactions: list[dict[str, Any]],
+        page_states: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        default_action_id = str(interactions[0].get("actionId")) if interactions else "default_action"
+        state_keys = [
+            str(item.get("stateKey"))
+            for item in page_states
+            if isinstance(item, dict) and item.get("stateKey")
+        ]
+        default_state = state_keys[0] if state_keys else None
+
+        for index, item in enumerate(self._as_list(raw_scenarios)):
+            if not isinstance(item, dict):
+                continue
+
+            scenario_key = str(item.get("scenarioKey") or item.get("scenarioId") or f"scenario_{index + 1}").strip()
+            if not scenario_key or scenario_key in seen:
+                continue
+
+            outcome = str(item.get("outcome") or "SUCCESS").strip().upper()
+            if outcome not in {"SUCCESS", "FAILURE"}:
+                outcome = "SUCCESS"
+
+            result.append(
+                {
+                    "scenarioKey": scenario_key,
+                    "actionId": str(item.get("actionId") or default_action_id),
+                    "outcome": outcome,
+                    "delayMs": int(item.get("delayMs") or 300),
+                    "message": str(item.get("message") or item.get("description") or ""),
+                    "nextPageState": str(item.get("nextPageState") or item.get("pageStateKey") or default_state or "") or None,
+                    "response": dict(item.get("response")) if isinstance(item.get("response"), dict) else {},
+                }
+            )
+            seen.add(scenario_key)
+
+        return result
+
+    def _coerce_development_rules(
+        self,
+        raw_rules: Any,
+    ) -> dict[str, Any]:
+        rules = dict(raw_rules) if isinstance(raw_rules, dict) else {}
+        allowed = {
+            "mustFollowLayout",
+            "mustFollowFields",
+            "mustFollowValidationRules",
+            "mustFollowInteractionFlow",
+            "mustFollowApiBindings",
+            "allowStyleOptimization",
+            "breakingChangeRequiresReview",
+            "arbitraryScriptForbidden",
+            "mockMustUseScenarioEngine",
+        }
+        result = {
+            key: bool(rules.get(key))
+            for key in allowed
+            if key in rules
+        }
+        result.setdefault("mustFollowLayout", True)
+        result.setdefault("mustFollowFields", True)
+        result.setdefault("mustFollowValidationRules", True)
+        result.setdefault("mustFollowInteractionFlow", True)
+        result.setdefault("mustFollowApiBindings", True)
+        result.setdefault("allowStyleOptimization", True)
+        result.setdefault("breakingChangeRequiresReview", True)
+        result.setdefault("arbitraryScriptForbidden", True)
+        result.setdefault("mockMustUseScenarioEngine", True)
+        return result
+
+    def _coerce_quality_summary(
+        self,
+        raw_summary: Any,
+    ) -> dict[str, Any]:
+        summary = dict(raw_summary) if isinstance(raw_summary, dict) else {}
+        score = int(summary.get("score") or 80)
+        coverage_rate = int(summary.get("coverageRate") or 0)
+        return {
+            "score": max(0, min(100, score)),
+            "coverageRate": max(0, min(100, coverage_rate)),
+            "generationMode": "LLM_STRUCTURED",
+            "blockers": self._normalize_str_list(summary.get("blockers")),
+            "warnings": self._normalize_str_list(summary.get("warnings")),
+        }
+
+    def _collect_component_ids(
+        self,
+        page: Any,
+    ) -> list[str]:
+        if not isinstance(page, dict):
+            return []
+
+        result: list[str] = []
+
+        def visit(value: Any) -> None:
+            if not isinstance(value, dict):
+                return
+
+            component_id = str(value.get("componentId") or "").strip()
+            if component_id and component_id not in result:
+                result.append(component_id)
+
+            for child in self._as_list(value.get("children")):
+                visit(child)
+
+        for component in self._as_list(page.get("componentTree")):
+            visit(component)
+
+        return result
+
+    def _collect_component_index(
+        self,
+        page: Any,
+    ) -> dict[str, dict[str, Any]]:
+        if not isinstance(page, dict):
+            return {}
+
+        result: dict[str, dict[str, Any]] = {}
+
+        def visit(value: Any) -> None:
+            if not isinstance(value, dict):
+                return
+
+            component_id = str(value.get("componentId") or value.get("id") or value.get("key") or "").strip()
+            if component_id:
+                result[component_id] = value
+
+            for child in self._as_list(value.get("children")):
+                visit(child)
+
+            for child in self._as_list(value.get("components")):
+                visit(child)
+
+            for child in self._as_list(value.get("items")):
+                visit(child)
+
+        for component in self._as_list(page.get("componentTree") or page.get("components")):
+            visit(component)
+
+        return result
+
+    def _filter_known_ids(
+        self,
+        raw_ids: Any,
+        known_ids: list[str],
+    ) -> list[str]:
+        values = self._normalize_str_list(raw_ids)
+        if not known_ids:
+            return values
+        return [value for value in values if value in known_ids]
 
     def _extract_current_page(
         self,
@@ -635,6 +1241,7 @@ class UiContractGenerationHardener:
         components: list[dict[str, Any]],
         api_bindings: list[dict[str, Any]],
         navigation_candidates: list[dict[str, Any]],
+        page_states: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         interactions = [
             dict(item)
@@ -700,7 +1307,12 @@ class UiContractGenerationHardener:
             interactions.append(item)
             existing_ids.add(action_id)
 
-        return self._sanitize_interactions(interactions)
+        return self._sanitize_interactions(
+            interactions,
+            components,
+            page_states,
+            navigation_candidates,
+        )
 
     def _harden_navigation_targets(
         self,
@@ -1128,9 +1740,27 @@ class UiContractGenerationHardener:
     def _sanitize_interactions(
         self,
         interactions: list[dict[str, Any]],
+        components: list[dict[str, Any]],
+        page_states: list[dict[str, Any]],
+        navigation_candidates: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
         seen: set[str] = set()
+        component_index = {
+            self._component_id(component): component
+            for component in components
+            if self._component_id(component)
+        }
+        state_keys = {
+            str(item.get("stateKey") or "").upper()
+            for item in page_states
+            if isinstance(item, dict) and item.get("stateKey")
+        }
+        navigation_target_ids = {
+            str(item.get("page_id") or item.get("pageId") or "")
+            for item in navigation_candidates
+            if isinstance(item, dict) and (item.get("page_id") or item.get("pageId"))
+        }
 
         for index, item in enumerate(interactions):
             action_id = str(item.get("actionId") or item.get("id") or f"action_{index + 1}")
@@ -1140,6 +1770,43 @@ class UiContractGenerationHardener:
             seen.add(action_id)
             normalized = dict(item)
             normalized["actionId"] = action_id
+            action_type = str(normalized.get("type") or "").upper()
+            label = str(normalized.get("label") or normalized.get("title") or "")
+            target_id = str(
+                normalized.get("targetId")
+                or normalized.get("componentId")
+                or normalized.get("sourceComponentId")
+                or ""
+            ).strip()
+            source_component_id = str(
+                normalized.get("sourceComponentId")
+                or normalized.get("componentId")
+                or normalized.get("targetId")
+                or ""
+            ).strip()
+
+            action_type, target_id, source_component_id = self._normalize_action_target(
+                action_id,
+                action_type,
+                label,
+                target_id,
+                source_component_id,
+                component_index,
+                state_keys,
+                bool(normalized.get("targetPageId")),
+            )
+
+            target_page_id = str(normalized.get("targetPageId") or "").strip()
+            if action_type == "NAVIGATE" and target_page_id not in navigation_target_ids:
+                action_type = "SHOW_TOAST"
+                target_page_id = ""
+
+            normalized["type"] = action_type
+            normalized["sourceComponentId"] = source_component_id or None
+            normalized["targetId"] = target_id or None
+            normalized["targetPageId"] = target_page_id or None
+            normalized.pop("componentId", None)
+            normalized.pop("component_id", None)
             normalized.pop("targetPageKey", None)
             normalized.pop("targetPageName", None)
             normalized.pop("target_page_key", None)
@@ -1147,6 +1814,206 @@ class UiContractGenerationHardener:
             result.append(normalized)
 
         return result
+
+    def _normalize_action_target(
+        self,
+        action_id: str,
+        action_type: str,
+        label: str,
+        target_id: str,
+        source_component_id: str,
+        component_index: dict[str, dict[str, Any]],
+        state_keys: set[str],
+        has_navigation_target: bool,
+    ) -> tuple[str, str, str]:
+        normalized_type = str(action_type or "").strip().upper() or "SHOW_TOAST"
+        normalized_target = str(target_id or "").strip()
+        normalized_source = str(source_component_id or "").strip()
+
+        if normalized_source and normalized_source not in component_index:
+            normalized_source = ""
+
+        if self._looks_like_navigation_action(action_id, normalized_type, label):
+            if normalized_type != "NAVIGATE" or not has_navigation_target:
+                normalized_type = "SHOW_TOAST"
+            if normalized_target and normalized_target not in component_index:
+                normalized_target = ""
+            return normalized_type, normalized_target, normalized_source
+
+        if normalized_type == "SET_PAGE_STATE":
+            state_key = normalized_target.upper()
+            if state_key not in state_keys:
+                state_key = self._semantic_state_for_action_text(
+                    f"{action_id} {label} {normalized_type}",
+                    state_keys,
+                )
+            return normalized_type, state_key, normalized_source
+
+        if normalized_type in {"SUBMIT_FORM", "RESET_FORM"}:
+            form_id = self._resolve_form_target(
+                normalized_target,
+                normalized_source,
+                component_index,
+            )
+            if form_id:
+                return normalized_type, form_id, normalized_source or form_id
+
+            return "SHOW_TOAST", "", normalized_source
+
+        if normalized_type == "OPEN_MODAL":
+            modal_id = self._resolve_component_target(
+                normalized_target,
+                component_index,
+                {"modal"},
+            )
+            if modal_id:
+                return normalized_type, modal_id, normalized_source
+            return "SHOW_TOAST", "", normalized_source
+
+        if normalized_type == "SWITCH_TAB":
+            tabs_id = self._resolve_component_target(
+                normalized_target,
+                component_index,
+                {"tabs"},
+            )
+            if tabs_id:
+                return normalized_type, tabs_id, normalized_source
+            return "SHOW_TOAST", "", normalized_source
+
+        if normalized_type in {"QUERY_DATA", "DELETE_ROW", "SET_VALUE"}:
+            if normalized_target and normalized_target not in component_index:
+                normalized_target = ""
+            return normalized_type, normalized_target, normalized_source
+
+        if normalized_target and normalized_target not in component_index:
+            normalized_target = ""
+
+        return normalized_type, normalized_target, normalized_source
+
+    def _looks_like_navigation_action(
+        self,
+        action_id: str,
+        action_type: str,
+        label: str,
+    ) -> bool:
+        text = f"{action_id} {action_type} {label}".lower()
+        return any(
+            token in text
+            for token in [
+                "navigate",
+                "navigation",
+                "switch_to",
+                "switch-to",
+                "jump",
+                "route",
+                "redirect",
+                "register",
+                "signup",
+                "sign_up",
+                "login",
+                "登录",
+                "注册",
+                "跳转",
+                "切换",
+                "返回",
+            ]
+        ) and not any(
+            token in text
+            for token in [
+                "submit",
+                "save",
+                "confirm",
+                "提交",
+                "保存",
+                "确认",
+            ]
+        )
+
+    def _semantic_state_for_action_text(
+        self,
+        text: str,
+        state_keys: set[str],
+    ) -> str:
+        lower = text.lower()
+        candidates: list[str]
+
+        if any(token in lower for token in ["success", "succeed", "complete", "done", "成功", "完成"]):
+            candidates = ["SUCCESS", "DEFAULT"]
+        elif any(token in lower for token in ["error", "fail", "failure", "invalid", "异常", "错误", "失败"]):
+            candidates = ["ERROR", "DEFAULT"]
+        elif any(token in lower for token in ["loading", "pending", "submitting", "加载", "处理中", "提交中"]):
+            candidates = ["LOADING", "DEFAULT"]
+        elif any(token in lower for token in ["empty", "none", "暂无", "为空"]):
+            candidates = ["EMPTY", "DEFAULT"]
+        else:
+            candidates = ["DEFAULT", "SUCCESS", "ERROR", "LOADING"]
+
+        for candidate in candidates:
+            if candidate in state_keys:
+                return candidate
+
+        return sorted(state_keys)[0] if state_keys else "DEFAULT"
+
+    def _resolve_form_target(
+        self,
+        target_id: str,
+        source_component_id: str,
+        component_index: dict[str, dict[str, Any]],
+    ) -> str:
+        direct = self._resolve_component_target(
+            target_id,
+            component_index,
+            {"form"},
+        )
+        if direct:
+            return direct
+
+        source_direct = self._resolve_component_target(
+            source_component_id,
+            component_index,
+            {"form"},
+        )
+        if source_direct:
+            return source_direct
+
+        for value in [target_id, source_component_id]:
+            if not value:
+                continue
+
+            candidates = []
+            if value.endswith("_button"):
+                candidates.append(value.removesuffix("_button") + "_form")
+            if value.endswith("_btn"):
+                candidates.append(value.removesuffix("_btn") + "_form")
+            if "button" in value:
+                candidates.append(value.replace("button", "form"))
+            if "btn" in value:
+                candidates.append(value.replace("btn", "form"))
+
+            for candidate in candidates:
+                if self._component_type(component_index.get(candidate, {})) == "form":
+                    return candidate
+
+        for component_id, component in component_index.items():
+            if self._component_type(component) == "form":
+                return component_id
+
+        return ""
+
+    def _resolve_component_target(
+        self,
+        target_id: str,
+        component_index: dict[str, dict[str, Any]],
+        expected_types: set[str],
+    ) -> str:
+        if target_id and self._component_type(component_index.get(target_id, {})) in expected_types:
+            return target_id
+
+        for component_id, component in component_index.items():
+            if self._component_type(component) in expected_types:
+                return component_id
+
+        return ""
 
     def _best_component_for_feature(
         self,

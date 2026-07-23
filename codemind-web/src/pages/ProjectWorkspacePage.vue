@@ -53,7 +53,7 @@
         :is-generating-prd="isGeneratingPrd" :is-generating-business-flow="isGeneratingBusinessFlow"
         :is-generating-page-spec="isGeneratingPageSpec" :is-generating-data-model="isGeneratingDataModel"
         :is-generating-api-contract="isGeneratingApiContract" :is-generating-test-spec="isGeneratingTestSpec"
-        :is-generating-dev-handoff-package="isGeneratingDevHandoffPackage" :module-prd-markdown="modulePrdMarkdown"
+        :is-generating-dev-handoff-package="isGeneratingDevHandoffPackage || isGeneratingDevHandoffPackageDirect" :module-prd-markdown="modulePrdMarkdown"
         :is-generating-full-chain="isGeneratingFullChain" :prd-artifact="prdArtifact"
         :business-flow-markdown="businessFlowMarkdown" :business-flow-artifact="businessFlowArtifact"
         :page-spec-markdown="pageSpecMarkdown" :page-spec-artifact="pageSpecArtifact"
@@ -222,6 +222,7 @@ import {
   downloadProjectArtifactExportZip,
   fetchModuleArtifactVersion,
   fetchModuleArtifactVersions,
+  generateDevHandoffPackageAsset,
   rejectModuleArtifactVersion,
   rollbackModuleArtifactVersion,
   submitModuleArtifactReview,
@@ -301,6 +302,7 @@ const treePatchProposal = ref<ModuleTreePatchProposalResponse | null>(null)
 const isSendingAssistantMessage = ref(false)
 const isApplyingTreePatch = ref(false)
 const manualArtifactEditSaving = ref(false)
+const isGeneratingDevHandoffPackageDirect = ref(false)
 
 const moduleTreeExists = computed(() => modules.value.length > 0)
 const requirementText = ref('我要做一个电商系统，包含用户、订单、支付、库存、后台管理、权限控制等模块。')
@@ -986,7 +988,7 @@ async function handleAssistantSend(payload: {
       return
     }
   } catch (error) {
-    window.alert(resolveErrorMessage(error, 'AI Assistant 消息处理失败。'))
+    showAssistantInlineError(error, 'AI Assistant 消息处理失败。')
   } finally {
     isSendingAssistantMessage.value = false
   }
@@ -1135,7 +1137,7 @@ async function proposeAssetEditFromRequirementChange(
       message: '已根据确认后的需求变更生成资产编辑提案。请在右侧 Assistant 卡片中确认是否生成“新版本待确认”。',
     }
   } catch (error) {
-    window.alert(resolveErrorMessage(error, '生成资产编辑提案失败。'))
+    showAssistantInlineError(error, '生成资产编辑提案失败。')
   } finally {
     isSendingAssistantMessage.value = false
   }
@@ -1292,7 +1294,7 @@ async function proposeAssetEditFromAttachmentDrivenChange(
         '已根据附件材料生成资产局部修订提案，请在右侧 Assistant 中确认是否保存为新版本。',
     }
   } catch (error) {
-    window.alert(resolveErrorMessage(error, '根据附件生成资产编辑提案失败。'))
+    showAssistantInlineError(error, '根据附件生成资产编辑提案失败。')
   } finally {
     isSendingAssistantMessage.value = false
   }
@@ -1427,7 +1429,9 @@ async function proposeAssetEditFromAttachmentArtifactDiff(
           baseArtifactId: baseline.baseArtifactId,
           baseVersionNo: baseline.baseVersionNo,
           baseChecksum: baseline.baseChecksum,
-          baselineValidationPolicy: 'BLOCK_IF_CURRENT_ARTIFACT_CHANGED',
+          baseModuleTreeHash: baseline.baseModuleTreeHash,
+          baseModuleTreeNodeCount: baseline.baseModuleTreeNodeCount,
+          baselineValidationPolicy: 'BLOCK_IF_CURRENT_ARTIFACT_OR_MODULE_TREE_CHANGED',
           targetNode: proposal.targetNode || {
             nodeId: selectedModule.value.id,
             nodeName: getModuleDisplayName(selectedModule.value),
@@ -1473,7 +1477,7 @@ async function proposeAssetEditFromAttachmentArtifactDiff(
         '已基于附件与当前资产差异生成资产局部修订提案，请在右侧 Assistant 中确认是否保存为新版本。',
     }
   } catch (error) {
-    window.alert(resolveErrorMessage(error, '基于差异生成资产编辑提案失败。'))
+    showAssistantInlineError(error, '基于差异生成资产编辑提案失败。')
   } finally {
     isSendingAssistantMessage.value = false
   }
@@ -1543,6 +1547,8 @@ function resolveAttachmentDiffBaseline(
   baseArtifactId: string | null
   baseVersionNo: number | null
   baseChecksum: string | null
+  baseModuleTreeHash: string | null
+  baseModuleTreeNodeCount: number | null
 } {
   const targetArtifact = proposal.targetArtifact
   const rawVersionNo =
@@ -1566,6 +1572,11 @@ function resolveAttachmentDiffBaseline(
       proposal.baseChecksum ||
       targetArtifact?.checksum ||
       null,
+    baseModuleTreeHash: proposal.baseModuleTreeHash || null,
+    baseModuleTreeNodeCount:
+      typeof proposal.baseModuleTreeNodeCount === 'number'
+        ? proposal.baseModuleTreeNodeCount
+        : null,
   }
 }
 
@@ -2032,7 +2043,7 @@ async function handleConfirmAssetEditProposal(
       actions: [],
     }
   } catch (error) {
-    window.alert(resolveErrorMessage(error, '确认资产编辑提案失败。'))
+    showAssistantInlineError(error, '确认资产编辑提案失败。')
   } finally {
     isSendingAssistantMessage.value = false
   }
@@ -2066,6 +2077,8 @@ async function dispatchAssistantFollowup(payload: {
   baseArtifactId?: string | null
   baseVersionNo?: number | null
   baseChecksum?: string | null
+  baseModuleTreeHash?: string | null
+  baseModuleTreeNodeCount?: number | null
 }) {
   const text = payload.message.trim()
 
@@ -2094,6 +2107,8 @@ async function dispatchAssistantFollowup(payload: {
         baseArtifactId: payload.baseArtifactId || null,
         baseVersionNo: payload.baseVersionNo ?? null,
         baseChecksum: payload.baseChecksum || null,
+        baseModuleTreeHash: payload.baseModuleTreeHash || null,
+        baseModuleTreeNodeCount: payload.baseModuleTreeNodeCount ?? null,
       },
     )
 
@@ -2114,7 +2129,7 @@ async function dispatchAssistantFollowup(payload: {
       await refreshAfterAssistantTaskDispatch()
     }
   } catch (error) {
-    window.alert(resolveErrorMessage(error, 'AI Assistant 后续执行失败。'))
+    showAssistantInlineError(error, 'AI Assistant 后续执行失败。')
   } finally {
     isSendingAssistantMessage.value = false
   }
@@ -2386,7 +2401,7 @@ async function handleApplyTreePatchProposal(
   const operations = proposal?.proposal?.operations || []
 
   if (!operations.length) {
-    window.alert('当前没有可应用的模块树变更操作。')
+    showAssistantInlineError(new Error('当前没有可应用的模块树变更操作。'), '当前没有可应用的模块树变更操作。')
     return
   }
 
@@ -2425,6 +2440,14 @@ const response = await applyModuleTreePatch(
     description: patchDescription,
     source: patchSource,
     operations,
+    baseModuleTreeHash:
+      typeof proposalPayload['baseModuleTreeHash'] === 'string'
+        ? proposalPayload['baseModuleTreeHash']
+        : null,
+    baseModuleTreeNodeCount:
+      typeof proposalPayload['baseModuleTreeNodeCount'] === 'number'
+        ? proposalPayload['baseModuleTreeNodeCount']
+        : null,
   },
 )
 
@@ -2491,7 +2514,7 @@ const response = await applyModuleTreePatch(
       actions: [],
     }
   } catch (error) {
-    window.alert(resolveErrorMessage(error, '应用 AI 模块树变更提案失败。'))
+    showAssistantInlineError(error, '应用 AI 模块树变更提案失败。')
   } finally {
     isApplyingTreePatch.value = false
   }
@@ -2935,6 +2958,32 @@ function resolveErrorMessage(
   return fallback
 }
 
+
+function showAssistantInlineError(
+  error: unknown,
+  fallback: string,
+) {
+  const message = resolveErrorMessage(error, fallback)
+
+  artifactTaskFeedback.value = {
+    level: 'error',
+    message,
+  }
+
+  latestAssistantResponse.value = {
+    messageId: `assistant_error_${Date.now()}`,
+    intent: 'GENERAL_QA',
+    reply: message,
+    requiresUserConfirmation: false,
+    proposal: null,
+    requirementChangeProposal: null,
+    assetEditProposal: null,
+    attachmentDrivenChangeProposal: null,
+    attachmentArtifactDiffProposal: null,
+    actions: [],
+  }
+}
+
 async function loadUiContractReadiness(
   node: ModuleTreeNode | null = selectedModule.value,
 ): Promise<UiContractGenerationReadinessResponse | null> {
@@ -3153,7 +3202,107 @@ async function handleGenerateUiContract() {
 }
 
 async function handleGenerateDevHandoffPackage() {
-  await startAsyncArtifactTask('GENERATE_DEV_HANDOFF_PACKAGE')
+  const module = selectedModule.value
+
+  if (!module?.id) {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message: '请先选择一个需求树节点，再生成开发交接包。',
+    }
+    return
+  }
+
+  isGeneratingDevHandoffPackageDirect.value = true
+  artifactTaskFeedback.value = {
+    level: 'info',
+    message: '正在汇总当前节点的需求资产并生成开发交接包。',
+  }
+
+  try {
+    const response = await generateDevHandoffPackageAsset(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      module.id,
+      {
+        includeUnapproved: true,
+        note: '由 Requirement Agent 主线入口生成。',
+      },
+    )
+
+    await loadCurrentArtifactByType(
+      module,
+      'DEV_HANDOFF_PACKAGE',
+    )
+
+    selectedArtifactType.value = 'DEV_HANDOFF_PACKAGE'
+
+    await Promise.allSettled([
+      loadAllCurrentModuleArtifacts(module),
+      loadCurrentModuleAgentTasks(),
+      loadDevelopmentHandoffReadiness(module),
+    ])
+
+    await saveCurrentWorkspaceState({
+      selectedModuleId: module.id,
+      selectedArtifactType: 'DEV_HANDOFF_PACKAGE',
+      selectedArtifactId: response.artifactId || null,
+      activeAgentTab: activeTab.value,
+      uiState: {
+        lastAction: 'generate-dev-handoff-package-asset',
+        artifactId: response.artifactId,
+        versionNo: response.versionNo,
+        blockerCount: response.blockers?.length || 0,
+        warningCount: response.warnings?.length || 0,
+      },
+    })
+
+    const blockerCount = response.blockers?.length || 0
+    const warningCount = response.warnings?.length || 0
+
+    artifactTaskFeedback.value = {
+      level: blockerCount > 0 ? 'info' : 'success',
+      message:
+        response.message ||
+        `开发交接包已保存为 V${response.versionNo}。`,
+    }
+
+    latestAssistantResponse.value = {
+      messageId: `dev_handoff_package_${Date.now()}`,
+      intent: 'GENERATE_REQUIREMENT_ARTIFACT',
+      reply:
+        response.message ||
+        `已生成开发交接包 V${response.versionNo}。` +
+          (blockerCount > 0
+            ? ` 存在 ${blockerCount} 个阻断项，请先处理。`
+            : warningCount > 0
+              ? ` 存在 ${warningCount} 个待复核提醒。`
+              : ' 可进入评审或交付给后续开发 Agent。'),
+      requiresUserConfirmation: false,
+      proposal: null,
+      requirementChangeProposal: null,
+      assetEditProposal: null,
+      attachmentDrivenChangeProposal: null,
+      attachmentArtifactDiffProposal: null,
+      actions: [
+        {
+          type: 'VIEW_ARTIFACT',
+          label: '查看开发交接包',
+          payload: {
+            artifactType: 'DEV_HANDOFF_PACKAGE',
+            artifactId: response.artifactId,
+            versionNo: response.versionNo,
+          },
+        },
+      ],
+    }
+  } catch (error) {
+    showAssistantInlineError(
+      error,
+      '生成开发交接包失败。',
+    )
+  } finally {
+    isGeneratingDevHandoffPackageDirect.value = false
+  }
 }
 
 async function handleViewArtifact(

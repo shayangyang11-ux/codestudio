@@ -7,6 +7,8 @@ public class ApplyModuleTreePatchRequest {
 
     private String description;
     private String source;
+    private String baseModuleTreeHash;
+    private Integer baseModuleTreeNodeCount;
     private List<ModuleTreePatchOperationRequest> operations = new ArrayList<>();
 
     public String getDescription() {
@@ -23,6 +25,22 @@ public class ApplyModuleTreePatchRequest {
 
     public void setSource(String source) {
         this.source = source;
+    }
+
+    public String getBaseModuleTreeHash() {
+        return baseModuleTreeHash;
+    }
+
+    public void setBaseModuleTreeHash(String baseModuleTreeHash) {
+        this.baseModuleTreeHash = baseModuleTreeHash;
+    }
+
+    public Integer getBaseModuleTreeNodeCount() {
+        return baseModuleTreeNodeCount;
+    }
+
+    public void setBaseModuleTreeNodeCount(Integer baseModuleTreeNodeCount) {
+        this.baseModuleTreeNodeCount = baseModuleTreeNodeCount;
     }
 
     public List<ModuleTreePatchOperationRequest> getOperations() {

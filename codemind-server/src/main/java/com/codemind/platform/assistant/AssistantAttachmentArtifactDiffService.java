@@ -4,6 +4,7 @@ import com.codemind.platform.artifact.ArtifactVersionEntity;
 import com.codemind.platform.artifact.ArtifactVersionRepository;
 import com.codemind.platform.module.ProjectModuleEntity;
 import com.codemind.platform.module.ProjectModuleRepository;
+import com.codemind.platform.module.ModuleTreeBaselineSupport;
 import com.codemind.platform.project.ProjectAccessService;
 import com.codemind.platform.project.ProjectAccessService.ProjectAccess;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -114,6 +115,9 @@ public class AssistantAttachmentArtifactDiffService {
                 artifactType
         );
 
+        ModuleTreeBaselineSupport.ModuleTreeBaselineSnapshot moduleTreeBaseline =
+                captureModuleTreeBaseline(project.projectId());
+
         String currentMarkdown = firstNonBlank(
                 currentArtifact.getContentMarkdown(),
                 safeJson(currentArtifact.getContent()),
@@ -129,7 +133,8 @@ public class AssistantAttachmentArtifactDiffService {
                 artifactType,
                 currentMarkdown,
                 attachmentText,
-                attachmentContexts
+                attachmentContexts,
+                moduleTreeBaseline
         );
 
         Map<String, Object> actionPayload = new LinkedHashMap<>();
@@ -159,7 +164,8 @@ public class AssistantAttachmentArtifactDiffService {
             String artifactType,
             String currentMarkdown,
             String attachmentText,
-            List<AssistantAttachmentParsedContext> attachmentContexts
+            List<AssistantAttachmentParsedContext> attachmentContexts,
+            ModuleTreeBaselineSupport.ModuleTreeBaselineSnapshot moduleTreeBaseline
     ) {
         List<String> attachmentRequirements = extractAttachmentRequirementItems(
                 attachmentText
@@ -270,6 +276,13 @@ public class AssistantAttachmentArtifactDiffService {
         proposal.put("targetNode", targetNode);
         proposal.put("targetArtifact", targetArtifact);
         proposal.put("targetArtifactType", artifactType);
+        proposal.put("baseArtifactId", currentArtifact.getId().toString());
+        proposal.put("baseVersionNo", currentArtifact.getVersionNo());
+        proposal.put("baseChecksum", currentArtifact.getChecksum());
+        proposal.put("baseModuleTreeHash", moduleTreeBaseline.hash());
+        proposal.put("baseModuleTreeNodeCount", moduleTreeBaseline.nodeCount());
+        proposal.put("baseModuleTreeSummary", moduleTreeBaseline.summary());
+        proposal.put("baselineValidationPolicy", "BLOCK_IF_CURRENT_ARTIFACT_OR_MODULE_TREE_CHANGED");
         proposal.put("currentArtifactExcerpt", trim(currentMarkdown, 1200));
         proposal.put("attachmentExcerpt", trim(attachmentText, 1200));
         proposal.put("attachmentSummary", buildAttachmentSummary(attachmentContexts));
@@ -287,6 +300,14 @@ public class AssistantAttachmentArtifactDiffService {
         proposal.put("projectCode", project.projectCode());
 
         return proposal;
+    }
+
+    private ModuleTreeBaselineSupport.ModuleTreeBaselineSnapshot captureModuleTreeBaseline(
+            UUID projectId
+    ) {
+        return ModuleTreeBaselineSupport.capture(
+                projectModuleRepository.findByProjectIdOrderByLevelNoAscSortOrderAsc(projectId)
+        );
     }
 
     private ArtifactVersionEntity loadCurrentArtifact(

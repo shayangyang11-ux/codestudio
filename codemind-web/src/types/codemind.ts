@@ -46,6 +46,8 @@ export interface ModuleTreePatchOperationRequest {
 export interface ApplyModuleTreePatchRequest {
   description?: string
   source?: string
+  baseModuleTreeHash?: string | null
+  baseModuleTreeNodeCount?: number | null
   operations: ModuleTreePatchOperationRequest[]
 }
 
@@ -60,6 +62,9 @@ export interface ModuleTreePatchApplyResponse {
 export interface ProposeModuleTreePatchRequest {
   instruction: string
   selectedNodeId?: string | null
+  /** Phase 7-F: module tree baseline used to block stale tree proposals. */
+  baseModuleTreeHash?: string | null
+  baseModuleTreeNodeCount?: number | null
   /** Phase 7-E: selected attachment diff item ids that should drive the proposal. */
   selectedDiffItemIds?: string[]
   /** Phase 7-E3: selected diff item payloads used by backend agents instead of full diff context. */
@@ -72,6 +77,10 @@ export interface ModuleTreePatchProposalResponse {
   proposal: {
     description?: string
     source?: string
+    baseModuleTreeHash?: string | null
+    baseModuleTreeNodeCount?: number | null
+    baseModuleTreeSummary?: string | null
+    treeBaselineValidationPolicy?: string | null
     operations?: ModuleTreePatchOperationRequest[]
     impact?: {
       summary?: string
@@ -116,6 +125,9 @@ export interface RequirementChangeProposal {
   baseArtifactId?: string | null
   baseVersionNo?: number | null
   baseChecksum?: string | null
+  baseModuleTreeHash?: string | null
+  baseModuleTreeNodeCount?: number | null
+  baseModuleTreeSummary?: string | null
   baselineValidationPolicy?: string | null
   targetNode?: RequirementChangeTargetNode | null
   affectedNodeIds?: string[]
@@ -226,6 +238,9 @@ export interface AttachmentArtifactDiffProposal {
   baseArtifactId?: string | null
   baseVersionNo?: number | null
   baseChecksum?: string | null
+  baseModuleTreeHash?: string | null
+  baseModuleTreeNodeCount?: number | null
+  baseModuleTreeSummary?: string | null
   missingRequirements?: string[]
   possibleConflicts?: string[]
   alreadyCoveredItems?: string[]
@@ -264,6 +279,9 @@ export interface AssetEditProposal {
   baseArtifactId?: string | null
   baseVersionNo?: number | null
   baseChecksum?: string | null
+  baseModuleTreeHash?: string | null
+  baseModuleTreeNodeCount?: number | null
+  baseModuleTreeSummary?: string | null
   baselineValidationPolicy?: string | null
   currentTitle?: string | null
   beforeExcerpt?: string | null
@@ -350,6 +368,8 @@ export interface AssistantMessageRequest {
   baseArtifactId?: string | null
   baseVersionNo?: number | null
   baseChecksum?: string | null
+  baseModuleTreeHash?: string | null
+  baseModuleTreeNodeCount?: number | null
 }
 
 export interface AssistantActionResponse {
@@ -495,6 +515,30 @@ export interface ArtifactVersionDetailResponse extends PromptTemplateMetadata{
   updatedAt?: string | null
 }
 
+
+
+export interface GenerateDevHandoffPackageAssetRequest {
+  forceGenerate?: boolean
+  includeUnapproved?: boolean
+  note?: string | null
+}
+
+export interface DevHandoffPackageResponse {
+  artifactId: string
+  projectId?: string | null
+  moduleId?: string | null
+  artifactType: 'DEV_HANDOFF_PACKAGE' | string
+  versionNo: number
+  title?: string | null
+  status?: string | null
+  current?: boolean | null
+  content?: Record<string, unknown> | null
+  contentMarkdown?: string | null
+  sourceArtifacts?: Array<Record<string, unknown>>
+  blockers?: string[]
+  warnings?: string[]
+  message?: string | null
+}
 
 export interface ManualArtifactEditPayload {
   artifactId?: string | null

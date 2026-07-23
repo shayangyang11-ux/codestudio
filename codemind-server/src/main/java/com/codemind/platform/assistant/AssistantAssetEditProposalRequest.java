@@ -15,6 +15,8 @@ public class AssistantAssetEditProposalRequest {
     private UUID baseArtifactId;
     private Integer baseVersionNo;
     private String baseChecksum;
+    private String baseModuleTreeHash;
+    private Integer baseModuleTreeNodeCount;
     private List<String> selectedDiffItemIds = new ArrayList<>();
     private List<Map<String, Object>> selectedDiffItems = new ArrayList<>();
 
@@ -74,6 +76,22 @@ public class AssistantAssetEditProposalRequest {
 
     public void setBaseChecksum(String baseChecksum) {
         this.baseChecksum = baseChecksum;
+    }
+
+    public String getBaseModuleTreeHash() {
+        return baseModuleTreeHash;
+    }
+
+    public void setBaseModuleTreeHash(String baseModuleTreeHash) {
+        this.baseModuleTreeHash = baseModuleTreeHash;
+    }
+
+    public Integer getBaseModuleTreeNodeCount() {
+        return baseModuleTreeNodeCount;
+    }
+
+    public void setBaseModuleTreeNodeCount(Integer baseModuleTreeNodeCount) {
+        this.baseModuleTreeNodeCount = baseModuleTreeNodeCount;
     }
 
     public List<String> getSelectedDiffItemIds() {

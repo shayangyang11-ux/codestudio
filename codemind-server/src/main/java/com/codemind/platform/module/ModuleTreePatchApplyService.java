@@ -1,5 +1,6 @@
 package com.codemind.platform.module;
 
+import com.codemind.platform.project.ProjectAccessService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,11 +18,17 @@ import java.util.UUID;
 public class ModuleTreePatchApplyService {
 
     private final ProjectModuleService projectModuleService;
+    private final ProjectModuleRepository projectModuleRepository;
+    private final ProjectAccessService projectAccessService;
 
     public ModuleTreePatchApplyService(
-            ProjectModuleService projectModuleService
+            ProjectModuleService projectModuleService,
+            ProjectModuleRepository projectModuleRepository,
+            ProjectAccessService projectAccessService
     ) {
         this.projectModuleService = projectModuleService;
+        this.projectModuleRepository = projectModuleRepository;
+        this.projectAccessService = projectAccessService;
     }
 
     @Transactional
@@ -33,6 +40,17 @@ public class ModuleTreePatchApplyService {
         if (request == null || request.getOperations() == null || request.getOperations().isEmpty()) {
             throw new IllegalArgumentException("模块树 Patch 操作不能为空。");
         }
+
+        ProjectAccessService.ProjectAccess project =
+                projectAccessService.resolveAccessibleProject(
+                        workspaceId,
+                        projectCode
+                );
+
+        validateModuleTreeBaseline(
+                request,
+                project.projectId()
+        );
 
         List<ProjectModuleService.ModuleTreeNode> currentTree =
                 projectModuleService.getModuleTreeByWorkspaceAndProjectCode(
@@ -114,6 +132,57 @@ public class ModuleTreePatchApplyService {
                 tree
         );
     }
+
+    private void validateModuleTreeBaseline(
+            ApplyModuleTreePatchRequest request,
+            UUID projectId
+    ) {
+        String expectedHash = firstNonBlank(
+                request == null ? null : request.getBaseModuleTreeHash(),
+                firstOperationExtraText(request, "baseModuleTreeHash")
+        );
+        Integer expectedNodeCount = request == null ? null : request.getBaseModuleTreeNodeCount();
+
+        if (expectedNodeCount == null) {
+            expectedNodeCount = firstOperationExtraInteger(
+                    request,
+                    "baseModuleTreeNodeCount"
+            );
+        }
+
+        if (!ModuleTreeBaselineSupport.hasBaseline(expectedHash, expectedNodeCount)) {
+            return;
+        }
+
+        ModuleTreeBaselineSupport.ModuleTreeBaselineSnapshot current =
+                ModuleTreeBaselineSupport.capture(
+                        projectModuleRepository.findByProjectIdOrderByLevelNoAscSortOrderAsc(projectId)
+                );
+
+        List<String> mismatches = new ArrayList<>();
+
+        if (expectedHash != null && !expectedHash.isBlank()
+                && !Objects.equals(expectedHash.trim(), current.hash())) {
+            mismatches.add("moduleTreeHash");
+        }
+
+        if (expectedNodeCount != null && !Objects.equals(expectedNodeCount, current.nodeCount())) {
+            mismatches.add("moduleTreeNodeCount");
+        }
+
+        if (!mismatches.isEmpty()) {
+            throw new IllegalArgumentException(
+                    ModuleTreeBaselineSupport.buildMismatchMessage(
+                            "模块树已经发生变化，请重新生成模块树变更提案后再应用。",
+                            expectedHash,
+                            expectedNodeCount,
+                            current
+                    )
+                            + "；不一致字段：" + String.join(", ", mismatches)
+            );
+        }
+    }
+
 
     private ProjectModuleMutationResponse applyAddNode(
             UUID workspaceId,
@@ -203,6 +272,62 @@ public class ModuleTreePatchApplyService {
                 operation.getNodeId()
         );
     }
+
+    private String firstOperationExtraText(
+            ApplyModuleTreePatchRequest request,
+            String key
+    ) {
+        if (request == null || request.getOperations() == null || key == null) {
+            return "";
+        }
+
+        for (ModuleTreePatchOperationRequest operation : request.getOperations()) {
+            if (operation == null || operation.getExtra() == null) {
+                continue;
+            }
+
+            Object value = operation.getExtra().get(key);
+
+            if (value != null && !String.valueOf(value).isBlank()) {
+                return String.valueOf(value).trim();
+            }
+        }
+
+        return "";
+    }
+
+    private Integer firstOperationExtraInteger(
+            ApplyModuleTreePatchRequest request,
+            String key
+    ) {
+        String value = firstOperationExtraText(
+                request,
+                key
+        );
+
+        if (value.isBlank()) {
+            return null;
+        }
+
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private String firstNonBlank(
+            String... values
+    ) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+
+        return "";
+    }
+
 
     private List<ModuleTreePatchOperationRequest> normalizeOperationsBeforeApply(
             ApplyModuleTreePatchRequest request,

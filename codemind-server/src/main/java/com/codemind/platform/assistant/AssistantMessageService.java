@@ -227,6 +227,8 @@ public class AssistantMessageService {
         );
         userMessageContent.put("baseVersionNo", request.getBaseVersionNo());
         userMessageContent.put("baseChecksum", nullToEmpty(request.getBaseChecksum()));
+        userMessageContent.put("baseModuleTreeHash", nullToEmpty(request.getBaseModuleTreeHash()));
+        userMessageContent.put("baseModuleTreeNodeCount", request.getBaseModuleTreeNodeCount());
 
         UUID userMessageId = persistMessage(
                 workspaceId,
@@ -2531,6 +2533,8 @@ public class AssistantMessageService {
         proposeRequest.setBaseArtifactId(request.getBaseArtifactId());
         proposeRequest.setBaseVersionNo(request.getBaseVersionNo());
         proposeRequest.setBaseChecksum(request.getBaseChecksum());
+        proposeRequest.setBaseModuleTreeHash(request.getBaseModuleTreeHash());
+        proposeRequest.setBaseModuleTreeNodeCount(request.getBaseModuleTreeNodeCount());
         proposeRequest.setSelectedDiffItemIds(
                 normalizeSelectedDiffItemIds(request.getSelectedDiffItemIds())
         );

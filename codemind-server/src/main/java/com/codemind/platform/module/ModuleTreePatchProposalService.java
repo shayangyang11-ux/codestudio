@@ -1,6 +1,7 @@
 package com.codemind.platform.module;
 
 import com.codemind.platform.agent.common.client.PythonAgentClient;
+import com.codemind.platform.project.ProjectAccessService;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -17,13 +18,19 @@ import java.util.UUID;
 public class ModuleTreePatchProposalService {
 
     private final ProjectModuleService projectModuleService;
+    private final ProjectModuleRepository projectModuleRepository;
+    private final ProjectAccessService projectAccessService;
     private final PythonAgentClient pythonAgentClient;
 
     public ModuleTreePatchProposalService(
             ProjectModuleService projectModuleService,
+            ProjectModuleRepository projectModuleRepository,
+            ProjectAccessService projectAccessService,
             PythonAgentClient pythonAgentClient
     ) {
         this.projectModuleService = projectModuleService;
+        this.projectModuleRepository = projectModuleRepository;
+        this.projectAccessService = projectAccessService;
         this.pythonAgentClient = pythonAgentClient;
     }
 
@@ -35,6 +42,21 @@ public class ModuleTreePatchProposalService {
         String instruction = normalizeText(
                 request == null ? null : request.getInstruction()
         );
+
+        ProjectAccessService.ProjectAccess project =
+                projectAccessService.resolveAccessibleProject(
+                        workspaceId,
+                        projectCode
+                );
+
+        validateRequestedModuleTreeBaseline(
+                request,
+                project.projectId(),
+                "模块树已经发生变化，请重新执行附件差异分析后再生成模块树变更提案。"
+        );
+
+        ModuleTreeBaselineSupport.ModuleTreeBaselineSnapshot moduleTreeBaseline =
+                captureModuleTreeBaseline(project.projectId());
 
         UUID selectedNodeId = request == null ? null : request.getSelectedNodeId();
         UUID baseArtifactId = request == null ? null : request.getBaseArtifactId();
@@ -93,20 +115,146 @@ public class ModuleTreePatchProposalService {
                             baseChecksum
                     );
 
+            normalized = attachModuleTreeBaseline(
+                    normalized,
+                    moduleTreeBaseline
+            );
+
             if (hasExecutableOperations(normalized)) {
                 return normalized;
             }
 
             return appendNoOperationGuidance(normalized);
         } catch (Exception ex) {
-            return buildRuleFallbackProposal(
-                    instruction,
-                    selectedNodeId,
-                    moduleTree,
-                    "Python ModuleTreePatchAgent 调用失败：" + ex.getMessage()
+            return attachModuleTreeBaseline(
+                    buildRuleFallbackProposal(
+                            instruction,
+                            selectedNodeId,
+                            moduleTree,
+                            "Python ModuleTreePatchAgent 调用失败：" + ex.getMessage()
+                    ),
+                    moduleTreeBaseline
             );
         }
     }
+
+    private void validateRequestedModuleTreeBaseline(
+            ProposeModuleTreePatchRequest request,
+            UUID projectId,
+            String staleMessage
+    ) {
+        if (request == null || projectId == null) {
+            return;
+        }
+
+        String expectedHash = firstNonBlank(request.getBaseModuleTreeHash());
+        Integer expectedNodeCount = request.getBaseModuleTreeNodeCount();
+
+        if (!ModuleTreeBaselineSupport.hasBaseline(expectedHash, expectedNodeCount)) {
+            return;
+        }
+
+        ModuleTreeBaselineSupport.ModuleTreeBaselineSnapshot current =
+                captureModuleTreeBaseline(projectId);
+
+        List<String> mismatches = new ArrayList<>();
+
+        if (!expectedHash.isBlank() && !Objects.equals(expectedHash, current.hash())) {
+            mismatches.add("moduleTreeHash");
+        }
+
+        if (expectedNodeCount != null && !Objects.equals(expectedNodeCount, current.nodeCount())) {
+            mismatches.add("moduleTreeNodeCount");
+        }
+
+        if (!mismatches.isEmpty()) {
+            throw new IllegalArgumentException(
+                    ModuleTreeBaselineSupport.buildMismatchMessage(
+                            staleMessage,
+                            expectedHash,
+                            expectedNodeCount,
+                            current
+                    )
+                            + "；不一致字段：" + String.join(", ", mismatches)
+            );
+        }
+    }
+
+    private ModuleTreeBaselineSupport.ModuleTreeBaselineSnapshot captureModuleTreeBaseline(
+            UUID projectId
+    ) {
+        return ModuleTreeBaselineSupport.capture(
+                projectModuleRepository.findByProjectIdOrderByLevelNoAscSortOrderAsc(projectId)
+        );
+    }
+
+    private List<Map<String, Object>> attachModuleTreeBaselineToOperations(
+            Object operations,
+            ModuleTreeBaselineSupport.ModuleTreeBaselineSnapshot moduleTreeBaseline
+    ) {
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        if (!(operations instanceof List<?> list)) {
+            return result;
+        }
+
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> rawMap)) {
+                continue;
+            }
+
+            Map<String, Object> operation = new LinkedHashMap<>();
+
+            for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
+                operation.put(
+                        String.valueOf(entry.getKey()),
+                        entry.getValue()
+                );
+            }
+
+            Map<String, Object> extra = toMap(operation.get("extra"));
+            extra.put("baseModuleTreeHash", moduleTreeBaseline.hash());
+            extra.put("baseModuleTreeNodeCount", moduleTreeBaseline.nodeCount());
+            extra.put("treeBaselineValidationPolicy", "BLOCK_IF_MODULE_TREE_CHANGED_BEFORE_APPLY");
+            operation.put("extra", extra);
+
+            result.add(operation);
+        }
+
+        return result;
+    }
+
+
+    private ModuleTreePatchProposalResponse attachModuleTreeBaseline(
+            ModuleTreePatchProposalResponse response,
+            ModuleTreeBaselineSupport.ModuleTreeBaselineSnapshot moduleTreeBaseline
+    ) {
+        if (response == null || moduleTreeBaseline == null) {
+            return response;
+        }
+
+        Map<String, Object> proposal = new LinkedHashMap<>(
+                response.proposal() == null ? Map.of() : response.proposal()
+        );
+        proposal.put("baseModuleTreeHash", moduleTreeBaseline.hash());
+        proposal.put("baseModuleTreeNodeCount", moduleTreeBaseline.nodeCount());
+        proposal.put("baseModuleTreeSummary", moduleTreeBaseline.summary());
+        proposal.put("treeBaselineValidationPolicy", "BLOCK_IF_MODULE_TREE_CHANGED_BEFORE_APPLY");
+        proposal.putIfAbsent("requiresUserConfirmation", true);
+        proposal.put("operations", attachModuleTreeBaselineToOperations(
+                proposal.get("operations"),
+                moduleTreeBaseline
+        ));
+
+        return new ModuleTreePatchProposalResponse(
+                response.description(),
+                response.source(),
+                proposal,
+                response.markdown(),
+                response.requiresUserConfirmation()
+        );
+    }
+
 
     @SuppressWarnings("unchecked")
     private ModuleTreePatchProposalResponse normalizeAgentProposalResponse(
