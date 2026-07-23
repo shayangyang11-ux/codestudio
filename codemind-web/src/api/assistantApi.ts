@@ -57,6 +57,11 @@ export async function sendAssistantMessage(
         selectedArtifactType: payload.selectedArtifactType || null,
         expectedIntent: payload.expectedIntent || null,
         attachments: payload.attachments || [],
+        selectedDiffItemIds: payload.selectedDiffItemIds || [],
+        selectedDiffItems: payload.selectedDiffItems || [],
+        baseArtifactId: payload.baseArtifactId || null,
+        baseVersionNo: payload.baseVersionNo ?? null,
+        baseChecksum: payload.baseChecksum || null,
       }),
     },
   )
@@ -106,6 +111,11 @@ export async function proposeAssistantAssetEdit(
     instruction?: string | null
     selectedNodeId?: string | null
     selectedArtifactType?: string | null
+    selectedDiffItemIds?: string[]
+    selectedDiffItems?: RequirementChangeProposal['selectedDiffItems']
+    baseArtifactId?: string | null
+    baseVersionNo?: number | null
+    baseChecksum?: string | null
   },
 ): Promise<AssistantMessageResponse> {
   return authFetch<AssistantMessageResponse>(
@@ -120,6 +130,11 @@ export async function proposeAssistantAssetEdit(
         instruction: payload.instruction || null,
         selectedNodeId: payload.selectedNodeId || null,
         selectedArtifactType: payload.selectedArtifactType || null,
+        selectedDiffItemIds: payload.selectedDiffItemIds || [],
+        selectedDiffItems: payload.selectedDiffItems || [],
+        baseArtifactId: payload.baseArtifactId || null,
+        baseVersionNo: payload.baseVersionNo ?? null,
+        baseChecksum: payload.baseChecksum || null,
       }),
     },
   )

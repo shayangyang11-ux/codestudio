@@ -111,6 +111,7 @@ public class AssistantIntentRouterService {
     ) {
         boolean hasAttachment = request.getAttachments() != null && !request.getAttachments().isEmpty();
         boolean hasParsedAttachmentText = hasParsedAttachmentText(attachmentContexts);
+        boolean hasImageAttachment = hasImageAttachment(request, attachmentContexts);
 
         if (isUiCommandIntent(messageText)) {
             AssistantIntentClassificationResult result = AssistantIntentClassificationResult.of(
@@ -118,6 +119,30 @@ public class AssistantIntentRouterService {
                     "RULE",
                     0.94,
                     "用户要求通过聊天触发页面已有操作。"
+            );
+            result.setNormalizedMessage(messageText);
+            applyRuleArtifactHints(result, messageText);
+            return result;
+        }
+
+        if (hasImageAttachment && isImagePageUiChangeIntent(messageText)) {
+            AssistantIntentClassificationResult result = AssistantIntentClassificationResult.of(
+                    INTENT_ANALYZE_ATTACHMENT,
+                    "RULE",
+                    0.9,
+                    "用户携带图片/原型图并要求处理页面或交互，先进入附件驱动页面变更分析。"
+            );
+            result.setNormalizedMessage(messageText);
+            applyRuleArtifactHints(result, messageText);
+            return result;
+        }
+
+        if (hasAttachment && isAttachmentArtifactDiffIntent(messageText, request.getSelectedArtifactType())) {
+            AssistantIntentClassificationResult result = AssistantIntentClassificationResult.of(
+                    INTENT_ANALYZE_ATTACHMENT,
+                    "RULE",
+                    0.9,
+                    "用户要求将附件材料与当前资产做差异对比。"
             );
             result.setNormalizedMessage(messageText);
             applyRuleArtifactHints(result, messageText);
@@ -695,6 +720,152 @@ public class AssistantIntentRouterService {
         return attachmentContexts.stream().anyMatch(
                 context -> context.getParsedTextExcerpt() != null &&
                         !context.getParsedTextExcerpt().isBlank()
+        );
+    }
+
+    private boolean hasImageAttachment(
+            AssistantMessageRequest request,
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        if (attachmentContexts != null) {
+            for (AssistantAttachmentParsedContext context : attachmentContexts) {
+                String mimeType = context == null ? null : context.getMimeType();
+                if (mimeType != null && mimeType.toLowerCase(Locale.ROOT).startsWith("image/")) {
+                    return true;
+                }
+            }
+        }
+
+        if (request == null || request.getAttachments() == null) {
+            return false;
+        }
+
+        for (AssistantAttachmentRef attachment : request.getAttachments()) {
+            String mimeType = attachment == null ? null : attachment.getMimeType();
+            if (mimeType != null && mimeType.toLowerCase(Locale.ROOT).startsWith("image/")) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean isImagePageUiChangeIntent(
+            String messageText
+    ) {
+        if (messageText == null || messageText.isBlank()) {
+            return false;
+        }
+
+        String text = messageText.trim().toLowerCase(Locale.ROOT).replaceAll("\s+", "");
+
+        boolean mentionsImageMaterial = containsAny(
+                text,
+                List.of(
+                        "图片",
+                        "图",
+                        "截图",
+                        "原型图",
+                        "设计稿",
+                        "界面图",
+                        "页面图",
+                        "这张图",
+                        "根据图",
+                        "按图",
+                        "看图",
+                        "mockup",
+                        "figma",
+                        "ui"
+                )
+        );
+
+        boolean mentionsPageOrInteraction = containsAny(
+                text,
+                List.of(
+                        "页面",
+                        "页",
+                        "界面",
+                        "交互",
+                        "布局",
+                        "表单",
+                        "字段",
+                        "按钮",
+                        "入口",
+                        "卡片",
+                        "列表",
+                        "详情",
+                        "登录",
+                        "注册",
+                        "页面规范",
+                        "ui_contract",
+                        "ui契约",
+                        "交互原型"
+                )
+        );
+
+        boolean hasChangeIntent = containsAny(
+                text,
+                List.of(
+                        "优化",
+                        "修改",
+                        "调整",
+                        "完善",
+                        "补全",
+                        "补充",
+                        "对齐",
+                        "检查",
+                        "看看",
+                        "分析",
+                        "生成建议",
+                        "变更建议",
+                        "缺什么",
+                        "缺少什么"
+                )
+        );
+
+        return mentionsImageMaterial && mentionsPageOrInteraction && hasChangeIntent;
+    }
+
+    private boolean isAttachmentArtifactDiffIntent(
+            String messageText,
+            String selectedArtifactType
+    ) {
+        if (selectedArtifactType == null || selectedArtifactType.isBlank()) {
+            return false;
+        }
+
+        String normalized = messageText == null
+                ? ""
+                : messageText.trim().toLowerCase(Locale.ROOT);
+
+        if (normalized.isBlank()) {
+            return false;
+        }
+
+        return containsAny(
+                normalized,
+                List.of(
+                        "附件与当前资产差异",
+                        "附件和当前资产差异",
+                        "附件与当前需求差异",
+                        "附件和当前需求差异",
+                        "附件与当前文档差异",
+                        "附件和当前文档差异",
+                        "对比当前资产",
+                        "对比当前需求",
+                        "对比当前文档",
+                        "差异对比",
+                        "差异分析",
+                        "有什么差异",
+                        "哪里不一致",
+                        "不一致",
+                        "冲突",
+                        "缺失",
+                        "遗漏",
+                        "已覆盖",
+                        "compare",
+                        "diff"
+                )
         );
     }
 

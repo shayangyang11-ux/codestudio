@@ -4,6 +4,7 @@ import com.codemind.platform.module.ModuleTreePatchProposalResponse;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public class AssistantMessageResponse {
@@ -13,6 +14,7 @@ public class AssistantMessageResponse {
     private String reply;
     private boolean requiresUserConfirmation;
     private ModuleTreePatchProposalResponse proposal;
+    private Map<String, Object> attachmentArtifactDiffProposal;
     private List<AssistantActionResponse> actions = new ArrayList<>();
 
     public UUID getMessageId() {
@@ -53,6 +55,14 @@ public class AssistantMessageResponse {
 
     public void setProposal(ModuleTreePatchProposalResponse proposal) {
         this.proposal = proposal;
+    }
+
+    public Map<String, Object> getAttachmentArtifactDiffProposal() {
+        return attachmentArtifactDiffProposal;
+    }
+
+    public void setAttachmentArtifactDiffProposal(Map<String, Object> attachmentArtifactDiffProposal) {
+        this.attachmentArtifactDiffProposal = attachmentArtifactDiffProposal;
     }
 
     public List<AssistantActionResponse> getActions() {

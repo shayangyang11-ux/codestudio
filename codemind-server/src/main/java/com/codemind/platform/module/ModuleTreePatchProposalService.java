@@ -9,6 +9,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.LinkedHashSet;
 import java.util.UUID;
 
 @Service
@@ -35,6 +37,27 @@ public class ModuleTreePatchProposalService {
         );
 
         UUID selectedNodeId = request == null ? null : request.getSelectedNodeId();
+        UUID baseArtifactId = request == null ? null : request.getBaseArtifactId();
+        Integer baseVersionNo = request == null ? null : request.getBaseVersionNo();
+        String baseChecksum = request == null ? null : request.getBaseChecksum();
+        List<String> selectedDiffItemIds = normalizeSelectedDiffItemIds(
+                request == null ? List.of() : request.getSelectedDiffItemIds()
+        );
+        List<Map<String, Object>> selectedDiffItems = resolveSelectedDiffItems(
+                request == null ? List.of() : request.getSelectedDiffItems(),
+                selectedDiffItemIds
+        );
+        Map<String, Object> attachmentSummary = buildAttachmentSummaryWithSelection(
+                request == null ? Map.of() : request.getAttachmentSummary(),
+                selectedDiffItemIds,
+                selectedDiffItems,
+                baseArtifactId,
+                baseVersionNo,
+                baseChecksum
+        );
+        List<Map<String, Object>> attachmentContextsForAgent = selectedDiffItems.isEmpty()
+                ? (request == null ? List.of() : request.getAttachmentContexts())
+                : buildSelectedDiffItemContextsForAgent(selectedDiffItems);
 
         if (instruction.isBlank()) {
             throw new IllegalArgumentException("模块树变更说明不能为空。");
@@ -52,7 +75,9 @@ public class ModuleTreePatchProposalService {
                     projectCode,
                     selectedNodeId,
                     instruction,
-                    moduleTree
+                    moduleTree,
+                    attachmentContextsForAgent,
+                    attachmentSummary
             );
 
             ModuleTreePatchProposalResponse normalized =
@@ -60,7 +85,12 @@ public class ModuleTreePatchProposalService {
                             rawResponse,
                             instruction,
                             selectedNodeId,
-                            moduleTree
+                            moduleTree,
+                            selectedDiffItemIds,
+                            selectedDiffItems,
+                            baseArtifactId,
+                            baseVersionNo,
+                            baseChecksum
                     );
 
             if (hasExecutableOperations(normalized)) {
@@ -83,7 +113,12 @@ public class ModuleTreePatchProposalService {
             Object rawResponse,
             String instruction,
             UUID selectedNodeId,
-            List<ProjectModuleService.ModuleTreeNode> moduleTree
+            List<ProjectModuleService.ModuleTreeNode> moduleTree,
+            List<String> selectedDiffItemIds,
+            List<Map<String, Object>> selectedDiffItems,
+            UUID baseArtifactId,
+            Integer baseVersionNo,
+            String baseChecksum
     ) {
         Map<String, Object> rawMap = toMap(rawResponse);
         Map<String, Object> content = toMap(rawMap.get("content"));
@@ -153,6 +188,26 @@ public class ModuleTreePatchProposalService {
         proposal.put("source", source);
         proposal.putIfAbsent("requiresUserConfirmation", true);
         proposal.putIfAbsent("agentMode", "LANGGRAPH_PROPOSAL_ONLY");
+        if (selectedDiffItemIds != null && !selectedDiffItemIds.isEmpty()) {
+            proposal.put("selectedDiffItemIds", selectedDiffItemIds);
+            proposal.put("selectionPolicy", "ONLY_SELECTED_ATTACHMENT_DIFF_ITEMS");
+        }
+        if (selectedDiffItems != null && !selectedDiffItems.isEmpty()) {
+            proposal.put("selectedDiffItems", selectedDiffItems);
+            proposal.put("selectionSource", "ATTACHMENT_ARTIFACT_DIFF_CARD");
+        }
+        if (baseArtifactId != null) {
+            proposal.put("baseArtifactId", baseArtifactId.toString());
+        }
+        if (baseVersionNo != null) {
+            proposal.put("baseVersionNo", baseVersionNo);
+        }
+        if (baseChecksum != null && !baseChecksum.isBlank()) {
+            proposal.put("baseChecksum", baseChecksum.trim());
+        }
+        if (baseArtifactId != null || baseVersionNo != null || (baseChecksum != null && !baseChecksum.isBlank())) {
+            proposal.put("baselineValidationPolicy", "SOURCE_ASSET_BASELINE_RECORDED");
+        }
 
         Map<String, Object> impact = normalizeImpact(proposal.get("impact"));
         proposal.put("impact", impact);
@@ -191,6 +246,160 @@ public class ModuleTreePatchProposalService {
                 markdown,
                 true
         );
+    }
+
+    private Map<String, Object> buildAttachmentSummaryWithSelection(
+            Map<String, Object> attachmentSummary,
+            List<String> selectedDiffItemIds,
+            List<Map<String, Object>> selectedDiffItems,
+            UUID baseArtifactId,
+            Integer baseVersionNo,
+            String baseChecksum
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>(
+                attachmentSummary == null ? Map.of() : attachmentSummary
+        );
+
+        if (selectedDiffItemIds != null && !selectedDiffItemIds.isEmpty()) {
+            result.put("selectedDiffItemIds", selectedDiffItemIds);
+            result.put("selectionPolicy", "ONLY_SELECTED_ATTACHMENT_DIFF_ITEMS");
+        }
+
+        if (selectedDiffItems != null && !selectedDiffItems.isEmpty()) {
+            result.put("selectedDiffItems", selectedDiffItems);
+            result.put("selectedDiffItemCount", selectedDiffItems.size());
+            result.put("selectionSource", "ATTACHMENT_ARTIFACT_DIFF_CARD");
+        }
+        if (baseArtifactId != null) {
+            result.put("baseArtifactId", baseArtifactId.toString());
+        }
+        if (baseVersionNo != null) {
+            result.put("baseVersionNo", baseVersionNo);
+        }
+        if (baseChecksum != null && !baseChecksum.isBlank()) {
+            result.put("baseChecksum", baseChecksum.trim());
+        }
+        if (baseArtifactId != null || baseVersionNo != null || (baseChecksum != null && !baseChecksum.isBlank())) {
+            result.put("baselineValidationPolicy", "SOURCE_ASSET_BASELINE_RECORDED");
+        }
+
+        return result;
+    }
+
+    private List<Map<String, Object>> buildSelectedDiffItemContextsForAgent(
+            List<Map<String, Object>> selectedDiffItems
+    ) {
+        if (selectedDiffItems == null || selectedDiffItems.isEmpty()) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> contexts = new ArrayList<>();
+        int index = 1;
+
+        for (Map<String, Object> diffItem : selectedDiffItems) {
+            Map<String, Object> context = new LinkedHashMap<>();
+            context.put("source", "ATTACHMENT_ARTIFACT_DIFF_SELECTION");
+            context.put("diffItemId", textValue(diffItem.get("id")));
+            context.put("diffItemType", textValue(diffItem.get("type")));
+            context.put("title", textValue(diffItem.get("title")));
+            context.put("attachmentExcerpt", textValue(diffItem.get("attachmentExcerpt")));
+            context.put("currentEvidence", textValue(diffItem.get("currentEvidence")));
+            context.put("recommendation", textValue(diffItem.get("recommendation")));
+            context.put("targetArtifactType", textValue(diffItem.get("targetArtifactType")));
+            context.put("parseStatus", "SELECTED_DIFF_ITEM");
+            context.put(
+                    "parsedTextExcerpt",
+                    buildSelectedDiffItemText(diffItem, index)
+            );
+            contexts.add(context);
+            index++;
+        }
+
+        return contexts;
+    }
+
+    private String buildSelectedDiffItemText(
+            Map<String, Object> diffItem,
+            int index
+    ) {
+        List<String> lines = new ArrayList<>();
+        lines.add("已选择差异 #" + index);
+        lines.add("ID：" + textValue(diffItem.get("id")));
+        lines.add("类型：" + textValue(diffItem.get("type")));
+        lines.add("标题：" + textValue(diffItem.get("title")));
+
+        String attachmentExcerpt = textValue(diffItem.get("attachmentExcerpt"));
+        if (!attachmentExcerpt.isBlank()) {
+            lines.add("附件依据：" + attachmentExcerpt);
+        }
+
+        String currentEvidence = textValue(diffItem.get("currentEvidence"));
+        if (!currentEvidence.isBlank()) {
+            lines.add("当前资产依据：" + currentEvidence);
+        }
+
+        String recommendation = textValue(diffItem.get("recommendation"));
+        if (!recommendation.isBlank()) {
+            lines.add("建议：" + recommendation);
+        }
+
+        return String.join("\n", lines);
+    }
+
+    private List<Map<String, Object>> resolveSelectedDiffItems(
+            List<Map<String, Object>> selectedDiffItems,
+            List<String> selectedDiffItemIds
+    ) {
+        if (selectedDiffItems == null || selectedDiffItems.isEmpty()) {
+            return List.of();
+        }
+
+        Set<String> selectedIds = new LinkedHashSet<>(
+                selectedDiffItemIds == null ? List.of() : selectedDiffItemIds
+        );
+        List<Map<String, Object>> result = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+
+        for (Map<String, Object> item : selectedDiffItems) {
+            if (item == null || item.isEmpty()) {
+                continue;
+            }
+
+            Map<String, Object> copy = new LinkedHashMap<>(item);
+            String id = textValue(copy.get("id"));
+
+            if (!selectedIds.isEmpty() && !selectedIds.contains(id)) {
+                continue;
+            }
+
+            String fingerprint = id.isBlank()
+                    ? textValue(copy.get("title")) + "|" + textValue(copy.get("attachmentExcerpt"))
+                    : id;
+
+            if (!fingerprint.isBlank() && seen.add(fingerprint)) {
+                result.add(copy);
+            }
+        }
+
+        return result;
+    }
+
+    private List<String> normalizeSelectedDiffItemIds(
+            List<String> selectedDiffItemIds
+    ) {
+        if (selectedDiffItemIds == null || selectedDiffItemIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<String> result = new ArrayList<>();
+        for (String item : selectedDiffItemIds) {
+            String value = item == null ? "" : item.trim();
+            if (!value.isBlank() && !result.contains(value)) {
+                result.add(value);
+            }
+        }
+
+        return result;
     }
 
     private ModuleTreePatchProposalResponse appendNoOperationGuidance(

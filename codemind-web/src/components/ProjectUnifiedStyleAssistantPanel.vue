@@ -738,7 +738,7 @@ const extractedSignalEntries = computed<SignalEntry[]>(() => {
       .filter(([key]) => !hiddenKeys.has(key))
       .map(([key, value]) => ({
         key: formatSignalKey(key),
-        value: formatSignalValue(key),
+        value: formatSignalValue(value),
       }))
   }
 

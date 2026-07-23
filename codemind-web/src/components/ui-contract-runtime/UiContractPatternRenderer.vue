@@ -194,7 +194,6 @@ import type {
 } from './uiContractTheme'
 import {
   cleanDisplayText,
-  isDeveloperOnlyText,
 } from './uiContractTheme'
 
 const props = defineProps<{

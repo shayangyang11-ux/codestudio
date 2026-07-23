@@ -1,7 +1,9 @@
 package com.codemind.platform.assistant;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public class AssistantMessageRequest {
@@ -10,7 +12,12 @@ public class AssistantMessageRequest {
     private UUID selectedNodeId;
     private String selectedArtifactType;
     private String expectedIntent;
+    private UUID baseArtifactId;
+    private Integer baseVersionNo;
+    private String baseChecksum;
     private List<AssistantAttachmentRef> attachments = new ArrayList<>();
+    private List<String> selectedDiffItemIds = new ArrayList<>();
+    private List<Map<String, Object>> selectedDiffItems = new ArrayList<>();
 
     public String getMessage() {
         return message;
@@ -44,11 +51,72 @@ public class AssistantMessageRequest {
         this.expectedIntent = expectedIntent;
     }
 
+    public UUID getBaseArtifactId() {
+        return baseArtifactId;
+    }
+
+    public void setBaseArtifactId(UUID baseArtifactId) {
+        this.baseArtifactId = baseArtifactId;
+    }
+
+    public Integer getBaseVersionNo() {
+        return baseVersionNo;
+    }
+
+    public void setBaseVersionNo(Integer baseVersionNo) {
+        this.baseVersionNo = baseVersionNo;
+    }
+
+    public String getBaseChecksum() {
+        return baseChecksum;
+    }
+
+    public void setBaseChecksum(String baseChecksum) {
+        this.baseChecksum = baseChecksum;
+    }
+
     public List<AssistantAttachmentRef> getAttachments() {
         return attachments;
     }
 
     public void setAttachments(List<AssistantAttachmentRef> attachments) {
-        this.attachments = attachments;
+        this.attachments = attachments == null
+                ? new ArrayList<>()
+                : new ArrayList<>(attachments);
+    }
+
+    public List<String> getSelectedDiffItemIds() {
+        return selectedDiffItemIds;
+    }
+
+    public void setSelectedDiffItemIds(List<String> selectedDiffItemIds) {
+        this.selectedDiffItemIds = selectedDiffItemIds == null
+                ? new ArrayList<>()
+                : new ArrayList<>(selectedDiffItemIds);
+    }
+
+    public List<Map<String, Object>> getSelectedDiffItems() {
+        return selectedDiffItems;
+    }
+
+    public void setSelectedDiffItems(
+            List<Map<String, Object>> selectedDiffItems
+    ) {
+        if (selectedDiffItems == null) {
+            this.selectedDiffItems = new ArrayList<>();
+            return;
+        }
+
+        this.selectedDiffItems = selectedDiffItems.stream()
+                .map(item -> {
+                    Map<String, Object> copied = new LinkedHashMap<>();
+
+                    if (item != null) {
+                        copied.putAll(item);
+                    }
+
+                    return copied;
+                })
+                .toList();
     }
 }

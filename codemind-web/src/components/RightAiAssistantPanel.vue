@@ -1,21 +1,10 @@
 <template>
-  <button
-    v-if="collapsed"
-    class="assistant-float-button"
-    @click="$emit('update:collapsed', false)"
-  >
+  <button v-if="collapsed" class="assistant-float-button" @click="$emit('update:collapsed', false)">
     AI
   </button>
 
-  <aside
-    v-else
-    class="ai-assistant-panel"
-    :style="{ width: `${panelWidth}px` }"
-  >
-    <div
-      class="resize-handle"
-      @mousedown="startResize"
-    />
+  <aside v-else class="ai-assistant-panel" :style="{ width: `${panelWidth}px` }">
+    <div class="resize-handle" @mousedown="startResize" />
 
     <header class="assistant-header">
       <div>
@@ -30,35 +19,19 @@
       </div>
 
       <div class="assistant-header-actions">
-        <button
-          class="clear-conversation-button"
-          title="清空当前对话视图"
-          :disabled="isBusy"
-          @click="$emit('clear-conversation')"
-        >
+        <button class="clear-conversation-button" title="清空当前对话视图" :disabled="isBusy"
+          @click="$emit('clear-conversation')">
           清空对话
         </button>
 
-        <button
-          class="collapse-button"
-          title="收起"
-          @click="$emit('update:collapsed', true)"
-        >
+        <button class="collapse-button" title="收起" @click="$emit('update:collapsed', true)">
           ×
         </button>
       </div>
     </header>
 
-    <section
-      ref="messageListRef"
-      class="assistant-message-list"
-    >
-      <article
-        v-for="message in visibleMessages"
-        :key="message.id"
-        class="assistant-message"
-        :class="message.role"
-      >
+    <section ref="messageListRef" class="assistant-message-list">
+      <article v-for="message in visibleMessages" :key="message.id" class="assistant-message" :class="message.role">
         <div class="message-avatar">
           {{ message.role === 'user' ? '我' : 'AI' }}
         </div>
@@ -71,17 +44,11 @@
             <span>{{ message.createdAt }}</span>
           </div>
 
-          <p
-            v-if="message.text"
-            class="message-text"
-          >
+          <p v-if="message.text" class="message-text">
             {{ message.text }}
           </p>
 
-          <div
-            v-if="message.type === 'TREE_PATCH_PROPOSAL' && message.proposal"
-            class="proposal-card"
-          >
+          <div v-if="message.type === 'TREE_PATCH_PROPOSAL' && message.proposal" class="proposal-card">
             <div class="proposal-title-row">
               <div>
                 <strong>模块树变更提案</strong>
@@ -107,10 +74,7 @@
               <h4>操作列表</h4>
 
               <ul v-if="message.proposal?.proposal?.operations?.length">
-                <li
-                  v-for="(operation, index) in message.proposal.proposal.operations"
-                  :key="index"
-                >
+                <li v-for="(operation, index) in message.proposal.proposal.operations" :key="index">
                   <span class="operation-op">{{ operation.op }}</span>
                   <span class="operation-main">
                     {{ formatOperation(operation) }}
@@ -118,72 +82,49 @@
                 </li>
               </ul>
 
-              <p
-                v-else
-                class="empty-tip"
-              >
+              <p v-else class="empty-tip">
                 AI 没有生成可执行操作，请调整描述后重试。
               </p>
             </div>
 
-            <div
-              v-if="message.proposal?.proposal?.impact"
-              class="proposal-section"
-            >
+            <div v-if="message.proposal?.proposal?.impact" class="proposal-section">
               <h4>影响分析</h4>
               <p>
                 {{ message.proposal.proposal.impact.summary || '暂无影响摘要。' }}
               </p>
 
               <ul v-if="message.proposal.proposal.impact.affectedArtifacts?.length">
-                <li
-                  v-for="artifact in message.proposal.proposal.impact.affectedArtifacts"
-                  :key="artifact"
-                >
+                <li v-for="artifact in message.proposal.proposal.impact.affectedArtifacts" :key="artifact">
                   {{ artifact }}
                 </li>
               </ul>
             </div>
 
-            <div
-              v-if="message.proposal?.proposal?.impact?.riskNotes?.length"
-              class="proposal-section warning"
-            >
+            <div v-if="message.proposal?.proposal?.impact?.riskNotes?.length" class="proposal-section warning">
               <h4>风险提示</h4>
               <ul>
-                <li
-                  v-for="note in message.proposal.proposal.impact.riskNotes"
-                  :key="note"
-                >
+                <li v-for="note in message.proposal.proposal.impact.riskNotes" :key="note">
                   {{ note }}
                 </li>
               </ul>
             </div>
 
             <footer class="proposal-actions">
-              <button
-                class="secondary-button"
-                :disabled="isApplyingTreePatch"
-                @click="clearProposal(message)"
-              >
+              <button class="secondary-button" :disabled="isApplyingTreePatch" @click="clearProposal(message)">
                 放弃提案
               </button>
 
-              <button
-                class="primary-button"
+              <button class="primary-button"
                 :disabled="isApplyingTreePatch || !message.proposal?.proposal?.operations?.length"
-                @click="handleApplyProposal(message.proposal)"
-              >
+                @click="handleApplyProposal(message.proposal)">
                 {{ isApplyingTreePatch ? '应用中...' : '应用提案' }}
               </button>
             </footer>
           </div>
 
 
-          <div
-            v-if="message.type === 'REQUIREMENT_CHANGE_PROPOSAL' && message.requirementChangeProposal"
-            class="proposal-card requirement-change-card"
-          >
+          <div v-if="message.type === 'REQUIREMENT_CHANGE_PROPOSAL' && message.requirementChangeProposal"
+            class="proposal-card requirement-change-card">
             <div class="proposal-title-row">
               <div>
                 <strong>需求变更草案</strong>
@@ -222,76 +163,48 @@
               </ul>
             </div>
 
-            <div
-              v-if="message.requirementChangeProposal.affectedArtifacts?.length"
-              class="proposal-section"
-            >
+            <div v-if="message.requirementChangeProposal.affectedArtifacts?.length" class="proposal-section">
               <h4>预计影响资产</h4>
               <ul>
-                <li
-                  v-for="artifact in message.requirementChangeProposal.affectedArtifacts"
-                  :key="artifact"
-                >
+                <li v-for="artifact in message.requirementChangeProposal.affectedArtifacts" :key="artifact">
                   {{ artifact }}
                 </li>
               </ul>
             </div>
 
-            <div
-              v-if="message.requirementChangeProposal.riskNotes?.length"
-              class="proposal-section warning"
-            >
+            <div v-if="message.requirementChangeProposal.riskNotes?.length" class="proposal-section warning">
               <h4>风险提示</h4>
               <ul>
-                <li
-                  v-for="note in message.requirementChangeProposal.riskNotes"
-                  :key="note"
-                >
+                <li v-for="note in message.requirementChangeProposal.riskNotes" :key="note">
                   {{ note }}
                 </li>
               </ul>
             </div>
 
-            <div
-              v-if="message.requirementChangeProposal.recommendedSteps?.length"
-              class="proposal-section"
-            >
+            <div v-if="message.requirementChangeProposal.recommendedSteps?.length" class="proposal-section">
               <h4>后续步骤</h4>
               <ol>
-                <li
-                  v-for="step in message.requirementChangeProposal.recommendedSteps"
-                  :key="step"
-                >
+                <li v-for="step in message.requirementChangeProposal.recommendedSteps" :key="step">
                   {{ step }}
                 </li>
               </ol>
             </div>
 
             <footer class="proposal-actions">
-              <button
-                class="secondary-button"
-                :disabled="isBusy"
-                title="放弃当前草案。对不满意的部分，可以直接在输入框继续说明，AI 会基于上下文重新生成方案。"
-                @click="clearRequirementChangeProposal(message)"
-              >
+              <button class="secondary-button" :disabled="isBusy" title="放弃当前草案。对不满意的部分，可以直接在输入框继续说明，AI 会基于上下文重新生成方案。"
+                @click="clearRequirementChangeProposal(message)">
                 放弃并继续说明
               </button>
 
-              <button
-                class="primary-button"
-                :disabled="isBusy"
-                title="确认该需求变更草案，并交给当前阶段可用的执行链路处理。"
-                @click="handleConfirmRequirementChange(message.requirementChangeProposal)"
-              >
+              <button class="primary-button" :disabled="isBusy" title="确认该需求变更草案，并交给当前阶段可用的执行链路处理。"
+                @click="handleConfirmRequirementChange(message.requirementChangeProposal)">
                 确认执行
               </button>
             </footer>
           </div>
 
-          <div
-            v-if="message.type === 'ASSET_EDIT_PROPOSAL' && message.assetEditProposal"
-            class="proposal-card asset-edit-card"
-          >
+          <div v-if="message.type === 'ASSET_EDIT_PROPOSAL' && message.assetEditProposal"
+            class="proposal-card asset-edit-card">
             <div class="proposal-title-row">
               <div>
                 <strong>资产编辑提案</strong>
@@ -301,7 +214,8 @@
               </div>
 
               <span>
-                {{ formatArtifactTypeLabel(message.assetEditProposal.targetArtifactType || message.assetEditProposal.targetArtifact?.artifactType || 'ASSET') }}
+                {{ formatArtifactTypeLabel(message.assetEditProposal.targetArtifactType ||
+                  message.assetEditProposal.targetArtifact?.artifactType || 'ASSET') }}
               </span>
             </div>
 
@@ -314,36 +228,289 @@
               <h4>目标资产</h4>
               <p>{{ formatAssetEditTarget(message.assetEditProposal) }}</p>
               <ul>
-                <li>编辑模式：<span class="operation-main">{{ formatAssetEditMode(message.assetEditProposal.editMode) }}</span></li>
-                <li>编辑策略：<span class="operation-main">{{ formatAssetEditPolicy(message.assetEditProposal.editPolicy) }}</span></li>
+                <li>编辑模式：<span class="operation-main">{{ formatAssetEditMode(message.assetEditProposal.editMode)
+                    }}</span></li>
+                <li>编辑策略：<span class="operation-main">{{ formatAssetEditPolicy(message.assetEditProposal.editPolicy)
+                    }}</span></li>
               </ul>
             </div>
 
-            <div
-              v-if="getAssetEditPatchOperations(message.assetEditProposal).length"
-              class="proposal-section patch-ops-section"
-            >
+            <div v-if="getAssetEditPatchOperations(message.assetEditProposal).length"
+              class="proposal-section patch-ops-section">
               <h4>局部 Patch 操作</h4>
               <p class="section-tip">Agent 只输出需要修改的片段，后端负责应用到当前资产全文并保存完整版本快照。</p>
               <ul>
-                <li
-                  v-for="(operation, index) in getAssetEditPatchOperations(message.assetEditProposal)"
-                  :key="index"
-                >
+                <li v-for="(operation, index) in getAssetEditPatchOperations(message.assetEditProposal)" :key="index">
                   <strong>{{ formatPatchOperationTitle(operation, index) }}</strong>
                   <p v-if="formatPatchOperationText(operation)">{{ formatPatchOperationText(operation) }}</p>
                 </li>
               </ul>
             </div>
 
-            <div
-              v-if="message.assetEditProposal.proposedPatchSummary?.length"
-              class="proposal-section"
-            >
+            <div v-if="message.assetEditProposal.proposedPatchSummary?.length" class="proposal-section">
               <h4>拟局部修订内容</h4>
               <ul>
+                <li v-for="item in message.assetEditProposal.proposedPatchSummary" :key="item">
+                  {{ item }}
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="message.assetEditProposal.downstreamArtifacts?.length"
+              class="proposal-section downstream-section">
+              <h4>确认后可能受影响的下游资产</h4>
+              <p class="section-tip">这些资产不是必须立即处理；可以稍后在影响分析中逐个使用 AI 局部同步修订。</p>
+              <ul>
+                <li v-for="artifact in message.assetEditProposal.downstreamArtifacts" :key="artifact">
+                  {{ formatArtifactTypeLabel(artifact) }}
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="message.assetEditProposal.riskNotes?.length" class="proposal-section warning">
+              <h4>风险提示</h4>
+              <ul>
+                <li v-for="note in message.assetEditProposal.riskNotes" :key="note">
+                  {{ note }}
+                </li>
+              </ul>
+            </div>
+
+            <footer class="proposal-actions">
+              <button class="secondary-button" :disabled="isBusy" @click="clearAssetEditProposal(message)">
+                放弃并继续说明
+              </button>
+
+              <button class="primary-button" :disabled="isBusy || !message.assetEditProposal.proposedContentMarkdown"
+                title="确认本次局部修订，并保存为新的待确认版本。旧版本保留。" @click="handleConfirmAssetEditProposal(message.assetEditProposal)">
+                确认并保存局部修订版本
+              </button>
+            </footer>
+          </div>
+
+
+          <div v-if="message.type === 'ATTACHMENT_CHANGE_PROPOSAL' && message.attachmentDrivenChangeProposal"
+            class="proposal-card attachment-change-card">
+            <div class="proposal-title-row">
+              <div>
+                <strong>附件驱动变更分析</strong>
+                <p>
+                  {{
+                    message.attachmentDrivenChangeProposal.summary ||
+                    'AI 已根据附件内容形成一份可审查的需求变更入口。'
+                  }}
+                </p>
+              </div>
+
+              <span>
+                {{ message.attachmentDrivenChangeProposal.recommendedDispatch || 'ATTACHMENT' }}
+              </span>
+            </div>
+
+            <div v-if="message.attachmentDrivenChangeProposal.attachmentSummary?.items?.length"
+              class="proposal-section">
+              <h4>附件材料</h4>
+              <ul>
+                <li v-for="(item, index) in message.attachmentDrivenChangeProposal.attachmentSummary.items"
+                  :key="String(item.attachmentId || item.fileName || index)">
+                  {{ formatAttachmentSummaryItem(item) }}
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="message.attachmentDrivenChangeProposal.materialInstruction" class="proposal-section">
+              <h4>材料理解摘要</h4>
+              <p>
+                {{ trimProposalPreview(message.attachmentDrivenChangeProposal.materialInstruction) }}
+              </p>
+            </div>
+
+            <div v-if="message.attachmentDrivenChangeProposal.affectedArtifacts?.length" class="proposal-section">
+              <h4>可能影响资产</h4>
+              <ul>
+                <li v-for="artifact in message.attachmentDrivenChangeProposal.affectedArtifacts" :key="artifact">
+                  {{ formatArtifactTypeLabel(artifact) }}
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="message.attachmentDrivenChangeProposal.riskNotes?.length" class="proposal-section warning">
+              <h4>风险提示</h4>
+              <ul>
+                <li v-for="note in message.attachmentDrivenChangeProposal.riskNotes" :key="note">
+                  {{ note }}
+                </li>
+              </ul>
+            </div>
+
+            <div v-if="message.attachmentDrivenChangeProposal.recommendedSteps?.length" class="proposal-section">
+              <h4>建议步骤</h4>
+              <ol>
+                <li v-for="step in message.attachmentDrivenChangeProposal.recommendedSteps" :key="step">
+                  {{ step }}
+                </li>
+              </ol>
+            </div>
+
+            <footer class="proposal-actions attachment-actions">
+              <button v-for="action in getAttachmentChangeCandidateActions(message.attachmentDrivenChangeProposal)"
+                :key="String(action.type || action.label)" class="primary-button"
+                :class="{ 'secondary-button': normalizeAttachmentActionType(action) === 'ANALYSIS_ONLY' }"
+                :disabled="isBusy" :title="action.description || ''"
+                @click="handleExecuteAttachmentChange(message.attachmentDrivenChangeProposal, action)">
+                {{ formatAttachmentChangeActionLabel(action) }}
+              </button>
+
+              <button class="secondary-button" :disabled="isBusy" @click="clearAttachmentDrivenChangeProposal(message)">
+                稍后处理
+              </button>
+            </footer>
+          </div>
+
+          <div
+            v-if="message.type === 'ATTACHMENT_ARTIFACT_DIFF_PROPOSAL' && message.attachmentArtifactDiffProposal"
+            class="proposal-card attachment-diff-card"
+          >
+            <div class="proposal-title-row">
+              <div>
+                <strong>附件与当前资产差异分析</strong>
+                <p>
+                  {{
+                    message.attachmentArtifactDiffProposal.summary ||
+                    '已完成附件材料与当前需求资产的差异分析。'
+                  }}
+                </p>
+              </div>
+
+              <span>
+                {{
+                  formatArtifactTypeLabel(
+                    message.attachmentArtifactDiffProposal.targetArtifactType ||
+                    message.attachmentArtifactDiffProposal.targetArtifact?.artifactType ||
+                    'ASSET',
+                  )
+                }}
+              </span>
+            </div>
+
+            <div class="asset-edit-flow-hint attachment-diff-flow-hint">
+              <strong>安全边界</strong>
+              <span>当前卡片只展示差异，不会直接覆盖资产或修改模块树。继续操作后仍会先生成可审查提案。</span>
+            </div>
+
+            <div class="proposal-section">
+              <h4>对比目标</h4>
+              <p>{{ formatAttachmentDiffTarget(message.attachmentArtifactDiffProposal) }}</p>
+              <ul>
+                <li v-if="message.attachmentArtifactDiffProposal.confidence !== null && message.attachmentArtifactDiffProposal.confidence !== undefined">
+                  分析置信度：
+                  <span class="operation-main">
+                    {{ formatAttachmentDiffConfidence(message.attachmentArtifactDiffProposal.confidence) }}
+                  </span>
+                </li>
+                <li>
+                  处理策略：
+                  <span class="operation-main">先审查差异，再生成局部 Patch 或模块树提案</span>
+                </li>
+              </ul>
+            </div>
+
+            <div
+              v-if="message.attachmentArtifactDiffProposal.attachmentSummary?.items?.length"
+              class="proposal-section"
+            >
+              <h4>参与对比的附件</h4>
+              <ul>
                 <li
-                  v-for="item in message.assetEditProposal.proposedPatchSummary"
+                  v-for="(item, index) in message.attachmentArtifactDiffProposal.attachmentSummary.items"
+                  :key="String(item.attachmentId || item.fileName || index)"
+                >
+                  {{ formatAttachmentSummaryItem(item) }}
+                </li>
+              </ul>
+            </div>
+
+            <div
+              v-if="message.attachmentArtifactDiffProposal.diffItems?.length"
+              class="proposal-section"
+            >
+              <div class="attachment-diff-section-header">
+                <div>
+                  <h4>差异清单</h4>
+                  <p class="section-tip">请选择要进入后续修订流程的差异项；未选中的差异只会保留在本次分析中。</p>
+                </div>
+
+                <div class="attachment-diff-selection-summary">
+                  已选择
+                  <strong>{{ getSelectedAttachmentDiffCount(message) }}</strong>
+                  /
+                  {{ getAttachmentDiffItemCount(message) }}
+                  项
+                </div>
+              </div>
+
+              <div class="attachment-diff-selection-actions">
+                <button
+                  type="button"
+                  class="link-button"
+                  :disabled="isBusy || getAttachmentDiffItemCount(message) === 0"
+                  @click="selectAllAttachmentDiffItems(message)"
+                >
+                  全选
+                </button>
+                <button
+                  type="button"
+                  class="link-button"
+                  :disabled="isBusy || getSelectedAttachmentDiffCount(message) === 0"
+                  @click="clearAttachmentDiffSelection(message)"
+                >
+                  取消全选
+                </button>
+              </div>
+
+              <ol class="attachment-diff-list">
+                <li
+                  v-for="(item, index) in message.attachmentArtifactDiffProposal.diffItems"
+                  :key="getAttachmentDiffItemId(item, index)"
+                  class="attachment-diff-item"
+                  :class="{ selected: isAttachmentDiffItemSelected(message, item, index) }"
+                >
+                  <label class="attachment-diff-select-row">
+                    <input
+                      type="checkbox"
+                      :checked="isAttachmentDiffItemSelected(message, item, index)"
+                      :disabled="isBusy"
+                      @change="toggleAttachmentDiffItem(message, item, index)"
+                    >
+                    <strong>{{ formatAttachmentDiffItemTitle(item, index) }}</strong>
+                  </label>
+
+                  <p v-if="item.attachmentExcerpt">
+                    <span class="diff-field-label">附件依据：</span>
+                    {{ trimProposalPreview(item.attachmentExcerpt) }}
+                  </p>
+
+                  <p v-if="item.currentEvidence">
+                    <span class="diff-field-label">当前资产证据：</span>
+                    {{ trimProposalPreview(item.currentEvidence) }}
+                  </p>
+
+                  <p v-if="item.recommendation">
+                    <span class="diff-field-label">建议：</span>
+                    {{ item.recommendation }}
+                  </p>
+                </li>
+              </ol>
+            </div>
+
+            <div
+              v-if="message.attachmentArtifactDiffProposal.missingRequirements?.length"
+              class="proposal-section"
+            >
+              <h4>当前资产可能缺失</h4>
+              <ul>
+                <li
+                  v-for="item in message.attachmentArtifactDiffProposal.missingRequirements"
                   :key="item"
                 >
                   {{ item }}
@@ -352,29 +519,43 @@
             </div>
 
             <div
-              v-if="message.assetEditProposal.downstreamArtifacts?.length"
-              class="proposal-section downstream-section"
+              v-if="message.attachmentArtifactDiffProposal.possibleConflicts?.length"
+              class="proposal-section warning"
             >
-              <h4>确认后可能受影响的下游资产</h4>
-              <p class="section-tip">这些资产不是必须立即处理；可以稍后在影响分析中逐个使用 AI 局部同步修订。</p>
+              <h4>可能冲突</h4>
               <ul>
                 <li
-                  v-for="artifact in message.assetEditProposal.downstreamArtifacts"
-                  :key="artifact"
+                  v-for="item in message.attachmentArtifactDiffProposal.possibleConflicts"
+                  :key="item"
                 >
-                  {{ formatArtifactTypeLabel(artifact) }}
+                  {{ item }}
                 </li>
               </ul>
             </div>
 
             <div
-              v-if="message.assetEditProposal.riskNotes?.length"
+              v-if="message.attachmentArtifactDiffProposal.alreadyCoveredItems?.length"
+              class="proposal-section"
+            >
+              <h4>当前资产已覆盖</h4>
+              <ul>
+                <li
+                  v-for="item in message.attachmentArtifactDiffProposal.alreadyCoveredItems"
+                  :key="item"
+                >
+                  {{ item }}
+                </li>
+              </ul>
+            </div>
+
+            <div
+              v-if="message.attachmentArtifactDiffProposal.riskNotes?.length"
               class="proposal-section warning"
             >
               <h4>风险提示</h4>
               <ul>
                 <li
-                  v-for="note in message.assetEditProposal.riskNotes"
+                  v-for="note in message.attachmentArtifactDiffProposal.riskNotes"
                   :key="note"
                 >
                   {{ note }}
@@ -382,37 +563,51 @@
               </ul>
             </div>
 
-            <footer class="proposal-actions">
+            <div
+              v-if="message.attachmentArtifactDiffProposal.recommendedSteps?.length"
+              class="proposal-section"
+            >
+              <h4>建议步骤</h4>
+              <ol>
+                <li
+                  v-for="step in message.attachmentArtifactDiffProposal.recommendedSteps"
+                  :key="step"
+                >
+                  {{ step }}
+                </li>
+              </ol>
+            </div>
+
+            <footer class="proposal-actions attachment-actions">
               <button
-                class="secondary-button"
-                :disabled="isBusy"
-                @click="clearAssetEditProposal(message)"
+                v-for="action in getAttachmentDiffCandidateActions(message.attachmentArtifactDiffProposal)"
+                :key="String(action.type || action.label)"
+                class="primary-button"
+                :class="{ 'secondary-button': normalizeAttachmentDiffActionType(action) === 'ANALYSIS_ONLY' }"
+                :disabled="isBusy || getSelectedAttachmentDiffCount(message) === 0"
+                :title="getAttachmentDiffActionButtonTitle(message, action)"
+                @click="handleExecuteAttachmentDiffAction(
+                  message.attachmentArtifactDiffProposal,
+                  action,
+                  getSelectedAttachmentDiffItemIds(message),
+                )"
               >
-                放弃并继续说明
+                {{ formatAttachmentDiffActionLabel(action) }}
               </button>
 
               <button
-                class="primary-button"
-                :disabled="isBusy || !message.assetEditProposal.proposedContentMarkdown"
-                title="确认本次局部修订，并保存为新的待确认版本。旧版本保留。"
-                @click="handleConfirmAssetEditProposal(message.assetEditProposal)"
+                class="secondary-button"
+                :disabled="isBusy"
+                @click="clearAttachmentArtifactDiffProposal(message)"
               >
-                确认并保存局部修订版本
+                稍后处理
               </button>
             </footer>
           </div>
 
-          <div
-            v-if="message.attachments?.length"
-            class="message-attachments"
-          >
-            <span
-              v-for="attachment in message.attachments"
-              :key="attachment.localId"
-              class="attachment-chip"
-              :class="attachmentStatusClass(attachment)"
-              :title="formatAttachmentTitle(attachment)"
-            >
+          <div v-if="message.attachments?.length" class="message-attachments">
+            <span v-for="attachment in message.attachments" :key="attachment.localId" class="attachment-chip"
+              :class="attachmentStatusClass(attachment)" :title="formatAttachmentTitle(attachment)">
               {{ attachment.fileName }}
               <em>{{ attachmentParseLabel(attachment) }}</em>
             </span>
@@ -420,10 +615,8 @@
         </div>
       </article>
 
-      <article
-        v-if="isGeneratingTree || isSendingMessage || isApplyingTreePatch"
-        class="assistant-message assistant pending"
-      >
+      <article v-if="isGeneratingTree || isSendingMessage || isApplyingTreePatch"
+        class="assistant-message assistant pending">
         <div class="message-avatar">AI</div>
 
         <div class="message-content">
@@ -440,63 +633,34 @@
     </section>
 
     <footer class="assistant-input-area">
-      <div
-        v-if="pendingAttachments.length"
-        class="pending-attachments"
-      >
-        <span
-          v-for="attachment in pendingAttachments"
-          :key="attachment.localId"
-          class="attachment-chip"
+      <div v-if="pendingAttachments.length" class="pending-attachments">
+        <span v-for="attachment in pendingAttachments" :key="attachment.localId" class="attachment-chip"
           :class="attachmentStatusClass(attachment)"
-          :title="attachment.errorMessage || formatAttachmentTitle(attachment)"
-        >
+          :title="attachment.errorMessage || formatAttachmentTitle(attachment)">
           {{ attachment.fileName }}
           <em>{{ attachmentParseLabel(attachment) }}</em>
-          <button
-            title="移除"
-            @click="removeAttachment(attachment.localId)"
-          >
+          <button title="移除" @click="removeAttachment(attachment.localId)">
             ×
           </button>
         </span>
       </div>
 
-      <textarea
-        v-model="inputText"
-        class="assistant-input"
-        :placeholder="inputPlaceholder"
-        @keydown="handleInputKeydown"
-      />
+      <textarea v-model="inputText" class="assistant-input" :placeholder="inputPlaceholder"
+        @keydown="handleInputKeydown" />
 
       <div class="assistant-input-footer">
-        <button
-          class="upload-button"
-          :disabled="isBusy"
-          title="上传 Word、PDF、Excel、图片等附件"
-          @click="handleUploadClick"
-        >
+        <button class="upload-button" :disabled="isBusy" title="上传 Word、PDF、Excel、图片等附件" @click="handleUploadClick">
           ＋ 附件
         </button>
 
-        <input
-          ref="fileInputRef"
-          class="hidden-file-input"
-          type="file"
-          multiple
-          accept=".txt,.md,.json,.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp"
-          @change="handleFileChange"
-        />
+        <input ref="fileInputRef" class="hidden-file-input" type="file" multiple
+          accept=".txt,.md,.json,.pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp" @change="handleFileChange" />
 
         <span class="input-hint">
           Enter 发送，Ctrl + Enter 换行
         </span>
 
-        <button
-          class="send-button"
-          :disabled="submitDisabled"
-          @click="submit"
-        >
+        <button class="send-button" :disabled="submitDisabled" @click="submit">
           {{ buttonText }}
         </button>
       </div>
@@ -516,6 +680,11 @@ import type {
   AssistantAttachmentRef,
   AssistantConversationMessageResponse,
   AssistantMessageResponse,
+  AttachmentDrivenChangeAction,
+  AttachmentDrivenChangeProposal,
+  AttachmentArtifactDiffAction,
+  AttachmentArtifactDiffItem,
+  AttachmentArtifactDiffProposal,
   ModuleTreePatchOperationRequest,
   ModuleTreePatchProposalResponse,
   RequirementChangeProposal,
@@ -529,6 +698,8 @@ type AssistantMessageType =
   | 'TREE_PATCH_PROPOSAL'
   | 'REQUIREMENT_CHANGE_PROPOSAL'
   | 'ASSET_EDIT_PROPOSAL'
+  | 'ATTACHMENT_CHANGE_PROPOSAL'
+  | 'ATTACHMENT_ARTIFACT_DIFF_PROPOSAL'
 
 type AssistantAttachmentUploadStatus =
   | 'UPLOADING'
@@ -557,6 +728,8 @@ interface AssistantMessage {
   proposal?: ModuleTreePatchProposalResponse | null
   requirementChangeProposal?: RequirementChangeProposal | null
   assetEditProposal?: AssetEditProposal | null
+  attachmentDrivenChangeProposal?: AttachmentDrivenChangeProposal | null
+  attachmentArtifactDiffProposal?: AttachmentArtifactDiffProposal | null
 }
 
 const props = defineProps<{
@@ -579,6 +752,15 @@ const emit = defineEmits<{
   'apply-proposal': [proposal: ModuleTreePatchProposalResponse]
   'confirm-requirement-change': [proposal: RequirementChangeProposal]
   'confirm-asset-edit-proposal': [proposal: AssetEditProposal]
+  'execute-attachment-change': [
+    proposal: AttachmentDrivenChangeProposal,
+    action: AttachmentDrivenChangeAction
+  ]
+  'execute-attachment-diff-action': [
+    proposal: AttachmentArtifactDiffProposal,
+    action: AttachmentArtifactDiffAction,
+    selectedDiffItemIds: string[]
+  ]
   'clear-proposal': []
   'clear-conversation': []
 }>()
@@ -592,6 +774,7 @@ const startWidth = ref(380)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const messageListRef = ref<HTMLElement | null>(null)
 const pendingAttachments = ref<AssistantAttachmentDraft[]>([])
+const attachmentDiffSelections = ref<Record<string, string[]>>({})
 
 const messages = ref<AssistantMessage[]>(createDefaultMessages())
 
@@ -711,6 +894,10 @@ watch(
       extractRequirementChangeProposalFromResponse(response)
     const assetEditProposal =
       extractAssetEditProposalFromResponse(response)
+    const attachmentDrivenChangeProposal =
+      extractAttachmentDrivenChangeProposalFromResponse(response)
+    const attachmentArtifactDiffProposal =
+      extractAttachmentArtifactDiffProposalFromResponse(response)
 
     messages.value.push({
       ...createMessage(
@@ -719,15 +906,21 @@ watch(
           ? 'TREE_PATCH_PROPOSAL'
           : assetEditProposal
             ? 'ASSET_EDIT_PROPOSAL'
-            : requirementChangeProposal
-              ? 'REQUIREMENT_CHANGE_PROPOSAL'
-              : 'TEXT',
+            : attachmentArtifactDiffProposal
+              ? 'ATTACHMENT_ARTIFACT_DIFF_PROPOSAL'
+              : attachmentDrivenChangeProposal
+                ? 'ATTACHMENT_CHANGE_PROPOSAL'
+                : requirementChangeProposal
+                  ? 'REQUIREMENT_CHANGE_PROPOSAL'
+                  : 'TEXT',
         response.reply || '已完成处理。',
         response.messageId || undefined,
       ),
       proposal: response.proposal || null,
       requirementChangeProposal,
       assetEditProposal,
+      attachmentDrivenChangeProposal,
+      attachmentArtifactDiffProposal,
     })
 
     scrollToBottom()
@@ -833,6 +1026,70 @@ function handleConfirmAssetEditProposal(
   emit('confirm-asset-edit-proposal', proposal)
 }
 
+
+function clearAttachmentDrivenChangeProposal(message: AssistantMessage) {
+  message.type = 'TEXT'
+  message.attachmentDrivenChangeProposal = null
+  message.text = '该附件驱动变更分析已暂不处理。你可以继续说明希望基于附件执行什么操作。'
+
+  scrollToBottom()
+}
+
+function handleExecuteAttachmentChange(
+  proposal: AttachmentDrivenChangeProposal | null | undefined,
+  action: AttachmentDrivenChangeAction | null | undefined,
+) {
+  if (!proposal || !action) {
+    return
+  }
+
+  emit('execute-attachment-change', proposal, action)
+}
+
+
+function clearAttachmentArtifactDiffProposal(message: AssistantMessage) {
+  const selectionKey = getAttachmentDiffSelectionKey(message)
+
+  message.type = 'TEXT'
+  message.attachmentArtifactDiffProposal = null
+  message.text = '该附件与当前资产差异分析已暂不处理。你可以继续说明希望基于哪一条差异生成修订提案。'
+
+  const nextSelections = { ...attachmentDiffSelections.value }
+  delete nextSelections[selectionKey]
+  attachmentDiffSelections.value = nextSelections
+
+  scrollToBottom()
+}
+
+function handleExecuteAttachmentDiffAction(
+  proposal: AttachmentArtifactDiffProposal | null | undefined,
+  action: AttachmentArtifactDiffAction | null | undefined,
+  selectedDiffItemIds: string[] = [],
+) {
+  if (!proposal || !action) {
+    return
+  }
+
+  const normalizedSelectedDiffItemIds = normalizeSelectedAttachmentDiffItemIds(
+    proposal,
+    selectedDiffItemIds,
+  )
+
+  if (!normalizedSelectedDiffItemIds.length) {
+    return
+  }
+
+  emit(
+    'execute-attachment-diff-action',
+    {
+      ...proposal,
+      selectedDiffItemIds: normalizedSelectedDiffItemIds,
+    },
+    action,
+    normalizedSelectedDiffItemIds,
+  )
+}
+
 function markAssetEditProposalsAsSaved() {
   messages.value = messages.value.map((message) => {
     if (message.type !== 'ASSET_EDIT_PROPOSAL' || !message.assetEditProposal) {
@@ -848,6 +1105,196 @@ function markAssetEditProposalsAsSaved() {
   })
 }
 
+
+
+function extractAttachmentDrivenChangeProposalFromResponse(
+  response: AssistantMessageResponse | null,
+): AttachmentDrivenChangeProposal | null {
+  if (!response) {
+    return null
+  }
+
+  const responseRecord = response as unknown as Record<string, unknown>
+
+  if (responseRecord['attachmentDrivenChangeProposal']) {
+    return normalizeAttachmentDrivenChangeProposal(
+      responseRecord['attachmentDrivenChangeProposal'],
+    )
+  }
+
+  const action = response.actions?.find((item) =>
+    item.type === 'ATTACHMENT_DRIVEN_CHANGE_PROPOSAL' ||
+    item.type === 'OPEN_ATTACHMENT_DRIVEN_CHANGE_PROPOSAL',
+  )
+
+  return normalizeAttachmentDrivenChangeProposal(
+    action?.payload?.proposal || action?.payload,
+  )
+}
+
+function extractAttachmentDrivenChangeProposalFromHistory(
+  message: AssistantConversationMessageResponse,
+): AttachmentDrivenChangeProposal | null {
+  const messageRecord = message as unknown as Record<string, unknown>
+
+  if (messageRecord['attachmentDrivenChangeProposal']) {
+    return normalizeAttachmentDrivenChangeProposal(
+      messageRecord['attachmentDrivenChangeProposal'],
+    )
+  }
+
+  const content = message.content || {}
+
+  return normalizeAttachmentDrivenChangeProposal(
+    content.attachmentDrivenChangeProposal ||
+    extractAttachmentDrivenChangeProposalFromContentActions(content.actions),
+  )
+}
+
+function extractAttachmentDrivenChangeProposalFromContentActions(
+  actions: unknown,
+): unknown {
+  if (!Array.isArray(actions)) {
+    return null
+  }
+
+  const action = actions.find((item) => {
+    if (!isRecord(item)) {
+      return false
+    }
+
+    return item.type === 'ATTACHMENT_DRIVEN_CHANGE_PROPOSAL' ||
+      item.type === 'OPEN_ATTACHMENT_DRIVEN_CHANGE_PROPOSAL'
+  })
+
+  if (!isRecord(action)) {
+    return null
+  }
+
+  const payload = action.payload
+
+  if (isRecord(payload) && payload.proposal) {
+    return payload.proposal
+  }
+
+  return payload
+}
+
+function normalizeAttachmentDrivenChangeProposal(
+  value: unknown,
+): AttachmentDrivenChangeProposal | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const proposal = value as AttachmentDrivenChangeProposal
+
+  if (
+    !proposal.summary &&
+    !proposal.proposalId &&
+    !proposal.attachmentSummary &&
+    !proposal.materialInstruction
+  ) {
+    return null
+  }
+
+  return proposal
+}
+
+
+function extractAttachmentArtifactDiffProposalFromResponse(
+  response: AssistantMessageResponse | null,
+): AttachmentArtifactDiffProposal | null {
+  if (!response) {
+    return null
+  }
+
+  const responseRecord = response as unknown as Record<string, unknown>
+
+  if (responseRecord['attachmentArtifactDiffProposal']) {
+    return normalizeAttachmentArtifactDiffProposal(
+      responseRecord['attachmentArtifactDiffProposal'],
+    )
+  }
+
+  const action = response.actions?.find((item) =>
+    item.type === 'ATTACHMENT_ARTIFACT_DIFF_PROPOSAL' ||
+    item.type === 'OPEN_ATTACHMENT_ARTIFACT_DIFF_PROPOSAL',
+  )
+
+  return normalizeAttachmentArtifactDiffProposal(
+    action?.payload?.proposal || action?.payload,
+  )
+}
+
+function extractAttachmentArtifactDiffProposalFromHistory(
+  message: AssistantConversationMessageResponse,
+): AttachmentArtifactDiffProposal | null {
+  const messageRecord = message as unknown as Record<string, unknown>
+
+  if (messageRecord['attachmentArtifactDiffProposal']) {
+    return normalizeAttachmentArtifactDiffProposal(
+      messageRecord['attachmentArtifactDiffProposal'],
+    )
+  }
+
+  const content = message.content || {}
+
+  return normalizeAttachmentArtifactDiffProposal(
+    content.attachmentArtifactDiffProposal ||
+    extractAttachmentArtifactDiffProposalFromContentActions(content.actions),
+  )
+}
+
+function extractAttachmentArtifactDiffProposalFromContentActions(
+  actions: unknown,
+): unknown {
+  if (!Array.isArray(actions)) {
+    return null
+  }
+
+  const action = actions.find((item) => {
+    if (!isRecord(item)) {
+      return false
+    }
+
+    return item.type === 'ATTACHMENT_ARTIFACT_DIFF_PROPOSAL' ||
+      item.type === 'OPEN_ATTACHMENT_ARTIFACT_DIFF_PROPOSAL'
+  })
+
+  if (!isRecord(action)) {
+    return null
+  }
+
+  const payload = action.payload
+
+  if (isRecord(payload) && payload.proposal) {
+    return payload.proposal
+  }
+
+  return payload
+}
+
+function normalizeAttachmentArtifactDiffProposal(
+  value: unknown,
+): AttachmentArtifactDiffProposal | null {
+  if (!isRecord(value)) {
+    return null
+  }
+
+  const proposal = value as AttachmentArtifactDiffProposal
+
+  if (
+    !proposal.summary &&
+    !proposal.proposalId &&
+    !proposal.diffItems &&
+    !proposal.attachmentSummary
+  ) {
+    return null
+  }
+
+  return proposal
+}
 
 function extractAssetEditProposalFromResponse(
   response: AssistantMessageResponse | null,
@@ -881,7 +1328,7 @@ function extractAssetEditProposalFromHistory(
 
   return normalizeAssetEditProposal(
     content.assetEditProposal ||
-      extractAssetEditProposalFromContentActions(content.actions),
+    extractAssetEditProposalFromContentActions(content.actions),
   )
 }
 
@@ -967,7 +1414,7 @@ function extractRequirementChangeProposalFromHistory(
 
   return normalizeRequirementChangeProposal(
     content.requirementChangeProposal ||
-      extractRequirementChangeProposalFromContentActions(content.actions),
+    extractRequirementChangeProposalFromContentActions(content.actions),
   )
 }
 
@@ -1022,6 +1469,398 @@ function normalizeRequirementChangeProposal(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+
+function getAttachmentChangeCandidateActions(
+  proposal: AttachmentDrivenChangeProposal,
+): AttachmentDrivenChangeAction[] {
+  if (proposal.candidateActions?.length) {
+    return proposal.candidateActions
+  }
+
+  return [
+    {
+      type: proposal.recommendedDispatch || proposal.executionAction || 'ANALYSIS_ONLY',
+      label: '按推荐动作继续',
+    },
+  ]
+}
+
+function normalizeAttachmentActionType(
+  action: AttachmentDrivenChangeAction,
+): string {
+  return String(action.type || '').trim().toUpperCase()
+}
+
+function formatAttachmentChangeActionLabel(
+  action: AttachmentDrivenChangeAction,
+): string {
+  if (action.label) {
+    return action.label
+  }
+
+  const actionType = normalizeAttachmentActionType(action)
+
+  const labels: Record<string, string> = {
+    MODULE_TREE_PATCH: '生成模块树变更提案',
+    ASSET_EDIT_PROPOSAL: '生成资产局部修订提案',
+    GENERATE_REQUIREMENT_ARTIFACT: '生成需求资产',
+    ATTACHMENT_ARTIFACT_DIFF: '对比当前资产差异',
+    ANALYSIS_ONLY: '仅保留摘要',
+  }
+
+  return labels[actionType] || '按该动作继续'
+}
+
+function formatAttachmentSummaryItem(
+  item: Record<string, unknown>,
+): string {
+  const fileName = String(item.fileName || '未命名附件')
+  const mimeType = String(item.mimeType || '')
+  const parseStatus = String(item.parseStatus || '')
+  const excerpt = String(item.parsedTextExcerpt || '').trim()
+  const parts = [
+    fileName,
+    mimeType,
+    parseStatus ? `解析状态：${parseStatus}` : '',
+    excerpt ? `摘录：${trimProposalPreview(excerpt).slice(0, 160)}` : '',
+  ].filter(Boolean)
+
+  return parts.join(' / ')
+}
+
+
+function getAttachmentDiffSelectionKey(message: AssistantMessage): string {
+  return String(
+    message.id ||
+      message.attachmentArtifactDiffProposal?.proposalId ||
+      'attachment-diff-proposal',
+  )
+}
+
+function getAttachmentDiffItemId(
+  item: AttachmentArtifactDiffItem | Record<string, unknown>,
+  index: number,
+): string {
+  const id = item.id
+
+  if (id !== null && id !== undefined && String(id).trim()) {
+    return String(id)
+  }
+
+  return `diff-item-${index + 1}`
+}
+
+function getAttachmentDiffItemCount(message: AssistantMessage): number {
+  return message.attachmentArtifactDiffProposal?.diffItems?.length || 0
+}
+
+function isDefaultSelectedAttachmentDiffItem(item: AttachmentArtifactDiffItem): boolean {
+  const type = String(item.type || '').trim().toUpperCase()
+
+  return type !== 'ALREADY_COVERED'
+}
+
+function getDefaultAttachmentDiffSelection(
+  proposal: AttachmentArtifactDiffProposal,
+): string[] {
+  return (proposal.diffItems || [])
+    .map((item, index) => ({
+      id: getAttachmentDiffItemId(item, index),
+      item,
+    }))
+    .filter(({ item }) => isDefaultSelectedAttachmentDiffItem(item))
+    .map(({ id }) => id)
+}
+
+function normalizeSelectedAttachmentDiffItemIds(
+  proposal: AttachmentArtifactDiffProposal,
+  selectedDiffItemIds: string[],
+): string[] {
+  const validIds = new Set(
+    (proposal.diffItems || []).map((item, index) => getAttachmentDiffItemId(item, index)),
+  )
+
+  return Array.from(new Set(selectedDiffItemIds.map(String)))
+    .filter((id) => validIds.has(id))
+}
+
+function ensureAttachmentDiffSelection(message: AssistantMessage): string[] {
+  const proposal = message.attachmentArtifactDiffProposal
+
+  if (!proposal) {
+    return []
+  }
+
+  const selectionKey = getAttachmentDiffSelectionKey(message)
+  const currentSelection = attachmentDiffSelections.value[selectionKey]
+
+  if (currentSelection) {
+    return normalizeSelectedAttachmentDiffItemIds(proposal, currentSelection)
+  }
+
+  const initialSelection = proposal.selectedDiffItemIds?.length
+    ? normalizeSelectedAttachmentDiffItemIds(proposal, proposal.selectedDiffItemIds)
+    : getDefaultAttachmentDiffSelection(proposal)
+
+  attachmentDiffSelections.value = {
+    ...attachmentDiffSelections.value,
+    [selectionKey]: initialSelection,
+  }
+
+  return initialSelection
+}
+
+function getSelectedAttachmentDiffItemIds(message: AssistantMessage): string[] {
+  return [...ensureAttachmentDiffSelection(message)]
+}
+
+function getSelectedAttachmentDiffCount(message: AssistantMessage): number {
+  return getSelectedAttachmentDiffItemIds(message).length
+}
+
+function isAttachmentDiffItemSelected(
+  message: AssistantMessage,
+  item: AttachmentArtifactDiffItem,
+  index: number,
+): boolean {
+  const selectedIds = new Set(getSelectedAttachmentDiffItemIds(message))
+
+  return selectedIds.has(getAttachmentDiffItemId(item, index))
+}
+
+function toggleAttachmentDiffItem(
+  message: AssistantMessage,
+  item: AttachmentArtifactDiffItem,
+  index: number,
+) {
+  const proposal = message.attachmentArtifactDiffProposal
+
+  if (!proposal) {
+    return
+  }
+
+  const selectionKey = getAttachmentDiffSelectionKey(message)
+  const selectedIds = new Set(getSelectedAttachmentDiffItemIds(message))
+  const itemId = getAttachmentDiffItemId(item, index)
+
+  if (selectedIds.has(itemId)) {
+    selectedIds.delete(itemId)
+  } else {
+    selectedIds.add(itemId)
+  }
+
+  attachmentDiffSelections.value = {
+    ...attachmentDiffSelections.value,
+    [selectionKey]: normalizeSelectedAttachmentDiffItemIds(
+      proposal,
+      Array.from(selectedIds),
+    ),
+  }
+}
+
+function selectAllAttachmentDiffItems(message: AssistantMessage) {
+  const proposal = message.attachmentArtifactDiffProposal
+
+  if (!proposal) {
+    return
+  }
+
+  attachmentDiffSelections.value = {
+    ...attachmentDiffSelections.value,
+    [getAttachmentDiffSelectionKey(message)]: (proposal.diffItems || [])
+      .map((item, index) => getAttachmentDiffItemId(item, index)),
+  }
+}
+
+function clearAttachmentDiffSelection(message: AssistantMessage) {
+  const proposal = message.attachmentArtifactDiffProposal
+
+  if (!proposal) {
+    return
+  }
+
+  attachmentDiffSelections.value = {
+    ...attachmentDiffSelections.value,
+    [getAttachmentDiffSelectionKey(message)]: [],
+  }
+}
+
+function getAttachmentDiffActionButtonTitle(
+  message: AssistantMessage,
+  action: AttachmentArtifactDiffAction,
+): string {
+  if (getSelectedAttachmentDiffCount(message) === 0) {
+    return '请至少选择一条差异后再继续。'
+  }
+
+  return action.description || ''
+}
+
+
+function getAttachmentDiffCandidateActions(
+  proposal: AttachmentArtifactDiffProposal,
+): AttachmentArtifactDiffAction[] {
+  const defaults: AttachmentArtifactDiffAction[] = [
+    {
+      type: 'ASSET_EDIT_PROPOSAL',
+      label: '基于差异生成资产局部修订提案',
+      description: '只基于已选择的差异生成可审查的资产局部修订提案，不会直接覆盖资产。',
+      targetArtifactType: proposal.targetArtifactType || null,
+      expectedIntent: 'ANALYZE_ATTACHMENT',
+      payload: { artifactType: proposal.targetArtifactType || null },
+    },
+    {
+      type: 'MODULE_TREE_PATCH',
+      label: '生成模块树变更提案',
+      description: '只基于已选择的结构性差异生成可审查的模块树 Patch，不会直接修改模块树。',
+      targetArtifactType: null,
+      expectedIntent: 'PROPOSE_MODULE_TREE_PATCH',
+      payload: { artifactType: proposal.targetArtifactType || null },
+    },
+    {
+      type: 'ANALYSIS_ONLY',
+      label: '仅保留差异摘要',
+      description: '只保留已选择的差异摘要，暂不修改模块树和需求资产。',
+      targetArtifactType: null,
+      expectedIntent: 'ANALYZE_ATTACHMENT',
+      payload: { artifactType: proposal.targetArtifactType || null },
+    },
+  ]
+
+  const actionByType = new Map<string, AttachmentArtifactDiffAction>()
+
+  defaults.forEach((action) => {
+    actionByType.set(normalizeAttachmentDiffActionType(action), action)
+  })
+
+  ;(proposal.candidateActions || []).forEach((action) => {
+    const actionType = normalizeAttachmentDiffActionType(action)
+
+    if (!actionType) {
+      return
+    }
+
+    const defaultAction = actionByType.get(actionType)
+
+    actionByType.set(actionType, {
+      ...(defaultAction || {}),
+      ...action,
+      type: action.type || actionType,
+      payload: {
+        ...(defaultAction?.payload || {}),
+        ...(action.payload || {}),
+      },
+    })
+  })
+
+  const orderedTypes = [
+    'ASSET_EDIT_PROPOSAL',
+    'MODULE_TREE_PATCH',
+    'ANALYSIS_ONLY',
+  ]
+
+  const orderedActions = orderedTypes
+    .map((type) => actionByType.get(type))
+    .filter((action): action is AttachmentArtifactDiffAction => Boolean(action))
+
+  const extraActions = Array.from(actionByType.entries())
+    .filter(([type]) => !orderedTypes.includes(type))
+    .map(([, action]) => action)
+
+  return [...orderedActions, ...extraActions]
+}
+
+function normalizeAttachmentDiffActionType(
+  action: AttachmentArtifactDiffAction,
+): string {
+  return String(action.type || '').trim().toUpperCase()
+}
+
+function formatAttachmentDiffActionLabel(
+  action: AttachmentArtifactDiffAction,
+): string {
+  if (action.label) {
+    return action.label
+  }
+
+  const actionType = normalizeAttachmentDiffActionType(action)
+
+  const labels: Record<string, string> = {
+    ASSET_EDIT_PROPOSAL: '基于差异生成资产局部修订提案',
+    MODULE_TREE_PATCH: '生成模块树变更提案',
+    ANALYSIS_ONLY: '仅保留差异摘要',
+  }
+
+  return labels[actionType] || '按该动作继续'
+}
+
+function formatAttachmentDiffTarget(
+  proposal: AttachmentArtifactDiffProposal,
+): string {
+  const targetArtifact = proposal.targetArtifact
+  const targetNode = proposal.targetNode
+
+  const artifactType = String(
+    proposal.targetArtifactType ||
+      targetArtifact?.artifactType ||
+      '当前资产',
+  )
+
+  const artifactTitle = String(
+    targetArtifact?.artifactTitle ||
+      artifactType,
+  )
+
+  const versionValue = targetArtifact?.versionNo
+  const version =
+    versionValue === null || versionValue === undefined
+      ? ''
+      : ` / V${versionValue}`
+
+  const nodeName = String(
+    targetNode?.nodeName ||
+      '当前节点',
+  )
+
+  return `${nodeName} / ${artifactTitle} / ${artifactType}${version}`
+}
+
+function formatAttachmentDiffConfidence(
+  value?: number | null,
+): string {
+  const confidence = Number(value)
+
+  if (!Number.isFinite(confidence)) {
+    return '未提供'
+  }
+
+  const normalized = confidence <= 1
+    ? confidence * 100
+    : confidence
+
+  return `${Math.max(0, Math.min(100, Math.round(normalized)))}%`
+}
+
+function formatAttachmentDiffItemTitle(
+  item: Record<string, unknown>,
+  index: number,
+): string {
+  const type = String(item.type || 'NEEDS_REVIEW').toUpperCase()
+  const title = String(item.title || '待核对差异')
+  const severity = String(item.severity || '').toUpperCase()
+
+  const typeLabels: Record<string, string> = {
+    MISSING: '缺失',
+    POTENTIAL_CONFLICT: '可能冲突',
+    ALREADY_COVERED: '已覆盖',
+    NEEDS_REVIEW: '待核对',
+  }
+
+  const severityText = severity ? ` / ${severity}` : ''
+
+  return `${index + 1}. ${typeLabels[type] || type}${severityText}：${title}`
 }
 
 function formatRequirementChangeTarget(
@@ -1103,16 +1942,16 @@ function formatAssetEditTarget(
 
   const artifactType = String(
     proposalRecord['targetArtifactType'] ||
-      targetRecord['artifactType'] ||
-      targetRecord['type'] ||
-      '资产',
+    targetRecord['artifactType'] ||
+    targetRecord['type'] ||
+    '资产',
   )
 
   const title = String(
     targetRecord['artifactTitle'] ||
-      targetRecord['title'] ||
-      proposalRecord['currentTitle'] ||
-      artifactType,
+    targetRecord['title'] ||
+    proposalRecord['currentTitle'] ||
+    artifactType,
   )
 
   const versionValue =
@@ -1181,7 +2020,9 @@ function formatPatchOperationText(
   return parts.join('；')
 }
 
-function trimProposalPreview(value: string): string {
+function trimProposalPreview(
+  value?: string | null,
+): string {
   const text = String(value || '').trim()
 
   if (text.length <= 420) {
@@ -1199,18 +2040,6 @@ function handleApplyProposal(
   }
 
   emit('apply-proposal', proposal)
-}
-
-function pushAssistantText(text: string) {
-  messages.value.push(
-    createMessage(
-      'assistant',
-      'TEXT',
-      text,
-    ),
-  )
-
-  scrollToBottom()
 }
 
 function createDefaultMessages(): AssistantMessage[] {
@@ -1233,14 +2062,25 @@ function buildMessagesFromHistory(
     const role = normalizeHistoryRole(historyMessage.role)
     const text = historyMessage.text || ''
 
-    if (!text && !historyMessage.proposal) {
-      continue
-    }
-
     const requirementChangeProposal =
       extractRequirementChangeProposalFromHistory(historyMessage)
     const assetEditProposal =
       extractAssetEditProposalFromHistory(historyMessage)
+    const attachmentDrivenChangeProposal =
+      extractAttachmentDrivenChangeProposalFromHistory(historyMessage)
+    const attachmentArtifactDiffProposal =
+      extractAttachmentArtifactDiffProposalFromHistory(historyMessage)
+
+    if (
+      !text &&
+      !historyMessage.proposal &&
+      !requirementChangeProposal &&
+      !assetEditProposal &&
+      !attachmentDrivenChangeProposal &&
+      !attachmentArtifactDiffProposal
+    ) {
+      continue
+    }
 
     result.push({
       id: historyMessage.messageId ||
@@ -1250,18 +2090,26 @@ function buildMessagesFromHistory(
         historyMessage.type === 'TREE_PATCH_PROPOSAL'
         ? 'TREE_PATCH_PROPOSAL'
         : assetEditProposal ||
-            historyMessage.type === 'ASSET_EDIT_PROPOSAL'
+          historyMessage.type === 'ASSET_EDIT_PROPOSAL'
           ? 'ASSET_EDIT_PROPOSAL'
-          : requirementChangeProposal ||
-              historyMessage.type === 'REQUIREMENT_CHANGE_PROPOSAL'
-            ? 'REQUIREMENT_CHANGE_PROPOSAL'
-            : 'TEXT',
+          : attachmentArtifactDiffProposal ||
+            historyMessage.type === 'ATTACHMENT_ARTIFACT_DIFF_PROPOSAL'
+            ? 'ATTACHMENT_ARTIFACT_DIFF_PROPOSAL'
+            : attachmentDrivenChangeProposal ||
+              historyMessage.type === 'ATTACHMENT_CHANGE_PROPOSAL'
+              ? 'ATTACHMENT_CHANGE_PROPOSAL'
+              : requirementChangeProposal ||
+                historyMessage.type === 'REQUIREMENT_CHANGE_PROPOSAL'
+                ? 'REQUIREMENT_CHANGE_PROPOSAL'
+                : 'TEXT',
       text,
       createdAt: formatHistoryTime(historyMessage.createdAt),
       attachments: normalizeHistoryAttachments(historyMessage.attachments),
       proposal: historyMessage.proposal || null,
       requirementChangeProposal,
       assetEditProposal,
+      attachmentDrivenChangeProposal,
+      attachmentArtifactDiffProposal,
     })
   }
 
@@ -1803,6 +2651,110 @@ onBeforeUnmount(() => {
   background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%);
 }
 
+.attachment-change-card {
+  border-color: #fed7aa;
+  background: linear-gradient(180deg, #fff7ed 0%, #ffffff 100%);
+}
+
+.attachment-diff-card {
+  border-color: #c4b5fd;
+  background: linear-gradient(180deg, #f5f3ff 0%, #ffffff 100%);
+}
+
+.attachment-actions {
+  flex-wrap: wrap;
+}
+
+.attachment-diff-flow-hint {
+  border-color: #ddd6fe;
+  background: #f5f3ff;
+  color: #5b21b6;
+}
+
+.attachment-diff-flow-hint strong {
+  color: #4c1d95;
+}
+
+.attachment-diff-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.attachment-diff-section-header h4 {
+  margin-bottom: 4px;
+}
+
+.attachment-diff-selection-summary {
+  flex: 0 0 auto;
+  border: 1px solid #ddd6fe;
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: #ffffff;
+  color: #4c1d95;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.attachment-diff-selection-summary strong {
+  color: #312e81;
+}
+
+.attachment-diff-selection-actions {
+  display: flex;
+  gap: 10px;
+  margin: 8px 0 10px;
+}
+
+
+.attachment-diff-list {
+  display: grid;
+  gap: 10px;
+  padding-left: 0 !important;
+  list-style: none;
+}
+
+.attachment-diff-item {
+  border: 1px solid #ddd6fe;
+  border-radius: 10px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+.attachment-diff-item.selected {
+  border-color: #8b5cf6;
+}
+
+.attachment-diff-select-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.attachment-diff-select-row input {
+  margin-top: 2px;
+}
+
+.attachment-diff-select-row strong {
+  display: block;
+  color: #312e81;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.attachment-diff-item p {
+  margin-top: 6px;
+  white-space: pre-wrap;
+}
+
+.diff-field-label {
+  color: #475569;
+  font-weight: 700;
+}
+
 .proposal-title-row {
   display: flex;
   justify-content: space-between;
@@ -1812,7 +2764,7 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid #dbeafe;
 }
 
-.proposal-title-row > div {
+.proposal-title-row>div {
   min-width: 0;
 }
 
@@ -1828,7 +2780,7 @@ onBeforeUnmount(() => {
   line-height: 1.5;
 }
 
-.proposal-title-row > span {
+.proposal-title-row>span {
   flex: 0 0 auto;
   align-self: flex-start;
   border-radius: 999px;
@@ -2047,6 +2999,25 @@ onBeforeUnmount(() => {
 
 .upload-button:disabled {
   opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.link-button {
+  border: none;
+  background: transparent;
+  color: #4c1d95;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.link-button:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.link-button:disabled {
+  color: #a8a29e;
   cursor: not-allowed;
 }
 

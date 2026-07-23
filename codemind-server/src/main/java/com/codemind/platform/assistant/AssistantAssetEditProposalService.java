@@ -21,10 +21,12 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -79,9 +81,13 @@ public class AssistantAssetEditProposalService {
                 projectCode
         );
 
+        Map<String, Object> requirementChangeProposal = buildRequirementChangeProposalWithSelection(
+                request
+        );
+
         UUID moduleId = resolveModuleId(
                 request == null ? null : request.getSelectedNodeId(),
-                request == null ? Map.of() : request.getRequirementChangeProposal()
+                requirementChangeProposal
         );
 
         ProjectModuleEntity module = moduleId == null
@@ -91,11 +97,11 @@ public class AssistantAssetEditProposalService {
         String instruction = firstNonBlank(
                 request == null ? null : request.getInstruction(),
                 textValue(deepGet(
-                        request == null ? Map.of() : request.getRequirementChangeProposal(),
+                        requirementChangeProposal,
                         "originalInstruction"
                 )),
                 textValue(deepGet(
-                        request == null ? Map.of() : request.getRequirementChangeProposal(),
+                        requirementChangeProposal,
                         "summary"
                 )),
                 "请根据确认后的需求变更更新当前资产。"
@@ -109,8 +115,14 @@ public class AssistantAssetEditProposalService {
                 targetArtifactType
         );
 
+        validateCurrentArtifactBaseline(
+                requirementChangeProposal,
+                currentArtifact,
+                "当前资产已经发生变化，请重新执行附件差异分析后再生成资产局部修订提案。"
+        );
+
         Map<String, Object> proposal = buildAssetEditProposal(
-                request == null ? Map.of() : request.getRequirementChangeProposal(),
+                requirementChangeProposal,
                 instruction,
                 project,
                 module,
@@ -175,6 +187,12 @@ public class AssistantAssetEditProposalService {
                 project.projectId(),
                 moduleId,
                 artifactType
+        );
+
+        validateCurrentArtifactBaseline(
+                proposal,
+                previous,
+                "当前资产已经发生变化，请重新执行附件差异分析后再生成新的资产局部修订提案。"
         );
 
         String proposedContentMarkdown = firstNonBlank(
@@ -312,6 +330,12 @@ public class AssistantAssetEditProposalService {
 
         List<String> proposedPatchSummary = objectStringList(agentResult.get("proposedPatchSummary"));
         if (proposedPatchSummary.isEmpty()) {
+            proposedPatchSummary = buildPatchSummaryFromSelectedDiffItems(
+                    objectMapList(requirementChangeProposal.get("selectedDiffItems")),
+                    targetArtifactType
+            );
+        }
+        if (proposedPatchSummary.isEmpty()) {
             proposedPatchSummary = buildPatchSummary(instruction, targetArtifactType);
         }
 
@@ -338,6 +362,7 @@ public class AssistantAssetEditProposalService {
         targetArtifact.put("artifactTitle", currentArtifact.getTitle());
         targetArtifact.put("versionNo", currentArtifact.getVersionNo());
         targetArtifact.put("status", currentArtifact.getStatus());
+        targetArtifact.put("checksum", currentArtifact.getChecksum());
 
         Map<String, Object> proposal = new LinkedHashMap<>();
         proposal.put("proposalId", UUID.randomUUID().toString());
@@ -357,6 +382,11 @@ public class AssistantAssetEditProposalService {
         proposal.put("targetArtifactType", targetArtifactType);
         proposal.put("targetArtifactId", currentArtifact.getId().toString());
         proposal.put("currentVersionNo", currentArtifact.getVersionNo());
+        proposal.put("currentChecksum", currentArtifact.getChecksum());
+        proposal.put("baseArtifactId", currentArtifact.getId().toString());
+        proposal.put("baseVersionNo", currentArtifact.getVersionNo());
+        proposal.put("baseChecksum", currentArtifact.getChecksum());
+        proposal.put("baselineValidationPolicy", "BLOCK_IF_CURRENT_ARTIFACT_CHANGED");
         proposal.put("currentTitle", currentArtifact.getTitle());
         proposal.put("beforeExcerpt", trimForSummary(beforeMarkdown, 520));
         proposal.put("proposedPatchOperations", proposedPatchOperations);
@@ -377,6 +407,21 @@ public class AssistantAssetEditProposalService {
         proposal.put("createdAt", LocalDateTime.now().toString());
         proposal.put("projectId", project.projectId().toString());
         proposal.put("projectCode", project.projectCode());
+
+        List<String> selectedDiffItemIds = normalizeSelectedDiffItemIds(
+                objectStringList(requirementChangeProposal.get("selectedDiffItemIds"))
+        );
+        List<Map<String, Object>> selectedDiffItems = objectMapList(
+                requirementChangeProposal.get("selectedDiffItems")
+        );
+        if (!selectedDiffItemIds.isEmpty()) {
+            proposal.put("selectedDiffItemIds", selectedDiffItemIds);
+            proposal.put("selectionPolicy", "ONLY_SELECTED_ATTACHMENT_DIFF_ITEMS");
+        }
+        if (!selectedDiffItems.isEmpty()) {
+            proposal.put("selectedDiffItems", selectedDiffItems);
+        }
+
         proposal.put("sourceRequirementChangeProposal", requirementChangeProposal);
 
         return proposal;
@@ -419,6 +464,22 @@ public class AssistantAssetEditProposalService {
                 targetArtifactType
         ));
         reviewInput.put("requirementChangeProposal", requirementChangeProposal == null ? Map.of() : requirementChangeProposal);
+        if (requirementChangeProposal != null) {
+            List<String> selectedDiffItemIds = normalizeSelectedDiffItemIds(
+                    objectStringList(requirementChangeProposal.get("selectedDiffItemIds"))
+            );
+            List<Map<String, Object>> selectedDiffItems = objectMapList(
+                    requirementChangeProposal.get("selectedDiffItems")
+            );
+
+            if (!selectedDiffItemIds.isEmpty()) {
+                reviewInput.put("selectedDiffItemIds", selectedDiffItemIds);
+                reviewInput.put("selectionPolicy", "ONLY_SELECTED_ATTACHMENT_DIFF_ITEMS");
+            }
+            if (!selectedDiffItems.isEmpty()) {
+                reviewInput.put("selectedDiffItems", selectedDiffItems);
+            }
+        }
         reviewInput.put("expectedOutput", "Patch-first mode. Return proposedPatchOperations and proposal metadata. Do not return full proposedContentMarkdown unless patch operations are not enough.");
 
         try {
@@ -665,7 +726,28 @@ public class AssistantAssetEditProposalService {
         }
 
         builder.append("**待落地修改**：\n");
-        builder.append("- 请根据用户要求修订本资产中的业务规则、页面字段、接口约束、流程步骤或测试点。\n");
+        List<Map<String, Object>> selectedDiffItems = objectMapList(
+                requirementChangeProposal.get("selectedDiffItems")
+        );
+        if (selectedDiffItems.isEmpty()) {
+            builder.append("- 请根据用户要求修订本资产中的业务规则、页面字段、接口约束、流程步骤或测试点。\n");
+        } else {
+            int index = 1;
+            for (Map<String, Object> diffItem : selectedDiffItems) {
+                builder.append("- 仅处理已选择差异 #")
+                        .append(index)
+                        .append("：")
+                        .append(firstNonBlank(textValue(diffItem.get("title")), textValue(diffItem.get("attachmentExcerpt")), "待核对差异"))
+                        .append("\n");
+                String excerpt = textValue(diffItem.get("attachmentExcerpt"));
+                if (!excerpt.isBlank()) {
+                    builder.append("  - 附件依据：")
+                            .append(trimForSummary(excerpt, 240))
+                            .append("\n");
+                }
+                index++;
+            }
+        }
         builder.append("- 本版本由安全兜底逻辑生成，未执行不可验证的关键词替换。\n");
         builder.append("- 确认前请人工核对修改位置是否准确，并在必要时使用文档视图继续编辑。\n");
 
@@ -883,6 +965,267 @@ public class AssistantAssetEditProposalService {
         return steps;
     }
 
+    private Map<String, Object> buildRequirementChangeProposalWithSelection(
+            AssistantAssetEditProposalRequest request
+    ) {
+        Map<String, Object> proposal = new LinkedHashMap<>(
+                request == null ? Map.of() : request.getRequirementChangeProposal()
+        );
+
+        putBaselineMetadataFromRequest(request, proposal);
+
+        List<String> selectedDiffItemIds = mergeSelectedDiffItemIds(
+                request == null ? List.of() : request.getSelectedDiffItemIds(),
+                objectStringList(proposal.get("selectedDiffItemIds"))
+        );
+
+        List<Map<String, Object>> selectedDiffItems = resolveSelectedDiffItems(
+                selectedDiffItemIds,
+                request == null ? List.of() : request.getSelectedDiffItems(),
+                objectMapList(proposal.get("selectedDiffItems")),
+                objectMapList(proposal.get("diffItems"))
+        );
+
+        if (!selectedDiffItemIds.isEmpty()) {
+            proposal.put("selectedDiffItemIds", selectedDiffItemIds);
+            proposal.put("selectionPolicy", "ONLY_SELECTED_ATTACHMENT_DIFF_ITEMS");
+            proposal.put("selectionSource", "ATTACHMENT_ARTIFACT_DIFF_CARD");
+        }
+
+        if (!selectedDiffItems.isEmpty()) {
+            proposal.put("selectedDiffItems", selectedDiffItems);
+            proposal.put("diffItems", selectedDiffItems);
+            proposal.put("selectedDiffItemCount", selectedDiffItems.size());
+            proposal.put("missingRequirements", selectedDiffItemExcerptsByType(
+                    selectedDiffItems,
+                    "MISSING"
+            ));
+            proposal.put("possibleConflicts", selectedDiffItemExcerptsByType(
+                    selectedDiffItems,
+                    "POTENTIAL_CONFLICT"
+            ));
+            proposal.put("alreadyCoveredItems", selectedDiffItemExcerptsByType(
+                    selectedDiffItems,
+                    "ALREADY_COVERED"
+            ));
+            proposal.put("selectedDiffSummary", buildSelectedDiffSummary(selectedDiffItems));
+            proposal.put("summary", buildSelectedRequirementChangeSummary(
+                    proposal,
+                    selectedDiffItems
+            ));
+        }
+
+        return proposal;
+    }
+
+    private void putBaselineMetadataFromRequest(
+            AssistantAssetEditProposalRequest request,
+            Map<String, Object> proposal
+    ) {
+        if (proposal == null) {
+            return;
+        }
+
+        if (request != null && request.getBaseArtifactId() != null) {
+            proposal.put("baseArtifactId", request.getBaseArtifactId().toString());
+        }
+        if (request != null && request.getBaseVersionNo() != null) {
+            proposal.put("baseVersionNo", request.getBaseVersionNo());
+        }
+        if (request != null && request.getBaseChecksum() != null && !request.getBaseChecksum().isBlank()) {
+            proposal.put("baseChecksum", request.getBaseChecksum().trim());
+        }
+
+        Map<String, Object> targetArtifact = toMap(proposal.get("targetArtifact"));
+
+        if (!targetArtifact.isEmpty()) {
+            String artifactId = textValue(targetArtifact.get("artifactId"));
+            Integer versionNo = integerValue(targetArtifact.get("versionNo"));
+            String checksum = textValue(targetArtifact.get("checksum"));
+
+            if (!artifactId.isBlank()) {
+                proposal.putIfAbsent("baseArtifactId", artifactId);
+            }
+            if (versionNo != null) {
+                proposal.putIfAbsent("baseVersionNo", versionNo);
+            }
+            if (!checksum.isBlank()) {
+                proposal.putIfAbsent("baseChecksum", checksum);
+            }
+        }
+
+        if (proposal.containsKey("baseArtifactId")
+                || proposal.containsKey("baseVersionNo")
+                || proposal.containsKey("baseChecksum")) {
+            proposal.put("baselineValidationPolicy", "BLOCK_IF_CURRENT_ARTIFACT_CHANGED");
+        }
+    }
+
+    private List<String> mergeSelectedDiffItemIds(
+            List<String> primary,
+            List<String> secondary
+    ) {
+        List<String> result = new ArrayList<>();
+        for (String item : primary == null ? List.<String>of() : primary) {
+            String value = item == null ? "" : item.trim();
+            if (!value.isBlank() && !result.contains(value)) {
+                result.add(value);
+            }
+        }
+        for (String item : secondary == null ? List.<String>of() : secondary) {
+            String value = item == null ? "" : item.trim();
+            if (!value.isBlank() && !result.contains(value)) {
+                result.add(value);
+            }
+        }
+        return result;
+    }
+
+    @SafeVarargs
+    private final List<Map<String, Object>> resolveSelectedDiffItems(
+            List<String> selectedDiffItemIds,
+            List<Map<String, Object>>... candidates
+    ) {
+        Set<String> selectedIds = new LinkedHashSet<>(
+                selectedDiffItemIds == null ? List.of() : selectedDiffItemIds
+        );
+        List<Map<String, Object>> result = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+
+        for (List<Map<String, Object>> candidateList : candidates) {
+            if (candidateList == null || candidateList.isEmpty()) {
+                continue;
+            }
+
+            for (Map<String, Object> item : candidateList) {
+                if (item == null || item.isEmpty()) {
+                    continue;
+                }
+
+                Map<String, Object> copy = new LinkedHashMap<>(item);
+                String id = textValue(copy.get("id"));
+
+                if (!selectedIds.isEmpty() && !selectedIds.contains(id)) {
+                    continue;
+                }
+
+                String fingerprint = id.isBlank()
+                        ? textValue(copy.get("title")) + "|" + textValue(copy.get("attachmentExcerpt"))
+                        : id;
+
+                if (!fingerprint.isBlank() && seen.add(fingerprint)) {
+                    result.add(copy);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private List<String> selectedDiffItemExcerptsByType(
+            List<Map<String, Object>> selectedDiffItems,
+            String expectedType
+    ) {
+        List<String> result = new ArrayList<>();
+
+        for (Map<String, Object> item : selectedDiffItems == null ? List.<Map<String, Object>>of() : selectedDiffItems) {
+            String type = textValue(item.get("type"));
+            if (!expectedType.equals(type)) {
+                continue;
+            }
+
+            String value = firstNonBlank(
+                    textValue(item.get("attachmentExcerpt")),
+                    textValue(item.get("title"))
+            );
+
+            if (!value.isBlank() && !result.contains(value)) {
+                result.add(value);
+            }
+        }
+
+        return result;
+    }
+
+    private List<String> buildSelectedDiffSummary(
+            List<Map<String, Object>> selectedDiffItems
+    ) {
+        List<String> result = new ArrayList<>();
+        int index = 1;
+
+        for (Map<String, Object> item : selectedDiffItems == null ? List.<Map<String, Object>>of() : selectedDiffItems) {
+            result.add(index + ". " + firstNonBlank(
+                    textValue(item.get("title")),
+                    textValue(item.get("attachmentExcerpt")),
+                    "待核对差异"
+            ));
+            index++;
+        }
+
+        return result;
+    }
+
+    private String buildSelectedRequirementChangeSummary(
+            Map<String, Object> proposal,
+            List<Map<String, Object>> selectedDiffItems
+    ) {
+        String originalSummary = textValue(proposal.get("summary"));
+        int count = selectedDiffItems == null ? 0 : selectedDiffItems.size();
+
+        if (count <= 0) {
+            return originalSummary;
+        }
+
+        String prefix = "仅基于用户选择的 " + count + " 条附件差异生成资产局部修订。";
+
+        if (originalSummary.isBlank() || originalSummary.startsWith("仅基于用户选择")) {
+            return prefix;
+        }
+
+        return prefix + "原差异摘要：" + originalSummary;
+    }
+
+    private List<String> buildPatchSummaryFromSelectedDiffItems(
+            List<Map<String, Object>> selectedDiffItems,
+            String targetArtifactType
+    ) {
+        List<String> result = new ArrayList<>();
+
+        for (Map<String, Object> item : selectedDiffItems == null ? List.<Map<String, Object>>of() : selectedDiffItems) {
+            String type = textValue(item.get("type"));
+            if ("ALREADY_COVERED".equals(type)) {
+                continue;
+            }
+
+            String title = firstNonBlank(
+                    textValue(item.get("title")),
+                    textValue(item.get("attachmentExcerpt")),
+                    "待核对差异"
+            );
+            result.add("仅基于已选择差异修订 " + targetArtifactType + "：" + title);
+        }
+
+        return result;
+    }
+
+    private List<String> normalizeSelectedDiffItemIds(
+            List<String> selectedDiffItemIds
+    ) {
+        if (selectedDiffItemIds == null || selectedDiffItemIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<String> result = new ArrayList<>();
+        for (String item : selectedDiffItemIds) {
+            String value = item == null ? "" : item.trim();
+            if (!value.isBlank() && !result.contains(value)) {
+                result.add(value);
+            }
+        }
+
+        return result;
+    }
+
     private String resolveTargetArtifactType(
             AssistantAssetEditProposalRequest request
     ) {
@@ -926,6 +1269,73 @@ public class AssistantAssetEditProposalService {
     ) {
         return EDITABLE_ARTIFACTS.contains(artifactType)
                 || STRUCTURED_EDIT_ARTIFACTS.contains(artifactType);
+    }
+
+    private void validateCurrentArtifactBaseline(
+            Map<String, Object> proposal,
+            ArtifactVersionEntity currentArtifact,
+            String staleMessage
+    ) {
+        if (proposal == null || proposal.isEmpty() || currentArtifact == null) {
+            return;
+        }
+
+        String expectedArtifactIdText = firstNonBlank(
+                textValue(proposal.get("baseArtifactId")),
+                textValue(deepGet(proposal, "targetArtifact", "artifactId")),
+                textValue(proposal.get("targetArtifactId"))
+        );
+        UUID expectedArtifactId = parseUuid(expectedArtifactIdText);
+
+        Integer expectedVersionNo = firstInteger(
+                proposal.get("baseVersionNo"),
+                deepGet(proposal, "targetArtifact", "versionNo"),
+                proposal.get("currentVersionNo")
+        );
+
+        String expectedChecksum = firstNonBlank(
+                textValue(proposal.get("baseChecksum")),
+                textValue(deepGet(proposal, "targetArtifact", "checksum")),
+                textValue(proposal.get("currentChecksum"))
+        );
+
+        boolean hasExpectedBaseline = expectedArtifactId != null
+                || expectedVersionNo != null
+                || !expectedChecksum.isBlank();
+
+        if (!hasExpectedBaseline) {
+            return;
+        }
+
+        List<String> mismatches = new ArrayList<>();
+
+        if (expectedArtifactId != null && !Objects.equals(expectedArtifactId, currentArtifact.getId())) {
+            mismatches.add("artifactId");
+        }
+
+        if (expectedVersionNo != null && !Objects.equals(expectedVersionNo, currentArtifact.getVersionNo())) {
+            mismatches.add("versionNo");
+        }
+
+        String currentChecksum = firstNonBlank(currentArtifact.getChecksum());
+        if (!expectedChecksum.isBlank()
+                && !currentChecksum.isBlank()
+                && !Objects.equals(expectedChecksum, currentChecksum)) {
+            mismatches.add("checksum");
+        }
+
+        if (!mismatches.isEmpty()) {
+            throw new IllegalArgumentException(
+                    staleMessage
+                            + " 预期基线：artifactId=" + firstNonBlank(expectedArtifactIdText, "未知")
+                            + ", versionNo=" + (expectedVersionNo == null ? "未知" : expectedVersionNo)
+                            + (expectedChecksum.isBlank() ? "" : ", checksum=" + expectedChecksum)
+                            + "；当前版本：artifactId=" + currentArtifact.getId()
+                            + ", versionNo=" + currentArtifact.getVersionNo()
+                            + (currentChecksum.isBlank() ? "" : ", checksum=" + currentChecksum)
+                            + "；不一致字段：" + String.join(", ", mismatches)
+            );
+        }
     }
 
     private ArtifactVersionEntity loadCurrentArtifact(
@@ -995,6 +1405,22 @@ public class AssistantAssetEditProposalService {
         edit.put("summary", proposal.get("summary"));
         edit.put("previousArtifactId", previous.getId().toString());
         edit.put("previousVersionNo", previous.getVersionNo());
+        edit.put("previousChecksum", previous.getChecksum());
+        edit.put("baseArtifactId", firstNonBlank(
+                textValue(proposal.get("baseArtifactId")),
+                textValue(deepGet(proposal, "targetArtifact", "artifactId")),
+                textValue(proposal.get("targetArtifactId"))
+        ));
+        edit.put("baseVersionNo", firstInteger(
+                proposal.get("baseVersionNo"),
+                deepGet(proposal, "targetArtifact", "versionNo"),
+                proposal.get("currentVersionNo")
+        ));
+        edit.put("baseChecksum", firstNonBlank(
+                textValue(proposal.get("baseChecksum")),
+                textValue(deepGet(proposal, "targetArtifact", "checksum")),
+                textValue(proposal.get("currentChecksum"))
+        ));
 
         List<Object> history = new ArrayList<>();
         Object existing = content.get("assistantEditHistory");
@@ -1237,6 +1663,46 @@ public class AssistantAssetEditProposalService {
         return current;
     }
 
+    private Integer firstInteger(
+            Object... values
+    ) {
+        if (values == null) {
+            return null;
+        }
+
+        for (Object value : values) {
+            Integer parsed = integerValue(value);
+            if (parsed != null) {
+                return parsed;
+            }
+        }
+
+        return null;
+    }
+
+    private Integer integerValue(
+            Object value
+    ) {
+        if (value == null) {
+            return null;
+        }
+
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+
+        String text = textValue(value);
+        if (text.isBlank()) {
+            return null;
+        }
+
+        try {
+            return Integer.parseInt(text);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
     private UUID parseUuid(
             String value
     ) {
@@ -1334,5 +1800,3 @@ public class AssistantAssetEditProposalService {
         return text.substring(0, Math.max(0, maxLength)) + "...";
     }
 }
-
-

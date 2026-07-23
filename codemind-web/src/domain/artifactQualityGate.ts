@@ -187,7 +187,6 @@ export function buildArtifactQualityGate(
     options,
     artifactByType,
     blockers,
-    warnings,
     passes,
   )
 
@@ -463,7 +462,6 @@ function appendUiContractSnapshotChecks(
   options: BuildArtifactQualityGateOptions,
   artifactByType: Map<RequirementArtifactType, ArtifactResponse | null>,
   blockers: ArtifactQualityIssue[],
-  warnings: ArtifactQualityIssue[],
   passes: ArtifactQualityIssue[],
 ) {
   const nodeType = resolveRequirementNodeType(options.node)

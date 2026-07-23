@@ -1,3 +1,4 @@
+
 package com.codemind.platform.agent.common.client;
 
 import com.codemind.platform.agent.requirement.dto.*;
@@ -344,13 +345,37 @@ public class PythonAgentClient {
             String instruction,
             Object moduleTree
     ) {
+        return proposeModuleTreePatch(
+                taskId,
+                projectCode,
+                selectedNodeId,
+                instruction,
+                moduleTree,
+                null,
+                null
+        );
+    }
+
+    public Object proposeModuleTreePatch(
+            UUID taskId,
+            String projectCode,
+            UUID selectedNodeId,
+            String instruction,
+            Object moduleTree,
+            Object attachmentContexts,
+            Object attachmentSummary
+    ) {
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("instruction", instruction);
         input.put("selected_node_id", selectedNodeId == null ? null : selectedNodeId.toString());
         input.put("module_tree", moduleTree);
+        input.put("attachment_contexts", attachmentContexts == null ? java.util.List.of() : attachmentContexts);
+        input.put("attachment_summary", attachmentSummary == null ? java.util.Map.of() : attachmentSummary);
 
         Map<String, Object> contextPackage = new LinkedHashMap<>();
         contextPackage.put("module_tree", moduleTree);
+        contextPackage.put("attachment_contexts", attachmentContexts == null ? java.util.List.of() : attachmentContexts);
+        contextPackage.put("attachment_summary", attachmentSummary == null ? java.util.Map.of() : attachmentSummary);
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("task_id", taskId.toString());

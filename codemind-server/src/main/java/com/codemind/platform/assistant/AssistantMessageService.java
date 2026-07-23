@@ -25,7 +25,11 @@ public class AssistantMessageService {
     private static final String MESSAGE_TYPE_ARCHIVE_MARKER = "CONVERSATION_ARCHIVE_MARKER";
     private static final String INTENT_PROPOSE_REQUIREMENT_CHANGE = "PROPOSE_REQUIREMENT_CHANGE";
     private static final String MESSAGE_TYPE_REQUIREMENT_CHANGE_PROPOSAL = "REQUIREMENT_CHANGE_PROPOSAL";
+    private static final String MESSAGE_TYPE_ATTACHMENT_DRIVEN_CHANGE_PROPOSAL = "ATTACHMENT_CHANGE_PROPOSAL";
+    private static final String MESSAGE_TYPE_ATTACHMENT_ARTIFACT_DIFF_PROPOSAL = "ATTACHMENT_ARTIFACT_DIFF_PROPOSAL";
     private static final String ACTION_REQUIREMENT_CHANGE_PROPOSAL = "REQUIREMENT_CHANGE_PROPOSAL";
+    private static final String ACTION_ATTACHMENT_DRIVEN_CHANGE_PROPOSAL = "ATTACHMENT_DRIVEN_CHANGE_PROPOSAL";
+    private static final String ACTION_ATTACHMENT_ARTIFACT_DIFF_PROPOSAL = "ATTACHMENT_ARTIFACT_DIFF_PROPOSAL";
 
     private final ProjectModuleService projectModuleService;
     private final ModuleTreePatchProposalService moduleTreePatchProposalService;
@@ -35,6 +39,7 @@ public class AssistantMessageService {
     private final AssistantArtifactTaskCommandResolver assistantArtifactTaskCommandResolver;
     private final AssistantArtifactTaskDispatchService assistantArtifactTaskDispatchService;
     private final AssistantArtifactReviewService assistantArtifactReviewService;
+    private final AssistantAttachmentArtifactDiffService assistantAttachmentArtifactDiffService;
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final CurrentUserProvider currentUserProvider;
     private final ObjectMapper objectMapper;
@@ -48,6 +53,7 @@ public class AssistantMessageService {
             AssistantArtifactTaskCommandResolver assistantArtifactTaskCommandResolver,
             AssistantArtifactTaskDispatchService assistantArtifactTaskDispatchService,
             AssistantArtifactReviewService assistantArtifactReviewService,
+            AssistantAttachmentArtifactDiffService assistantAttachmentArtifactDiffService,
             NamedParameterJdbcTemplate jdbcTemplate,
             CurrentUserProvider currentUserProvider,
             ObjectMapper objectMapper
@@ -60,6 +66,7 @@ public class AssistantMessageService {
         this.assistantArtifactTaskCommandResolver = assistantArtifactTaskCommandResolver;
         this.assistantArtifactTaskDispatchService = assistantArtifactTaskDispatchService;
         this.assistantArtifactReviewService = assistantArtifactReviewService;
+        this.assistantAttachmentArtifactDiffService = assistantAttachmentArtifactDiffService;
         this.jdbcTemplate = jdbcTemplate;
         this.currentUserProvider = currentUserProvider;
         this.objectMapper = objectMapper;
@@ -206,6 +213,21 @@ public class AssistantMessageService {
                         attachmentContexts
                 );
 
+        Map<String, Object> userMessageContent = new LinkedHashMap<>();
+        userMessageContent.put("message", messageText);
+        userMessageContent.put("messageType", "TEXT");
+        userMessageContent.put("expectedIntent", nullToEmpty(request.getExpectedIntent()));
+        userMessageContent.put("attachments", enrichedAttachments);
+        userMessageContent.put("attachmentContexts", attachmentContexts);
+        userMessageContent.put("selectedDiffItemIds", normalizeSelectedDiffItemIds(request.getSelectedDiffItemIds()));
+        userMessageContent.put("selectedDiffItems", normalizeSelectedDiffItems(request.getSelectedDiffItems()));
+        userMessageContent.put(
+                "baseArtifactId",
+                request.getBaseArtifactId() == null ? null : request.getBaseArtifactId().toString()
+        );
+        userMessageContent.put("baseVersionNo", request.getBaseVersionNo());
+        userMessageContent.put("baseChecksum", nullToEmpty(request.getBaseChecksum()));
+
         UUID userMessageId = persistMessage(
                 workspaceId,
                 projectCode,
@@ -213,13 +235,7 @@ public class AssistantMessageService {
                 null,
                 request.getSelectedNodeId(),
                 request.getSelectedArtifactType(),
-                Map.of(
-                        "message", messageText,
-                        "messageType", "TEXT",
-                        "expectedIntent", nullToEmpty(request.getExpectedIntent()),
-                        "attachments", enrichedAttachments,
-                        "attachmentContexts", attachmentContexts
-                )
+                userMessageContent
         );
 
         assistantAttachmentService.bindAttachmentsToMessage(
@@ -450,16 +466,28 @@ public class AssistantMessageService {
                     attachmentContexts
             );
         }
-
         if (AssistantIntentRouterService.INTENT_ANALYZE_ATTACHMENT.equals(intent)) {
-            return simpleResponse(
-                    intent,
-                    buildAttachmentAnalysisReply(
-                            attachmentContexts,
-                            classification.getSuggestedReply()
-                    ),
-                    false,
-                    List.of()
+            if (shouldBuildAttachmentArtifactDiffProposal(
+                    request,
+                    messageText,
+                    attachmentContexts
+            )) {
+                return assistantAttachmentArtifactDiffService.buildDiffResponse(
+                        workspaceId,
+                        projectCode,
+                        request,
+                        messageText,
+                        attachmentContexts
+                );
+            }
+
+            return buildAttachmentDrivenChangeProposalResponse(
+                    workspaceId,
+                    projectCode,
+                    request,
+                    messageText,
+                    classification,
+                    attachmentContexts
             );
         }
 
@@ -713,6 +741,102 @@ public class AssistantMessageService {
                         AssistantActionResponse.of(
                                 ACTION_REQUIREMENT_CHANGE_PROPOSAL,
                                 "查看需求变更草案",
+                                actionPayload
+                        )
+                )
+        );
+    }
+
+
+    private boolean shouldBuildAttachmentArtifactDiffProposal(
+            AssistantMessageRequest request,
+            String messageText,
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        if (request == null ||
+                request.getSelectedNodeId() == null ||
+                request.getSelectedArtifactType() == null ||
+                request.getSelectedArtifactType().isBlank()) {
+            return false;
+        }
+
+        if (attachmentContexts == null || attachmentContexts.isEmpty()) {
+            return false;
+        }
+
+        String normalized = normalizeForIntent(messageText);
+
+        return containsAny(
+                normalized,
+                List.of(
+                        "附件与当前资产差异",
+                        "附件和当前资产差异",
+                        "附件与当前需求差异",
+                        "附件和当前需求差异",
+                        "附件与当前文档差异",
+                        "附件和当前文档差异",
+                        "对比当前资产",
+                        "对比当前需求",
+                        "对比当前文档",
+                        "差异对比",
+                        "差异分析",
+                        "有什么差异",
+                        "哪里不一致",
+                        "不一致",
+                        "冲突",
+                        "缺失",
+                        "遗漏",
+                        "已覆盖",
+                        "compare",
+                        "diff"
+                )
+        );
+    }
+
+    private AssistantMessageResponse buildAttachmentDrivenChangeProposalResponse(
+            UUID workspaceId,
+            String projectCode,
+            AssistantMessageRequest request,
+            String messageText,
+            AssistantIntentClassificationResult classification,
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        if (!hasAttachmentContext(attachmentContexts)) {
+            return simpleResponse(
+                    AssistantIntentRouterService.INTENT_ANALYZE_ATTACHMENT,
+                    buildAttachmentAnalysisReply(
+                            attachmentContexts,
+                            classification == null ? null : classification.getSuggestedReply()
+                    ),
+                    false,
+                    List.of()
+            );
+        }
+
+        List<ProjectModuleService.ModuleTreeNode> moduleTree =
+                projectModuleService.getModuleTreeByWorkspaceAndProjectCode(
+                        workspaceId,
+                        projectCode
+                );
+
+        Map<String, Object> proposal = buildAttachmentDrivenChangeProposal(
+                request,
+                messageText,
+                moduleTree,
+                attachmentContexts
+        );
+
+        Map<String, Object> actionPayload = new LinkedHashMap<>();
+        actionPayload.put("proposal", proposal);
+
+        return simpleResponse(
+                AssistantIntentRouterService.INTENT_ANALYZE_ATTACHMENT,
+                buildAttachmentDrivenChangeReply(proposal),
+                true,
+                List.of(
+                        AssistantActionResponse.of(
+                                ACTION_ATTACHMENT_DRIVEN_CHANGE_PROPOSAL,
+                                "查看附件驱动变更分析",
                                 actionPayload
                         )
                 )
@@ -1365,6 +1489,428 @@ public class AssistantMessageService {
         );
     }
 
+
+    private Map<String, Object> buildAttachmentDrivenChangeProposal(
+            AssistantMessageRequest request,
+            String messageText,
+            List<ProjectModuleService.ModuleTreeNode> moduleTree,
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        String materialInstruction = buildInstructionWithAttachmentContext(
+                messageText,
+                attachmentContexts
+        );
+
+        String recommendedDispatch = inferAttachmentDrivenExecutionAction(
+                request,
+                messageText,
+                attachmentContexts
+        );
+
+        Map<String, Object> selectedNode = resolveSelectedNodeContext(
+                request == null ? null : request.getSelectedNodeId(),
+                moduleTree
+        );
+
+        List<String> affectedArtifacts = inferAttachmentDrivenAffectedArtifacts(
+                request,
+                messageText,
+                materialInstruction,
+                recommendedDispatch,
+                attachmentContexts
+        );
+
+        Map<String, Object> proposal = new LinkedHashMap<>();
+        proposal.put("proposalId", UUID.randomUUID().toString());
+        proposal.put("source", "ATTACHMENT_DRIVEN_CHANGE");
+        proposal.put("status", "DRAFT");
+        proposal.put("phase", "Phase 7-A");
+        proposal.put("originalInstruction", messageText);
+        proposal.put("summary", buildAttachmentDrivenSummary(
+                messageText,
+                attachmentContexts,
+                recommendedDispatch
+        ));
+        proposal.put("materialInstruction", materialInstruction);
+        proposal.put("recommendedDispatch", recommendedDispatch);
+        proposal.put("executionAction", recommendedDispatch);
+        proposal.put("targetNode", selectedNode);
+        proposal.put("targetArtifactType", resolveAttachmentDrivenTargetArtifactType(
+                request,
+                affectedArtifacts,
+                recommendedDispatch
+        ));
+        proposal.put("affectedArtifacts", affectedArtifacts);
+        proposal.put("riskNotes", buildAttachmentDrivenRiskNotes(
+                attachmentContexts,
+                recommendedDispatch
+        ));
+        proposal.put("recommendedSteps", buildAttachmentDrivenRecommendedSteps(
+                recommendedDispatch
+        ));
+        proposal.put("candidateActions", buildAttachmentDrivenCandidateActions(
+                affectedArtifacts,
+                recommendedDispatch
+        ));
+        proposal.put("attachmentSummary", buildAttachmentSummaryForRequirementChange(attachmentContexts));
+        proposal.put("requiresUserConfirmation", true);
+        proposal.put("executionPolicy", "当前仅生成附件驱动变更分析，不会直接修改模块树、覆盖资产或创建生成任务；用户点击动作按钮后才进入对应链路。");
+
+        return proposal;
+    }
+
+    private String buildAttachmentDrivenChangeReply(
+            Map<String, Object> proposal
+    ) {
+        String summary = textValue(proposal.get("summary"));
+        String recommendedDispatch = textValue(proposal.get("recommendedDispatch"));
+
+        return firstNonBlank(
+                summary,
+                "我已根据附件形成一份材料驱动需求变更分析。"
+        ) + "\n\n推荐处理方式：" + firstNonBlank(
+                recommendedDispatch,
+                "ANALYSIS_ONLY"
+        ) + "。请在右侧卡片中选择下一步动作。";
+    }
+
+    private String buildAttachmentDrivenSummary(
+            String messageText,
+            List<AssistantAttachmentParsedContext> attachmentContexts,
+            String recommendedDispatch
+    ) {
+        int attachmentCount = attachmentContexts == null
+                ? 0
+                : attachmentContexts.size();
+
+        long parsedTextCount = attachmentContexts == null
+                ? 0
+                : attachmentContexts.stream()
+                .filter(context -> context.getParsedTextExcerpt() != null && !context.getParsedTextExcerpt().isBlank())
+                .count();
+
+        if (isImageDrivenPageUiChangeIntent(messageText, attachmentContexts)) {
+            return "已接收图片/原型图类附件。当前阶段不会直接识别或编造图片中的视觉细节，" +
+                    "但可以基于图片元数据与用户描述，先生成 PAGE_SPEC 页面规范局部修订提案；" +
+                    "PAGE_SPEC 确认后再重新生成或确认 UI_CONTRACT。";
+        }
+
+        return "已读取 " + attachmentCount + " 个附件，其中 " + parsedTextCount +
+                " 个包含可用文本摘录。系统判断该材料当前更适合走 " +
+                recommendedDispatch + " 链路。";
+    }
+
+    private String inferAttachmentDrivenExecutionAction(
+            AssistantMessageRequest request,
+            String messageText,
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        String normalized = normalizeForIntent(messageText);
+        boolean hasParsedText = hasParsedAttachmentText(attachmentContexts);
+        boolean imageDrivenPageUiChange = isImageDrivenPageUiChangeIntent(
+                messageText,
+                attachmentContexts
+        );
+
+        if (!hasParsedText) {
+            return imageDrivenPageUiChange
+                    ? "ASSET_EDIT_PROPOSAL"
+                    : "ANALYSIS_ONLY";
+        }
+
+        if (imageDrivenPageUiChange) {
+            return "ASSET_EDIT_PROPOSAL";
+        }
+
+        if (containsAny(
+                normalized,
+                List.of(
+                        "模块树",
+                        "补全模块",
+                        "补充模块",
+                        "完善模块",
+                        "页面和功能点",
+                        "页面、功能点",
+                        "功能清单",
+                        "根据附件改模块",
+                        "按附件改模块",
+                        "新增页面",
+                        "新增功能点"
+                )
+        )) {
+            return "MODULE_TREE_PATCH";
+        }
+
+        if (containsAny(
+                normalized,
+                List.of(
+                        "生成",
+                        "写",
+                        "出",
+                        "创建资产",
+                        "需求",
+                        "页面规范",
+                        "接口",
+                        "api",
+                        "测试",
+                        "用例",
+                        "原型"
+                )
+        )) {
+            return "GENERATE_REQUIREMENT_ARTIFACT";
+        }
+
+        if (
+                request != null &&
+                        request.getSelectedArtifactType() != null &&
+                        !request.getSelectedArtifactType().isBlank()
+        ) {
+            return "ASSET_EDIT_PROPOSAL";
+        }
+
+        return "MODULE_TREE_PATCH";
+    }
+
+    private List<Map<String, Object>> buildAttachmentDrivenCandidateActions(
+            List<String> affectedArtifacts,
+            String recommendedDispatch
+    ) {
+        List<Map<String, Object>> actions = new ArrayList<>();
+
+        boolean pageUiChange = isPageUiAssetImpact(affectedArtifacts);
+
+        actions.add(attachmentCandidateAction(
+                "MODULE_TREE_PATCH",
+                "生成模块树变更提案",
+                "从附件中提取页面、功能点或模块变化，进入可审查 ModuleTreePatchAgent 提案。",
+                null
+        ));
+
+        String firstArtifact = affectedArtifacts == null || affectedArtifacts.isEmpty()
+                ? "MODULE_PRD"
+                : affectedArtifacts.get(0);
+
+        String assetEditLabel = pageUiChange
+                ? "生成页面规范修订提案"
+                : "生成资产局部修订提案";
+        String assetEditDescription = pageUiChange
+                ? "基于图片/原型图元数据和用户描述，先修订 PAGE_SPEC；确认后再重新生成或确认 UI_CONTRACT。"
+                : "把附件材料作为变更依据，对当前节点已有需求资产生成局部 Patch 提案。";
+
+        actions.add(attachmentCandidateAction(
+                "ASSET_EDIT_PROPOSAL",
+                assetEditLabel,
+                assetEditDescription,
+                firstArtifact
+        ));
+
+        actions.add(attachmentCandidateAction(
+                "ATTACHMENT_ARTIFACT_DIFF",
+                "对比当前资产差异",
+                "将附件材料与当前选中的需求资产做差异对照，先输出缺失、冲突和已覆盖清单。",
+                firstArtifact
+        ));
+
+        actions.add(attachmentCandidateAction(
+                "GENERATE_REQUIREMENT_ARTIFACT",
+                "生成需求资产",
+                "基于附件材料为当前节点创建一个需求资产生成任务。",
+                firstArtifact
+        ));
+
+        actions.add(attachmentCandidateAction(
+                "ANALYSIS_ONLY",
+                "仅保留摘要",
+                "只保留附件分析结论，暂不修改模块树或需求资产。",
+                null
+        ));
+
+        if (recommendedDispatch == null || recommendedDispatch.isBlank()) {
+            return actions;
+        }
+
+        actions.sort((left, right) -> {
+            boolean leftPreferred = recommendedDispatch.equals(textValue(left.get("type")));
+            boolean rightPreferred = recommendedDispatch.equals(textValue(right.get("type")));
+
+            if (leftPreferred == rightPreferred) {
+                return 0;
+            }
+
+            return leftPreferred ? -1 : 1;
+        });
+
+        return actions;
+    }
+
+    private Map<String, Object> attachmentCandidateAction(
+            String type,
+            String label,
+            String description,
+            String targetArtifactType
+    ) {
+        Map<String, Object> action = new LinkedHashMap<>();
+
+        action.put("type", type);
+        action.put("label", label);
+        action.put("description", description);
+        action.put("targetArtifactType", targetArtifactType);
+        action.put("expectedIntent", resolveExpectedIntentForAttachmentCandidate(type));
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("artifactType", targetArtifactType);
+        action.put("payload", payload);
+
+        return action;
+    }
+
+    private String resolveExpectedIntentForAttachmentCandidate(
+            String type
+    ) {
+        if ("MODULE_TREE_PATCH".equals(type)) {
+            return AssistantIntentRouterService.INTENT_PROPOSE_MODULE_TREE_PATCH;
+        }
+
+        if ("GENERATE_REQUIREMENT_ARTIFACT".equals(type)) {
+            return AssistantIntentRouterService.INTENT_GENERATE_REQUIREMENT_ARTIFACT;
+        }
+
+        if ("ASSET_EDIT_PROPOSAL".equals(type)) {
+            return INTENT_PROPOSE_REQUIREMENT_CHANGE;
+        }
+
+        if ("ATTACHMENT_ARTIFACT_DIFF".equals(type)) {
+            return AssistantIntentRouterService.INTENT_ANALYZE_ATTACHMENT;
+        }
+
+        return AssistantIntentRouterService.INTENT_ANALYZE_ATTACHMENT;
+    }
+
+    private List<String> inferAttachmentDrivenAffectedArtifacts(
+            AssistantMessageRequest request,
+            String messageText,
+            String materialInstruction,
+            String recommendedDispatch,
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        if (isImageDrivenPageUiChangeIntent(messageText, attachmentContexts)) {
+            return List.of("PAGE_SPEC", "UI_CONTRACT", "TEST_SPEC");
+        }
+
+        if (
+                request != null &&
+                        request.getSelectedArtifactType() != null &&
+                        !request.getSelectedArtifactType().isBlank()
+        ) {
+            return deduplicate(List.of(request.getSelectedArtifactType()));
+        }
+
+        List<String> inferred = inferAffectedArtifacts(
+                firstNonBlank(messageText, "") + "\n" + firstNonBlank(materialInstruction, "")
+        );
+
+        if (inferred == null || inferred.isEmpty()) {
+            return "MODULE_TREE_PATCH".equals(recommendedDispatch)
+                    ? List.of("MODULE_PRD", "PAGE_SPEC", "TEST_SPEC")
+                    : List.of("MODULE_PRD");
+        }
+
+        return inferred;
+    }
+
+    private String resolveAttachmentDrivenTargetArtifactType(
+            AssistantMessageRequest request,
+            List<String> affectedArtifacts,
+            String recommendedDispatch
+    ) {
+        if (
+                request != null &&
+                        request.getSelectedArtifactType() != null &&
+                        !request.getSelectedArtifactType().isBlank()
+        ) {
+            return request.getSelectedArtifactType();
+        }
+
+        if (!"GENERATE_REQUIREMENT_ARTIFACT".equals(recommendedDispatch)
+                && !"ASSET_EDIT_PROPOSAL".equals(recommendedDispatch)) {
+            return null;
+        }
+
+        return affectedArtifacts == null || affectedArtifacts.isEmpty()
+                ? "MODULE_PRD"
+                : affectedArtifacts.get(0);
+    }
+
+    private List<String> buildAttachmentDrivenRiskNotes(
+            List<AssistantAttachmentParsedContext> attachmentContexts,
+            String recommendedDispatch
+    ) {
+        List<String> risks = new ArrayList<>();
+
+        risks.add("该分析不会直接修改模块树或覆盖需求资产，需用户选择下一步动作。");
+
+        boolean hasImageOnly = attachmentContexts != null &&
+                !attachmentContexts.isEmpty() &&
+                attachmentContexts.stream().allMatch(context ->
+                        context.getMimeType() != null &&
+                                context.getMimeType().toLowerCase().startsWith("image/") &&
+                                (context.getParsedTextExcerpt() == null || context.getParsedTextExcerpt().isBlank())
+                );
+
+        if (hasImageOnly) {
+            risks.add("当前图片附件只记录元数据，尚未接入正式视觉理解模型，不能凭图片内容编造页面结构。");
+        }
+
+        if (hasImageAttachmentContext(attachmentContexts)
+                && "ASSET_EDIT_PROPOSAL".equals(recommendedDispatch)) {
+            risks.add("图片驱动页面修订只会先形成 PAGE_SPEC 修订提案；UI_CONTRACT 必须在 PAGE_SPEC 确认后重新生成或重新确认。");
+        }
+
+        if ("MODULE_TREE_PATCH".equals(recommendedDispatch)) {
+            risks.add("附件中提取的模块树变化仍需人工确认父子层级，确认后才可应用。");
+        }
+
+        if ("ASSET_EDIT_PROPOSAL".equals(recommendedDispatch)) {
+            risks.add("附件驱动资产修订应尽量局部 Patch，避免整份重写导致旧版本可追溯性下降。");
+        }
+
+        return deduplicate(risks);
+    }
+
+    private List<String> buildAttachmentDrivenRecommendedSteps(
+            String recommendedDispatch
+    ) {
+        if ("MODULE_TREE_PATCH".equals(recommendedDispatch)) {
+            return List.of(
+                    "先检查附件驱动变更范围是否符合客户真实需求。",
+                    "点击“生成模块树变更提案”，由 ModuleTreePatchAgent 生成可审查 Patch。",
+                    "确认 Patch 后再应用模块树变更；旧资产同步放到影响分析或 AI 局部同步修订中处理。"
+            );
+        }
+
+        if ("ASSET_EDIT_PROPOSAL".equals(recommendedDispatch)) {
+            return List.of(
+                    "确认附件材料确实作用于当前节点或当前资产；图片/原型图类材料需要人工补充关键字段、按钮和布局说明。",
+                    "点击“生成页面规范修订提案”或“生成资产局部修订提案”，由资产变更 Agent 输出局部 Patch。",
+                    "确认 PAGE_SPEC 或目标资产新版本后，再重新生成或确认受影响的 UI_CONTRACT、测试规格和开发交接资产。"
+            );
+        }
+
+        if ("GENERATE_REQUIREMENT_ARTIFACT".equals(recommendedDispatch)) {
+            return List.of(
+                    "确认要基于附件生成的目标资产类型。",
+                    "点击“生成需求资产”，系统创建后台生成任务。",
+                    "生成完成后进入版本确认和后续影响分析。"
+            );
+        }
+
+        return List.of(
+                "先查看附件摘要和解析状态。",
+                "确认需要修改模块树、修订资产还是生成新资产后，再继续说明。",
+                "图片附件在未接入视觉模型前，不作为正式页面结构依据。"
+        );
+    }
+
     private Map<String, Object> buildRequirementChangeProposal(
             AssistantMessageRequest request,
             String instruction,
@@ -1652,6 +2198,30 @@ public class AssistantMessageService {
                 "应用 Patch 后进入 Phase 8，分析受影响资产并选择性重生成。",
                 "重生成后的 UI_CONTRACT 和 Development Plan 需要重新确认，避免旧交接包继续被使用。"
         );
+    }
+
+    private List<Map<String, Object>> buildAttachmentContextItemsForAgent(
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        if (attachmentContexts == null || attachmentContexts.isEmpty()) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> items = new ArrayList<>();
+
+        for (AssistantAttachmentParsedContext context : attachmentContexts) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("attachmentId", context.getAttachmentId());
+            item.put("fileName", context.getFileName());
+            item.put("mimeType", context.getMimeType());
+            item.put("size", context.getSize());
+            item.put("parseStatus", context.getParseStatus());
+            item.put("parsedTextExcerpt", context.getParsedTextExcerpt());
+            item.put("metadata", context.getMetadata());
+            items.add(item);
+        }
+
+        return items;
     }
 
     private Map<String, Object> buildAttachmentSummaryForRequirementChange(
@@ -1958,6 +2528,21 @@ public class AssistantMessageService {
                 )
         );
         proposeRequest.setSelectedNodeId(request.getSelectedNodeId());
+        proposeRequest.setBaseArtifactId(request.getBaseArtifactId());
+        proposeRequest.setBaseVersionNo(request.getBaseVersionNo());
+        proposeRequest.setBaseChecksum(request.getBaseChecksum());
+        proposeRequest.setSelectedDiffItemIds(
+                normalizeSelectedDiffItemIds(request.getSelectedDiffItemIds())
+        );
+        proposeRequest.setSelectedDiffItems(
+                normalizeSelectedDiffItems(request.getSelectedDiffItems())
+        );
+        proposeRequest.setAttachmentContexts(
+                buildAttachmentContextItemsForAgent(attachmentContexts)
+        );
+        proposeRequest.setAttachmentSummary(
+                buildAttachmentSummaryForRequirementChange(attachmentContexts)
+        );
 
         ModuleTreePatchProposalResponse proposal =
                 moduleTreePatchProposalService.propose(
@@ -2143,6 +2728,114 @@ public class AssistantMessageService {
         return "已上传，暂无可用文本摘录";
     }
 
+    private boolean isImageDrivenPageUiChangeIntent(
+            String messageText,
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        if (!hasImageAttachmentContext(attachmentContexts)) {
+            return false;
+        }
+
+        String normalized = normalizeForIntent(messageText);
+
+        if (normalized.isBlank()) {
+            return false;
+        }
+
+        boolean mentionsImageMaterial = containsAny(
+                normalized,
+                List.of(
+                        "图片",
+                        "图",
+                        "截图",
+                        "原型图",
+                        "设计稿",
+                        "界面图",
+                        "页面图",
+                        "这张图",
+                        "根据图",
+                        "按图",
+                        "看图",
+                        "mockup",
+                        "figma",
+                        "ui"
+                )
+        );
+
+        boolean mentionsPageOrInteraction = containsAny(
+                normalized,
+                List.of(
+                        "页面",
+                        "页",
+                        "界面",
+                        "交互",
+                        "布局",
+                        "表单",
+                        "字段",
+                        "按钮",
+                        "入口",
+                        "卡片",
+                        "列表",
+                        "详情",
+                        "登录",
+                        "注册",
+                        "页面规范",
+                        "ui_contract",
+                        "ui契约",
+                        "交互原型"
+                )
+        );
+
+        boolean hasChangeIntent = containsAny(
+                normalized,
+                List.of(
+                        "优化",
+                        "修改",
+                        "调整",
+                        "完善",
+                        "补全",
+                        "补充",
+                        "对齐",
+                        "检查",
+                        "看看",
+                        "分析",
+                        "建议",
+                        "变更建议",
+                        "缺什么",
+                        "缺少什么"
+                )
+        );
+
+        return mentionsImageMaterial && mentionsPageOrInteraction && hasChangeIntent;
+    }
+
+    private boolean hasImageAttachmentContext(
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        if (attachmentContexts == null || attachmentContexts.isEmpty()) {
+            return false;
+        }
+
+        for (AssistantAttachmentParsedContext context : attachmentContexts) {
+            String mimeType = context == null ? null : context.getMimeType();
+            if (mimeType != null && mimeType.toLowerCase(Locale.ROOT).startsWith("image/")) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean isPageUiAssetImpact(
+            List<String> affectedArtifacts
+    ) {
+        if (affectedArtifacts == null || affectedArtifacts.isEmpty()) {
+            return false;
+        }
+
+        return affectedArtifacts.contains("PAGE_SPEC") && affectedArtifacts.contains("UI_CONTRACT");
+    }
+
     private String buildInstructionWithAttachmentContext(
             String messageText,
             List<AssistantAttachmentParsedContext> attachmentContexts
@@ -2204,6 +2897,64 @@ public class AssistantMessageService {
                         !context.getParsedTextExcerpt().isBlank()
         );
     }
+
+    private List<String> normalizeSelectedDiffItemIds(
+            List<String> selectedDiffItemIds
+    ) {
+        if (selectedDiffItemIds == null || selectedDiffItemIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<String> result = new ArrayList<>();
+        for (String item : selectedDiffItemIds) {
+            String value = item == null ? "" : item.trim();
+            if (!value.isBlank() && !result.contains(value)) {
+                result.add(value);
+            }
+        }
+
+        return result;
+    }
+
+    private List<Map<String, Object>> normalizeSelectedDiffItems(
+            List<Map<String, Object>> selectedDiffItems
+    ) {
+        if (selectedDiffItems == null || selectedDiffItems.isEmpty()) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+
+        for (Map<String, Object> item : selectedDiffItems) {
+            if (item == null || item.isEmpty()) {
+                continue;
+            }
+
+            Map<String, Object> normalized = new LinkedHashMap<>(item);
+            String id = String.valueOf(normalized.getOrDefault("id", "")).trim();
+            String fingerprint = id.isBlank()
+                    ? normalizeSelectedDiffFingerprint(String.valueOf(normalized.getOrDefault("title", ""))) + "|" + normalizeSelectedDiffFingerprint(String.valueOf(normalized.getOrDefault("attachmentExcerpt", "")))
+                    : id;
+
+            if (fingerprint.isBlank() || !seen.add(fingerprint)) {
+                continue;
+            }
+
+            result.add(normalized);
+        }
+
+        return result;
+    }
+
+    private String normalizeSelectedDiffFingerprint(
+            String value
+    ) {
+        return value == null
+                ? ""
+                : value.trim().replaceAll("\\s+", " ");
+    }
+
 
     private AssistantMessageResponse simpleResponse(
             String intent,
@@ -2283,14 +3034,25 @@ public class AssistantMessageService {
 
         Map<String, Object> requirementChangeProposal =
                 extractRequirementChangeProposalFromActions(response.getActions());
+        Map<String, Object> attachmentDrivenChangeProposal =
+                extractAttachmentDrivenChangeProposalFromActions(response.getActions());
+        Map<String, Object> attachmentArtifactDiffProposal =
+                extractAttachmentArtifactDiffProposal(response);
 
         content.put("reply", nullToEmpty(response.getReply()));
-        content.put("messageType", resolveAssistantMessageType(response, requirementChangeProposal));
+        content.put("messageType", resolveAssistantMessageType(
+                response,
+                requirementChangeProposal,
+                attachmentDrivenChangeProposal,
+                attachmentArtifactDiffProposal
+        ));
         content.put("intent", nullToEmpty(response.getIntent()));
         content.put("requiresUserConfirmation", response.isRequiresUserConfirmation());
         content.put("actions", response.getActions());
         content.put("proposal", response.getProposal() == null ? Map.of() : response.getProposal());
         content.put("requirementChangeProposal", requirementChangeProposal);
+        content.put("attachmentDrivenChangeProposal", attachmentDrivenChangeProposal);
+        content.put("attachmentArtifactDiffProposal", attachmentArtifactDiffProposal);
         content.put("classification", classification);
 
         return content;
@@ -2299,10 +3061,20 @@ public class AssistantMessageService {
 
     private String resolveAssistantMessageType(
             AssistantMessageResponse response,
-            Map<String, Object> requirementChangeProposal
+            Map<String, Object> requirementChangeProposal,
+            Map<String, Object> attachmentDrivenChangeProposal,
+            Map<String, Object> attachmentArtifactDiffProposal
     ) {
         if (response != null && response.getProposal() != null) {
             return "TREE_PATCH_PROPOSAL";
+        }
+
+        if (attachmentArtifactDiffProposal != null && !attachmentArtifactDiffProposal.isEmpty()) {
+            return MESSAGE_TYPE_ATTACHMENT_ARTIFACT_DIFF_PROPOSAL;
+        }
+
+        if (attachmentDrivenChangeProposal != null && !attachmentDrivenChangeProposal.isEmpty()) {
+            return MESSAGE_TYPE_ATTACHMENT_DRIVEN_CHANGE_PROPOSAL;
         }
 
         if (requirementChangeProposal != null && !requirementChangeProposal.isEmpty()) {
@@ -2327,6 +3099,78 @@ public class AssistantMessageService {
 
         for (Map<String, Object> action : actionMaps) {
             if (!ACTION_REQUIREMENT_CHANGE_PROPOSAL.equals(textValue(action.get("type")))) {
+                continue;
+            }
+
+            Map<String, Object> payload = asStringObjectMap(action.get("payload"));
+            Map<String, Object> proposal = asStringObjectMap(payload.get("proposal"));
+
+            return proposal.isEmpty() ? payload : proposal;
+        }
+
+        return new LinkedHashMap<>();
+    }
+
+
+    private Map<String, Object> extractAttachmentArtifactDiffProposal(
+            AssistantMessageResponse response
+    ) {
+        if (response == null) {
+            return new LinkedHashMap<>();
+        }
+
+        Map<String, Object> direct = response.getAttachmentArtifactDiffProposal();
+
+        if (direct != null && !direct.isEmpty()) {
+            return direct;
+        }
+
+        return extractAttachmentArtifactDiffProposalFromActions(response.getActions());
+    }
+
+    private Map<String, Object> extractAttachmentArtifactDiffProposalFromActions(
+            List<AssistantActionResponse> actions
+    ) {
+        if (actions == null || actions.isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+
+        List<Map<String, Object>> actionMaps = objectMapper.convertValue(
+                actions,
+                new TypeReference<List<Map<String, Object>>>() {
+                }
+        );
+
+        for (Map<String, Object> action : actionMaps) {
+            if (!ACTION_ATTACHMENT_ARTIFACT_DIFF_PROPOSAL.equals(textValue(action.get("type")))) {
+                continue;
+            }
+
+            Map<String, Object> payload = asStringObjectMap(action.get("payload"));
+            Map<String, Object> proposal = asStringObjectMap(payload.get("proposal"));
+
+            return proposal.isEmpty() ? payload : proposal;
+        }
+
+        return new LinkedHashMap<>();
+    }
+
+
+    private Map<String, Object> extractAttachmentDrivenChangeProposalFromActions(
+            List<AssistantActionResponse> actions
+    ) {
+        if (actions == null || actions.isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+
+        List<Map<String, Object>> actionMaps = objectMapper.convertValue(
+                actions,
+                new TypeReference<List<Map<String, Object>>>() {
+                }
+        );
+
+        for (Map<String, Object> action : actionMaps) {
+            if (!ACTION_ATTACHMENT_DRIVEN_CHANGE_PROPOSAL.equals(textValue(action.get("type")))) {
                 continue;
             }
 

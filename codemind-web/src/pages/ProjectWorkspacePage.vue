@@ -91,7 +91,9 @@
         @clear-proposal="treePatchProposal = null"
         @apply-proposal="handleApplyTreePatchProposal"
         @confirm-requirement-change="handleConfirmRequirementChangeProposal"
-        @confirm-asset-edit-proposal="handleConfirmAssetEditProposal" />
+        @confirm-asset-edit-proposal="handleConfirmAssetEditProposal"
+        @execute-attachment-change="handleExecuteAttachmentDrivenChange"
+        @execute-attachment-diff-action="handleExecuteAttachmentArtifactDiffAction" />
 
       <ArtifactVersionHistoryDrawer :visible="artifactVersionDrawerVisible" :loading="artifactVersionLoading"
         :rollback-loading="artifactVersionRollbackLoading" :artifact-title="artifactVersionTitle"
@@ -259,6 +261,11 @@ import type {
   AssistantActionResponse,
   AssistantAttachmentRef,
   AssistantConversationMessageResponse,
+  AttachmentDrivenChangeAction,
+  AttachmentDrivenChangeProposal,
+  AttachmentArtifactDiffAction,
+  AttachmentArtifactDiffItem,
+  AttachmentArtifactDiffProposal,
   AssistantMessageResponse,
   AssetEditProposal,
   ManualArtifactEditPayload,
@@ -1135,6 +1142,729 @@ async function proposeAssetEditFromRequirementChange(
 }
 
 
+async function handleExecuteAttachmentDrivenChange(
+  proposal: AttachmentDrivenChangeProposal,
+  action: AttachmentDrivenChangeAction,
+) {
+  const actionType = normalizeAttachmentDrivenActionType(action)
+  const followupMessage = buildAttachmentDrivenFollowupMessage(
+    proposal,
+    action,
+  )
+
+  if (actionType === 'MODULE_TREE_PATCH') {
+    await dispatchAssistantFollowup({
+      message: followupMessage,
+      expectedIntent: 'PROPOSE_MODULE_TREE_PATCH',
+      selectedArtifactType: null,
+      attachments: buildAttachmentRefsFromDrivenProposal(proposal),
+    })
+    return
+  }
+
+  if (actionType === 'ASSET_EDIT_PROPOSAL') {
+    await proposeAssetEditFromAttachmentDrivenChange(
+      proposal,
+      action,
+      followupMessage,
+    )
+    return
+  }
+
+  if (actionType === 'GENERATE_REQUIREMENT_ARTIFACT') {
+    await dispatchAssistantFollowup({
+      message: followupMessage,
+      expectedIntent: 'GENERATE_REQUIREMENT_ARTIFACT',
+      selectedArtifactType:
+        resolveAttachmentDrivenTargetArtifactType(proposal, action) ||
+        selectedArtifactType.value ||
+        null,
+      attachments: buildAttachmentRefsFromDrivenProposal(proposal),
+    })
+    return
+  }
+
+  if (actionType === 'ATTACHMENT_ARTIFACT_DIFF') {
+    await dispatchAssistantFollowup({
+      message: buildAttachmentArtifactDiffRequestMessage(proposal, action),
+      expectedIntent: 'ANALYZE_ATTACHMENT',
+      selectedArtifactType:
+        resolveAttachmentDrivenTargetArtifactType(proposal, action) ||
+        selectedArtifactType.value ||
+        null,
+      attachments: buildAttachmentRefsFromDrivenProposal(proposal),
+    })
+    return
+  }
+
+  artifactTaskFeedback.value = {
+    level: 'info',
+    message:
+      '已保留附件分析摘要。你可以继续说明“根据附件补全模块树”或“根据附件修改当前需求资产”。',
+  }
+
+  latestAssistantResponse.value = {
+    messageId: `attachment_change_ack_${Date.now()}`,
+    intent: 'ANALYZE_ATTACHMENT',
+    reply:
+      '已保留附件分析摘要，暂不执行模块树或资产变更。你可以继续用自然语言说明下一步处理方式。',
+    requiresUserConfirmation: false,
+    proposal: null,
+    requirementChangeProposal: null,
+    assetEditProposal: null,
+    actions: [],
+  }
+}
+
+async function proposeAssetEditFromAttachmentDrivenChange(
+  proposal: AttachmentDrivenChangeProposal,
+  action: AttachmentDrivenChangeAction,
+  instruction: string,
+) {
+  if (!selectedModule.value?.id) {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message: '请先在模块树中选择一个节点，再根据附件生成资产局部修订提案。',
+    }
+    return
+  }
+
+  latestAssistantResponse.value = null
+  isSendingAssistantMessage.value = true
+
+  try {
+    const targetArtifactType =
+      resolveAttachmentDrivenTargetArtifactType(proposal, action) ||
+      selectedArtifactType.value
+
+    const response = await proposeAssistantAssetEdit(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      {
+        requirementChangeProposal: {
+          proposalId: proposal.proposalId || null,
+          source: proposal.source || 'ATTACHMENT_DRIVEN_CHANGE',
+          status: 'CONFIRMED',
+          originalInstruction: instruction,
+          summary:
+            proposal.summary ||
+            '根据附件材料生成资产局部修订提案。',
+          changeType: 'UPDATE',
+          scopeType: 'ATTACHMENT_DRIVEN_ASSET_PATCH',
+          targetNode: proposal.targetNode || {
+            nodeId: selectedModule.value.id,
+            nodeName: getModuleDisplayName(selectedModule.value),
+            nodeType: selectedModule.value.moduleType || null,
+            moduleKey: selectedModule.value.moduleKey || null,
+          },
+          affectedArtifacts:
+            targetArtifactType && isRequirementArtifactType(targetArtifactType)
+              ? [targetArtifactType]
+              : proposal.affectedArtifacts || [],
+          riskNotes: proposal.riskNotes || [
+            '附件驱动修订只生成资产编辑提案，不会直接覆盖当前版本。',
+          ],
+          recommendedSteps: proposal.recommendedSteps || [
+            '查看右侧 Assistant 的资产编辑提案。',
+            '确认后保存为新的待确认版本。',
+          ],
+          attachmentSummary: proposal.attachmentSummary || null,
+        },
+        instruction,
+        selectedNodeId: selectedModule.value.id || null,
+        selectedArtifactType: targetArtifactType || selectedArtifactType.value,
+      },
+    )
+
+    latestAssistantResponse.value = response
+
+    const responseArtifactType =
+      resolveAssetEditProposalArtifactType(response) ||
+      targetArtifactType
+
+    if (responseArtifactType) {
+      await handleViewArtifact(responseArtifactType)
+    }
+
+    artifactTaskFeedback.value = {
+      level: 'info',
+      message:
+        '已根据附件材料生成资产局部修订提案，请在右侧 Assistant 中确认是否保存为新版本。',
+    }
+  } catch (error) {
+    window.alert(resolveErrorMessage(error, '根据附件生成资产编辑提案失败。'))
+  } finally {
+    isSendingAssistantMessage.value = false
+  }
+}
+
+
+async function handleExecuteAttachmentArtifactDiffAction(
+  proposal: AttachmentArtifactDiffProposal,
+  action: AttachmentArtifactDiffAction,
+  selectedDiffItemIds: string[] = [],
+) {
+  const actionType = normalizeAttachmentArtifactDiffActionType(action)
+  const normalizedSelectedDiffItemIds = resolveSelectedAttachmentDiffItemIds(
+    proposal,
+    selectedDiffItemIds,
+  )
+
+  if ((proposal.diffItems?.length || 0) > 0 && !normalizedSelectedDiffItemIds.length) {
+    artifactTaskFeedback.value = {
+      level: 'info',
+      message: '请至少选择一条差异后再继续生成提案。',
+    }
+    return
+  }
+
+  if (actionType === 'ASSET_EDIT_PROPOSAL') {
+    await proposeAssetEditFromAttachmentArtifactDiff(
+      proposal,
+      action,
+      normalizedSelectedDiffItemIds,
+    )
+    return
+  }
+
+  if (actionType === 'MODULE_TREE_PATCH') {
+    await dispatchAssistantFollowup({
+      message: buildAttachmentArtifactDiffFollowupMessage(
+        proposal,
+        action,
+        normalizedSelectedDiffItemIds,
+      ),
+      expectedIntent: 'PROPOSE_MODULE_TREE_PATCH',
+      selectedArtifactType: null,
+      attachments: buildAttachmentRefsFromDiffProposal(proposal),
+      selectedDiffItemIds: normalizedSelectedDiffItemIds,
+      selectedDiffItems: getSelectedAttachmentDiffItems(
+        proposal,
+        normalizedSelectedDiffItemIds,
+      ),
+      ...resolveAttachmentDiffBaseline(proposal),
+    })
+    return
+  }
+
+  const selectedSummary = buildAttachmentDiffSelectionSummary(
+    proposal,
+    normalizedSelectedDiffItemIds,
+  )
+
+  artifactTaskFeedback.value = {
+    level: 'info',
+    message:
+      '已保留已选择的附件与当前资产差异摘要。你可以继续说明希望基于哪一条差异生成局部修订提案。',
+  }
+
+  latestAssistantResponse.value = {
+    messageId: `attachment_diff_ack_${Date.now()}`,
+    intent: 'ANALYZE_ATTACHMENT',
+    reply:
+      `已保留附件与当前资产差异摘要，暂不执行资产修订或模块树变更。${selectedSummary}`,
+    requiresUserConfirmation: false,
+    proposal: null,
+    requirementChangeProposal: null,
+    assetEditProposal: null,
+    attachmentDrivenChangeProposal: null,
+    attachmentArtifactDiffProposal: null,
+    actions: [],
+  }
+}
+
+async function proposeAssetEditFromAttachmentArtifactDiff(
+  proposal: AttachmentArtifactDiffProposal,
+  action: AttachmentArtifactDiffAction,
+  selectedDiffItemIds: string[] = [],
+) {
+  if (!selectedModule.value?.id) {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message: '请先在模块树中选择一个节点，再基于差异生成资产局部修订提案。',
+    }
+    return
+  }
+
+  latestAssistantResponse.value = null
+  isSendingAssistantMessage.value = true
+
+  try {
+    const targetArtifactType =
+      resolveAttachmentDiffTargetArtifactType(proposal, action) ||
+      selectedArtifactType.value
+    const normalizedSelectedDiffItemIds = resolveSelectedAttachmentDiffItemIds(
+      proposal,
+      selectedDiffItemIds,
+    )
+    const selectedDiffItems = getSelectedAttachmentDiffItems(
+      proposal,
+      normalizedSelectedDiffItemIds,
+    )
+    const instruction = buildAttachmentArtifactDiffFollowupMessage(
+      proposal,
+      action,
+      normalizedSelectedDiffItemIds,
+    )
+    const baseline = resolveAttachmentDiffBaseline(proposal)
+
+    const response = await proposeAssistantAssetEdit(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      {
+        requirementChangeProposal: {
+          proposalId: proposal.proposalId || null,
+          source: proposal.source || 'ATTACHMENT_ARTIFACT_DIFF',
+          status: 'CONFIRMED',
+          originalInstruction: instruction,
+          summary:
+            proposal.summary ||
+            '根据附件与当前资产差异分析生成资产局部修订提案。',
+          changeType: 'UPDATE',
+          scopeType: 'ATTACHMENT_ARTIFACT_DIFF_PATCH',
+          selectedDiffItemIds: normalizedSelectedDiffItemIds,
+          selectedDiffItems,
+          baseArtifactId: baseline.baseArtifactId,
+          baseVersionNo: baseline.baseVersionNo,
+          baseChecksum: baseline.baseChecksum,
+          baselineValidationPolicy: 'BLOCK_IF_CURRENT_ARTIFACT_CHANGED',
+          targetNode: proposal.targetNode || {
+            nodeId: selectedModule.value.id,
+            nodeName: getModuleDisplayName(selectedModule.value),
+            nodeType: selectedModule.value.moduleType || null,
+            moduleKey: selectedModule.value.moduleKey || null,
+          },
+          affectedArtifacts:
+            targetArtifactType && isRequirementArtifactType(targetArtifactType)
+              ? [targetArtifactType]
+              : proposal.affectedArtifacts || [],
+          riskNotes: proposal.riskNotes || [
+            '差异分析只作为修订依据，保存前仍需要人工确认资产编辑提案。',
+          ],
+          recommendedSteps: proposal.recommendedSteps || [
+            '查看右侧 Assistant 中的资产编辑提案。',
+            '确认后保存为新的待确认版本。',
+            '再根据影响分析选择性同步下游资产。',
+          ],
+          attachmentSummary: proposal.attachmentSummary || null,
+        },
+        instruction,
+        selectedNodeId: selectedModule.value.id || null,
+        selectedArtifactType: targetArtifactType || selectedArtifactType.value,
+        selectedDiffItemIds: normalizedSelectedDiffItemIds,
+        selectedDiffItems,
+        ...baseline,
+      },
+    )
+
+    latestAssistantResponse.value = response
+
+    const responseArtifactType =
+      resolveAssetEditProposalArtifactType(response) ||
+      targetArtifactType
+
+    if (responseArtifactType) {
+      await handleViewArtifact(responseArtifactType)
+    }
+
+    artifactTaskFeedback.value = {
+      level: 'info',
+      message:
+        '已基于附件与当前资产差异生成资产局部修订提案，请在右侧 Assistant 中确认是否保存为新版本。',
+    }
+  } catch (error) {
+    window.alert(resolveErrorMessage(error, '基于差异生成资产编辑提案失败。'))
+  } finally {
+    isSendingAssistantMessage.value = false
+  }
+}
+
+function getAttachmentDiffItemId(
+  item: AttachmentArtifactDiffItem,
+  index: number,
+): string {
+  const id = item.id
+
+  if (id !== null && id !== undefined && String(id).trim()) {
+    return String(id)
+  }
+
+  return `diff-item-${index + 1}`
+}
+
+function resolveSelectedAttachmentDiffItemIds(
+  proposal: AttachmentArtifactDiffProposal,
+  selectedDiffItemIds: string[],
+): string[] {
+  const validIds = new Set(
+    (proposal.diffItems || []).map((item, index) => getAttachmentDiffItemId(item, index)),
+  )
+
+  return Array.from(new Set(selectedDiffItemIds.map(String)))
+    .filter((id) => validIds.has(id))
+}
+
+function getSelectedAttachmentDiffItems(
+  proposal: AttachmentArtifactDiffProposal,
+  selectedDiffItemIds: string[],
+): AttachmentArtifactDiffItem[] {
+  const selectedIds = new Set(resolveSelectedAttachmentDiffItemIds(
+    proposal,
+    selectedDiffItemIds,
+  ))
+
+  return (proposal.diffItems || []).filter((item, index) => {
+    return selectedIds.has(getAttachmentDiffItemId(item, index))
+  })
+}
+
+function buildAttachmentDiffSelectionSummary(
+  proposal: AttachmentArtifactDiffProposal,
+  selectedDiffItemIds: string[],
+): string {
+  const total = proposal.diffItems?.length || 0
+
+  if (!total) {
+    return ''
+  }
+
+  const selectedCount = resolveSelectedAttachmentDiffItemIds(
+    proposal,
+    selectedDiffItemIds,
+  ).length
+
+  return `本次选择了 ${selectedCount} / ${total} 条差异。`
+}
+
+
+function resolveAttachmentDiffBaseline(
+  proposal: AttachmentArtifactDiffProposal,
+): {
+  baseArtifactId: string | null
+  baseVersionNo: number | null
+  baseChecksum: string | null
+} {
+  const targetArtifact = proposal.targetArtifact
+  const rawVersionNo =
+    proposal.baseVersionNo ??
+    targetArtifact?.versionNo ??
+    null
+  const parsedVersionNo =
+    typeof rawVersionNo === 'number'
+      ? rawVersionNo
+      : Number(rawVersionNo || 0)
+
+  return {
+    baseArtifactId:
+      proposal.baseArtifactId ||
+      targetArtifact?.artifactId ||
+      null,
+    baseVersionNo: Number.isFinite(parsedVersionNo) && parsedVersionNo > 0
+      ? parsedVersionNo
+      : null,
+    baseChecksum:
+      proposal.baseChecksum ||
+      targetArtifact?.checksum ||
+      null,
+  }
+}
+
+function normalizeAttachmentArtifactDiffActionType(
+  action: AttachmentArtifactDiffAction | null | undefined,
+): string {
+  return String(action?.type || '').trim().toUpperCase()
+}
+
+function resolveAttachmentDiffTargetArtifactType(
+  proposal: AttachmentArtifactDiffProposal,
+  action: AttachmentArtifactDiffAction,
+): RequirementArtifactType | null {
+  const candidates = [
+    action.targetArtifactType,
+    String(action.payload?.artifactType || ''),
+    proposal.targetArtifactType,
+    proposal.targetArtifact?.artifactType,
+    ...(proposal.affectedArtifacts || []),
+  ]
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && isRequirementArtifactType(candidate)) {
+      return candidate
+    }
+  }
+
+  return null
+}
+
+function buildAttachmentArtifactDiffRequestMessage(
+  proposal: AttachmentDrivenChangeProposal,
+  action: AttachmentDrivenChangeAction,
+): string {
+  return [
+    '请将附件材料与当前选中的需求资产进行差异对比，输出可审查的差异分析卡片，不要直接修改资产。',
+    `目标资产：${resolveAttachmentDrivenTargetArtifactType(proposal, action) || selectedArtifactType.value || ''}`,
+    proposal.summary ? `附件分析摘要：${proposal.summary}` : '',
+    proposal.materialInstruction ? `材料理解：\n${proposal.materialInstruction}` : '',
+  ].filter(Boolean).join('\n\n')
+}
+
+function buildAttachmentArtifactDiffFollowupMessage(
+  proposal: AttachmentArtifactDiffProposal,
+  action: AttachmentArtifactDiffAction,
+  selectedDiffItemIds: string[] = [],
+): string {
+  const actionType = normalizeAttachmentArtifactDiffActionType(action)
+  const normalizedSelectedDiffItemIds = resolveSelectedAttachmentDiffItemIds(
+    proposal,
+    selectedDiffItemIds,
+  )
+  const allDiffItems = proposal.diffItems || []
+  const selectedDiffItems = normalizedSelectedDiffItemIds.length
+    ? getSelectedAttachmentDiffItems(proposal, normalizedSelectedDiffItemIds)
+    : allDiffItems
+  const selectionSummary = allDiffItems.length
+    ? `本次用户选择：${selectedDiffItems.length} / ${allDiffItems.length} 条差异。`
+    : ''
+  const selectedTitles = selectedDiffItems
+    .map((item, index) => `${index + 1}. ${item.title || '待核对差异'}`)
+    .join('\n')
+  const diffSummary = selectedDiffItems
+    .map((item, index) => {
+      return [
+        `${index + 1}. ${item.type || 'NEEDS_REVIEW'}：${item.title || '待核对差异'}`,
+        item.attachmentExcerpt ? `附件依据：${item.attachmentExcerpt}` : '',
+        item.currentEvidence ? `当前资产依据：${item.currentEvidence}` : '',
+        item.recommendation ? `建议：${item.recommendation}` : '',
+      ].filter(Boolean).join('\n')
+    })
+    .join('\n\n')
+
+  const actionHint: Record<string, string> = {
+    ASSET_EDIT_PROPOSAL:
+      '请仅基于用户已选择的附件与当前资产差异，生成当前资产的局部修订提案，不要整份重写，也不要处理未选择的差异。',
+    MODULE_TREE_PATCH:
+      '请仅基于用户已选择的附件与当前资产差异，生成可审查的模块树变更提案，不要直接应用，也不要处理未选择的差异。',
+    ANALYSIS_ONLY:
+      '请仅保留用户已选择的差异摘要，暂不执行变更。',
+  }
+
+  return [
+    actionHint[actionType] || '请基于以下已选择差异继续处理。',
+    selectionSummary,
+    selectedTitles ? `已选择差异标题：\n${selectedTitles}` : '',
+    `目标资产：${resolveAttachmentDiffTargetArtifactType(proposal, action) || selectedArtifactType.value || ''}`,
+    `原始指令：${proposal.originalInstruction || ''}`,
+    proposal.summary ? `差异摘要：${proposal.summary}` : '',
+    proposal.missingRequirements?.length
+      ? `当前资产缺失，仅供背景参考，不代表全部都已被选择：\n${proposal.missingRequirements.join('\n')}`
+      : '',
+    proposal.possibleConflicts?.length
+      ? `可能冲突，仅供背景参考，不代表全部都已被选择：\n${proposal.possibleConflicts.join('\n')}`
+      : '',
+    diffSummary ? `已选择差异清单：\n${diffSummary}` : '',
+  ].filter(Boolean).join('\n\n')
+}
+
+function buildAttachmentRefsFromDiffProposal(
+  proposal: AttachmentArtifactDiffProposal,
+): AssistantAttachmentRef[] {
+  const items = proposal.attachmentSummary?.items || []
+
+  return items
+    .map((item) => {
+      const attachmentId = String(item.attachmentId || '').trim()
+
+      if (!attachmentId) {
+        return null
+      }
+
+      const sizeValue = item.size
+      const size = typeof sizeValue === 'number'
+        ? sizeValue
+        : Number(sizeValue || 0)
+
+      return {
+        attachmentId,
+        fileName: String(item.fileName || '附件'),
+        mimeType: String(item.mimeType || 'application/octet-stream'),
+        size: Number.isFinite(size) ? size : 0,
+        parseStatus: String(item.parseStatus || 'PARSED'),
+        parsedTextExcerpt: String(item.parsedTextExcerpt || ''),
+        metadata: isPlainRecord(item.metadata) ? item.metadata : {},
+      }
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null)
+}
+
+function normalizeAttachmentDrivenActionType(
+  action: AttachmentDrivenChangeAction | null | undefined,
+): string {
+  return String(action?.type || '').trim().toUpperCase()
+}
+
+function resolveAttachmentDrivenTargetArtifactType(
+  proposal: AttachmentDrivenChangeProposal,
+  action: AttachmentDrivenChangeAction,
+): RequirementArtifactType | null {
+  const candidates = [
+    action.targetArtifactType,
+    String(action.payload?.artifactType || ''),
+    proposal.targetArtifactType,
+    ...(proposal.affectedArtifacts || []),
+  ]
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && isRequirementArtifactType(candidate)) {
+      return candidate
+    }
+  }
+
+  return null
+}
+
+function buildAttachmentDrivenFollowupMessage(
+  proposal: AttachmentDrivenChangeProposal,
+  action: AttachmentDrivenChangeAction,
+): string {
+  const actionType = normalizeAttachmentDrivenActionType(action)
+  const targetArtifactType =
+    resolveAttachmentDrivenTargetArtifactType(proposal, action) ||
+    selectedArtifactType.value ||
+    null
+
+  const actionHint: Record<string, string> = {
+    MODULE_TREE_PATCH:
+      '请基于以下附件驱动变更分析，生成可审查的模块树变更提案，不要直接应用。',
+    ASSET_EDIT_PROPOSAL:
+      '请基于以下附件驱动变更分析，生成当前资产的局部修订提案，不要整份重写。',
+    GENERATE_REQUIREMENT_ARTIFACT:
+      '请基于以下附件驱动变更分析，为当前节点创建对应需求资产生成任务。',
+    PAGE_UI_CHANGE_PROPOSAL:
+      '请基于以下图片、原型图或页面截图材料，生成页面结构与 UI_CONTRACT 变更建议；优先输出 PAGE_SPEC 局部修订建议，不要直接覆盖 UI_CONTRACT。',
+    ANALYSIS_ONLY:
+      '请仅保留附件摘要，暂不执行变更。',
+  }
+
+  const attachmentItems = proposal.attachmentSummary?.items || []
+  const attachmentSummary = attachmentItems
+    .map(formatAttachmentDrivenFollowupAttachmentItem)
+    .join('\n\n')
+
+  const hasImageAttachment = attachmentItems.some(isImageAttachmentSummaryItem)
+  const imageBoundary = hasImageAttachment
+    ? '图片处理边界：当前阶段仅基于图片元数据、文件名和用户文字描述形成页面变更建议；未接入正式视觉理解模型，不得编造图片中的具体字段、按钮、颜色、布局或业务含义。用户需要人工补充关键信息。'
+    : ''
+
+  return [
+    actionHint[actionType] || '请基于以下附件驱动变更分析继续处理。',
+    targetArtifactType ? `目标资产：${targetArtifactType}` : '',
+    imageBoundary,
+    `原始指令：${proposal.originalInstruction || ''}`,
+    proposal.summary ? `分析摘要：${proposal.summary}` : '',
+    proposal.materialInstruction ? `材料理解：\n${proposal.materialInstruction}` : '',
+    attachmentSummary ? `附件内容：\n${attachmentSummary}` : '',
+  ].filter(Boolean).join('\n\n')
+}
+
+function formatAttachmentDrivenFollowupAttachmentItem(
+  item: Record<string, unknown>,
+): string {
+  const fileName = String(item.fileName || '未命名附件')
+  const mimeType = String(item.mimeType || '')
+  const parseStatus = String(item.parseStatus || '')
+  const excerpt = String(item.parsedTextExcerpt || '').trim()
+  const dimensions = formatAttachmentDrivenImageDimensions(item)
+  const metadata = isPlainRecord(item.metadata)
+    ? item.metadata
+    : {}
+  const parser = typeof metadata.parser === 'string'
+    ? metadata.parser
+    : ''
+
+  return [
+    `附件：${fileName}`,
+    mimeType ? `MIME：${mimeType}` : '',
+    parseStatus ? `解析状态：${parseStatus}` : '',
+    dimensions ? `图片尺寸：${dimensions}` : '',
+    parser ? `解析器：${parser}` : '',
+    excerpt ? `摘录：${excerpt}` : '摘录：暂无可用文本。',
+  ].filter(Boolean).join('\n')
+}
+
+function isImageAttachmentSummaryItem(
+  item: Record<string, unknown>,
+): boolean {
+  const mimeType = String(item.mimeType || '').toLowerCase()
+  const fileName = String(item.fileName || '').toLowerCase()
+
+  return mimeType.startsWith('image/') ||
+    /\.(png|jpg|jpeg|webp|gif|bmp|svg)$/i.test(fileName)
+}
+
+function formatAttachmentDrivenImageDimensions(
+  item: Record<string, unknown>,
+): string {
+  const metadata = isPlainRecord(item.metadata)
+    ? item.metadata
+    : {}
+
+  const width =
+    item.imageWidth ||
+    item.width ||
+    metadata.imageWidth ||
+    metadata.width
+
+  const height =
+    item.imageHeight ||
+    item.height ||
+    metadata.imageHeight ||
+    metadata.height
+
+  if (!width || !height) {
+    return ''
+  }
+
+  return `${width}×${height}`
+}
+
+
+function buildAttachmentRefsFromDrivenProposal(
+  proposal: AttachmentDrivenChangeProposal,
+): AssistantAttachmentRef[] {
+  const items = proposal.attachmentSummary?.items || []
+
+  return items
+    .map((item) => {
+      const attachmentId = String(item.attachmentId || '').trim()
+
+      if (!attachmentId) {
+        return null
+      }
+
+      const sizeValue = item.size
+      const size = typeof sizeValue === 'number'
+        ? sizeValue
+        : Number(sizeValue || 0)
+
+      return {
+        attachmentId,
+        fileName: String(item.fileName || '附件'),
+        mimeType: String(item.mimeType || 'application/octet-stream'),
+        size: Number.isFinite(size) ? size : 0,
+        parseStatus: String(item.parseStatus || 'PARSED'),
+        parsedTextExcerpt: String(item.parsedTextExcerpt || ''),
+        metadata: isPlainRecord(item.metadata) ? item.metadata : {},
+      }
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null)
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+
+
 async function handleSaveManualArtifactEdit(
   payload: ManualArtifactEditPayload,
 ) {
@@ -1329,6 +2059,13 @@ function resolveAssetEditProposalArtifactType(
 async function dispatchAssistantFollowup(payload: {
   message: string
   expectedIntent: string
+  selectedArtifactType?: string | null
+  attachments?: AssistantAttachmentRef[]
+  selectedDiffItemIds?: string[]
+  selectedDiffItems?: AttachmentArtifactDiffItem[]
+  baseArtifactId?: string | null
+  baseVersionNo?: number | null
+  baseChecksum?: string | null
 }) {
   const text = payload.message.trim()
 
@@ -1346,9 +2083,17 @@ async function dispatchAssistantFollowup(payload: {
       {
         message: text,
         selectedNodeId: selectedModule.value?.id || null,
-        selectedArtifactType: selectedArtifactType.value || null,
+        selectedArtifactType:
+          payload.selectedArtifactType === undefined
+            ? selectedArtifactType.value || null
+            : payload.selectedArtifactType,
         expectedIntent: payload.expectedIntent,
-        attachments: [],
+        attachments: payload.attachments || [],
+        selectedDiffItemIds: payload.selectedDiffItemIds || [],
+        selectedDiffItems: payload.selectedDiffItems || [],
+        baseArtifactId: payload.baseArtifactId || null,
+        baseVersionNo: payload.baseVersionNo ?? null,
+        baseChecksum: payload.baseChecksum || null,
       },
     )
 
@@ -1915,143 +2660,6 @@ function normalizeTreePatchMatchText(
     .toLowerCase()
     .replace(/\s+/g, '')
 }
-
-async function proposeAssetEditAfterTreePatch(
-  proposal: ModuleTreePatchProposalResponse,
-  preferredArtifactType: RequirementArtifactType | null,
-) {
-  if (!selectedModule.value?.id || !preferredArtifactType) {
-    artifactTaskFeedback.value = {
-      level: 'info',
-      message: '模块树提案已应用。当前没有可直接同步编辑的文档资产，请在受影响资产中选择重生成或手动编辑。',
-    }
-    return
-  }
-
-  const instruction = buildTreePatchAssetEditInstruction(proposal)
-
-  try {
-    const response = await proposeAssistantAssetEdit(
-      props.workspace.workspaceId,
-      props.project.projectCode,
-      {
-        requirementChangeProposal: {
-          proposalId: null,
-          source: proposal.source || proposal.proposal.source || 'AI_TREE_PATCH',
-          status: 'PATCH_APPLIED',
-          originalInstruction: instruction,
-          summary: proposal.description || proposal.proposal.description || instruction,
-          changeType: 'UPDATE',
-          scopeType: 'ASSET_AFTER_TREE_PATCH',
-          targetNode: {
-            nodeId: selectedModule.value.id,
-            nodeName: getModuleDisplayName(selectedModule.value),
-            nodeType: selectedModule.value.moduleType || null,
-            moduleKey: selectedModule.value.moduleKey || null,
-          },
-          affectedArtifacts: [
-            preferredArtifactType,
-            ...resolveTreePatchAffectedArtifacts(proposal),
-          ],
-          riskNotes: proposal.proposal.impact?.riskNotes || [],
-          recommendedSteps: [
-            '根据已应用的模块树变更，生成正式资产的新版本编辑提案。',
-            '确认新版本后，再通过影响分析选择性重生成下游资产。',
-          ],
-        },
-        instruction,
-        selectedNodeId: selectedModule.value.id,
-        selectedArtifactType: preferredArtifactType,
-      },
-    )
-
-    latestAssistantResponse.value = response
-
-    const targetArtifactType = resolveAssetEditProposalArtifactType(response) || preferredArtifactType
-
-    if (targetArtifactType) {
-      await handleViewArtifact(targetArtifactType)
-    }
-
-    artifactTaskFeedback.value = {
-      level: 'info',
-      message: '模块树提案已应用，并已继续生成正式资产编辑提案。请在右侧 Assistant 中确认是否生成新资产版本。',
-    }
-  } catch (error) {
-    artifactTaskFeedback.value = {
-      level: 'error',
-      message: resolveErrorMessage(error, '模块树已应用，但生成资产编辑提案失败。'),
-    }
-  }
-}
-
-function resolveTreePatchAssetEditTarget(
-  proposal: ModuleTreePatchProposalResponse,
-  currentArtifactType: RequirementArtifactType | null,
-): RequirementArtifactType | null {
-  const documentEditableTypes: RequirementArtifactType[] = [
-    'PAGE_SPEC',
-    'MODULE_PRD',
-    'BUSINESS_FLOW',
-    'TEST_SPEC',
-  ]
-
-  if (currentArtifactType && documentEditableTypes.includes(currentArtifactType)) {
-    return currentArtifactType
-  }
-
-  const affectedArtifacts = resolveTreePatchAffectedArtifacts(proposal)
-
-  for (const artifactType of documentEditableTypes) {
-    if (affectedArtifacts.includes(artifactType) && getArtifactByType(artifactType)?.artifactId) {
-      return artifactType
-    }
-  }
-
-  for (const artifactType of documentEditableTypes) {
-    if (getArtifactByType(artifactType)?.artifactId) {
-      return artifactType
-    }
-  }
-
-  return null
-}
-
-function resolveTreePatchAffectedArtifacts(
-  proposal: ModuleTreePatchProposalResponse,
-): RequirementArtifactType[] {
-  const rawArtifacts = proposal.proposal.impact?.affectedArtifacts || []
-  const result: RequirementArtifactType[] = []
-
-  for (const rawArtifact of rawArtifacts) {
-    if (isRequirementArtifactType(rawArtifact) && !result.includes(rawArtifact)) {
-      result.push(rawArtifact)
-    }
-  }
-
-  return result
-}
-
-function buildTreePatchAssetEditInstruction(
-  proposal: ModuleTreePatchProposalResponse,
-): string {
-  const description = proposal.description || proposal.proposal.description || 'AI 模块树变更提案已应用。'
-  const operations = proposal.proposal.operations || []
-  const operationSummary = operations
-    .map((operation) => `${operation.op}: ${operation.moduleName || operation.nodeId || operation.parentId || ''}`.trim())
-    .filter(Boolean)
-    .join('；')
-
-  const impactSummary = proposal.proposal.impact?.summary || ''
-
-  return [
-    '模块树变更提案已应用，请把该变更同步落地到当前正式需求资产正文中。',
-    `变更说明：${description}`,
-    operationSummary ? `操作摘要：${operationSummary}` : '',
-    impactSummary ? `影响摘要：${impactSummary}` : '',
-  ].filter(Boolean).join('\n')
-}
-
 
 async function handleSelectModule(node: ModuleTreeNode) {
   stopTaskPolling()
@@ -2678,10 +3286,6 @@ function handleOpenImpactAnalysis(
   if (!selectedModule.value?.id) {
     return
   }
-
-  const sourceDefinition = REQUIREMENT_ARTIFACT_DEFINITIONS.find(
-    (definition) => definition.artifactType === artifactType,
-  )
 
   impactAnalysisError.value = ''
   impactAnalysisSourceArtifactType.value = artifactType
@@ -3911,4 +4515,3 @@ function handleLogout() {
 }
 
 </style>
-

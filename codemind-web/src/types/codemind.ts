@@ -60,6 +60,10 @@ export interface ModuleTreePatchApplyResponse {
 export interface ProposeModuleTreePatchRequest {
   instruction: string
   selectedNodeId?: string | null
+  /** Phase 7-E: selected attachment diff item ids that should drive the proposal. */
+  selectedDiffItemIds?: string[]
+  /** Phase 7-E3: selected diff item payloads used by backend agents instead of full diff context. */
+  selectedDiffItems?: AttachmentArtifactDiffItem[]
 }
 
 export interface ModuleTreePatchProposalResponse {
@@ -104,6 +108,15 @@ export interface RequirementChangeProposal {
   summary?: string | null
   changeType?: string | null
   scopeType?: string | null
+  /** Phase 7-E: selected attachment diff item ids used as the source of this proposal. */
+  selectedDiffItemIds?: string[]
+  /** Phase 7-E: selected attachment diff item payloads, kept for backend agent context and audit. */
+  selectedDiffItems?: AttachmentArtifactDiffItem[]
+  /** Phase 7-E4: target asset baseline captured when the diff card was generated. */
+  baseArtifactId?: string | null
+  baseVersionNo?: number | null
+  baseChecksum?: string | null
+  baselineValidationPolicy?: string | null
   targetNode?: RequirementChangeTargetNode | null
   affectedNodeIds?: string[]
   affectedArtifacts?: string[]
@@ -120,12 +133,118 @@ export interface RequirementChangeProposal {
 }
 
 
+
+export type AttachmentDrivenChangeExecutionAction =
+  | 'MODULE_TREE_PATCH'
+  | 'ASSET_EDIT_PROPOSAL'
+  | 'GENERATE_REQUIREMENT_ARTIFACT'
+  | 'ATTACHMENT_ARTIFACT_DIFF'
+  | 'ANALYSIS_ONLY'
+  | string
+
+export interface AttachmentDrivenChangeAction {
+  type: AttachmentDrivenChangeExecutionAction
+  label?: string | null
+  description?: string | null
+  targetArtifactType?: string | null
+  expectedIntent?: AssistantIntent | null
+  payload?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export interface AttachmentDrivenChangeProposal {
+  proposalId?: string | null
+  source?: string | null
+  status?: string | null
+  phase?: string | null
+  originalInstruction?: string | null
+  summary?: string | null
+  materialInstruction?: string | null
+  recommendedDispatch?: AttachmentDrivenChangeExecutionAction | null
+  executionAction?: AttachmentDrivenChangeExecutionAction | null
+  targetNode?: RequirementChangeTargetNode | null
+  targetArtifactType?: string | null
+  affectedArtifacts?: string[]
+  riskNotes?: string[]
+  recommendedSteps?: string[]
+  candidateActions?: AttachmentDrivenChangeAction[]
+  attachmentSummary?: RequirementChangeAttachmentSummary | null
+  requiresUserConfirmation?: boolean
+  executionPolicy?: string | null
+  [key: string]: unknown
+}
+
+
+export interface AttachmentArtifactDiffAction {
+  type: 'ASSET_EDIT_PROPOSAL' | 'MODULE_TREE_PATCH' | 'ANALYSIS_ONLY' | string
+  label?: string | null
+  description?: string | null
+  targetArtifactType?: string | null
+  expectedIntent?: AssistantIntent | null
+  payload?: Record<string, unknown>
+  [key: string]: unknown
+}
+
+export interface AttachmentArtifactDiffItem {
+  id?: string | null
+  type?: 'MISSING' | 'POTENTIAL_CONFLICT' | 'ALREADY_COVERED' | 'NEEDS_REVIEW' | string
+  title?: string | null
+  severity?: 'INFO' | 'WARNING' | 'BLOCKER' | string | null
+  attachmentExcerpt?: string | null
+  currentEvidence?: string | null
+  recommendation?: string | null
+  targetArtifactType?: string | null
+  canAutoPatch?: boolean
+  /**
+   * Frontend-only UI state used by Phase 7-E selection controls.
+   * The canonical payload field is AttachmentArtifactDiffProposal.selectedDiffItemIds.
+   */
+  selected?: boolean
+  [key: string]: unknown
+}
+
+export interface AttachmentArtifactDiffProposal {
+  proposalId?: string | null
+  source?: string | null
+  status?: string | null
+  phase?: string | null
+  originalInstruction?: string | null
+  summary?: string | null
+  targetNode?: RequirementChangeTargetNode | null
+  targetArtifact?: AssetEditTargetArtifact | null
+  targetArtifactType?: string | null
+  currentArtifactExcerpt?: string | null
+  attachmentExcerpt?: string | null
+  attachmentSummary?: RequirementChangeAttachmentSummary | null
+  diffItems?: AttachmentArtifactDiffItem[]
+  /**
+   * Phase 7-E: user-selected diff item ids for follow-up actions.
+   * This is optional so historical Phase 7-D messages remain compatible.
+   */
+  selectedDiffItemIds?: string[]
+  /** Phase 7-E protocol fields copied from targetArtifact for later stale-baseline checks. */
+  baseArtifactId?: string | null
+  baseVersionNo?: number | null
+  baseChecksum?: string | null
+  missingRequirements?: string[]
+  possibleConflicts?: string[]
+  alreadyCoveredItems?: string[]
+  affectedArtifacts?: string[]
+  riskNotes?: string[]
+  recommendedSteps?: string[]
+  candidateActions?: AttachmentArtifactDiffAction[]
+  requiresUserConfirmation?: boolean
+  confidence?: number | null
+  [key: string]: unknown
+}
+
 export interface AssetEditTargetArtifact {
   artifactId?: string | null
   artifactType: string
   artifactTitle?: string | null
   versionNo?: number | null
   status?: string | null
+  checksum?: string | null
 }
 
 export interface AssetEditProposal {
@@ -141,6 +260,11 @@ export interface AssetEditProposal {
   targetArtifactType?: string | null
   targetArtifactId?: string | null
   currentVersionNo?: number | null
+  currentChecksum?: string | null
+  baseArtifactId?: string | null
+  baseVersionNo?: number | null
+  baseChecksum?: string | null
+  baselineValidationPolicy?: string | null
   currentTitle?: string | null
   beforeExcerpt?: string | null
   proposedContentMarkdown?: string | null
@@ -152,6 +276,8 @@ export interface AssetEditProposal {
   requiresUserConfirmation?: boolean
   createdAt?: string | null
   sourceRequirementChangeProposal?: RequirementChangeProposal | null
+  selectedDiffItemIds?: string[]
+  selectedDiffItems?: AttachmentArtifactDiffItem[]
   [key: string]: unknown
 }
 
@@ -216,6 +342,14 @@ export interface AssistantMessageRequest {
   selectedArtifactType?: string | null
   expectedIntent?: AssistantIntent | null
   attachments?: AssistantAttachmentRef[]
+  /** Phase 7-E: selected diff item ids from an attachment-artifact-diff card. */
+  selectedDiffItemIds?: string[]
+  /** Phase 7-E3: selected diff item payloads for selective backend proposal generation. */
+  selectedDiffItems?: AttachmentArtifactDiffItem[]
+  /** Phase 7-E4: asset baseline used to block stale follow-up actions. */
+  baseArtifactId?: string | null
+  baseVersionNo?: number | null
+  baseChecksum?: string | null
 }
 
 export interface AssistantActionResponse {
@@ -232,6 +366,8 @@ export interface AssistantMessageResponse {
   proposal?: ModuleTreePatchProposalResponse | null
   requirementChangeProposal?: RequirementChangeProposal | null
   assetEditProposal?: AssetEditProposal | null
+  attachmentDrivenChangeProposal?: AttachmentDrivenChangeProposal | null
+  attachmentArtifactDiffProposal?: AttachmentArtifactDiffProposal | null
   actions: AssistantActionResponse[]
 }
 
@@ -241,12 +377,14 @@ export interface AssistantConversationMessageResponse {
   intent?: AssistantIntent | null
   selectedNodeId?: string | null
   selectedArtifactType?: string | null
-  type?: 'TEXT' | 'TREE_PATCH_PROPOSAL' | 'REQUIREMENT_CHANGE_PROPOSAL' | 'ASSET_EDIT_PROPOSAL' | 'TASK_NOTIFICATION' | string
+  type?: 'TEXT' | 'TREE_PATCH_PROPOSAL' | 'REQUIREMENT_CHANGE_PROPOSAL' | 'ASSET_EDIT_PROPOSAL' | 'ATTACHMENT_CHANGE_PROPOSAL' | 'ATTACHMENT_ARTIFACT_DIFF_PROPOSAL' | 'TASK_NOTIFICATION' | string
   text?: string | null
   attachments?: AssistantAttachmentRef[]
   proposal?: ModuleTreePatchProposalResponse | null
   requirementChangeProposal?: RequirementChangeProposal | null
   assetEditProposal?: AssetEditProposal | null
+  attachmentDrivenChangeProposal?: AttachmentDrivenChangeProposal | null
+  attachmentArtifactDiffProposal?: AttachmentArtifactDiffProposal | null
   content?: Record<string, unknown>
   createdAt?: string | null
 }
@@ -299,31 +437,6 @@ export interface ProjectModuleMutationResponse {
 
 export interface GenerateModuleTreeRequest {
   requirementText: string
-}
-
-export interface ProposeModuleTreePatchRequest {
-  instruction: string
-  selectedNodeId?: string | null
-}
-
-export interface ModuleTreePatchProposalResponse {
-  description?: string
-  source?: string
-  proposal: {
-    description?: string
-    source?: string
-    operations?: ModuleTreePatchOperationRequest[]
-    impact?: {
-      summary?: string
-      affectedNodeIds?: string[]
-      affectedArtifacts?: string[]
-      riskNotes?: string[]
-    }
-    analysis_summary?: string
-    [key: string]: unknown
-  }
-  markdown?: string | null
-  requiresUserConfirmation: boolean
 }
 
 export interface GenerateModulePrdRequest {
@@ -884,4 +997,3 @@ export interface ArtifactQualityCheckRecordResponse {
   checkedBy?: string | null
   checkedAt: string
 }
-

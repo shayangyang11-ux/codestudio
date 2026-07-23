@@ -579,11 +579,6 @@ const artboardScaleStyle = computed(() => ({
   transform: `scale(${effectiveScale.value})`,
 }))
 
-const artboardPageStyle = computed(() => ({
-  width: `${selectedDevice.value.width}px`,
-  height: `${selectedDevice.value.height}px`,
-}))
-
 const themeClass = computed(() => {
   const configuredClass = themeClassFromProjectTheme(
     props.projectThemeProfile,
