@@ -27,7 +27,17 @@
         <span>{{ artifactTaskFeedback.message }}</span>
       </div>
 
-      <section class="selected-module-card compact-module-card">
+      <section v-if="!selectedModule" class="workspace-empty-state">
+        <div>
+          <span class="empty-state-eyebrow">暂无选中节点</span>
+          <h3>请从左侧模块树选择一个节点</h3>
+          <p>
+            左侧没有模块树时，可以直接在右侧 AI Assistant 输入需求生成模块树；选择节点后，系统会展示该节点的需求资产和生成状态。
+          </p>
+        </div>
+      </section>
+
+      <section v-else class="selected-module-card compact-module-card">
         <div class="selected-module-header compact">
           <div>
             <h3>当前选中节点</h3>
@@ -96,9 +106,6 @@
             />
           </details>
 
-          <div v-if="selectedModule" class="module-meta">
-            <span>ID：{{ selectedModule.id || '-' }}</span>
-          </div>
         </div>
 
         <div v-if="!selectedModule" class="empty-hint">
@@ -117,7 +124,7 @@
       />
 
       <section v-if="selectedModule" class="artifact-view-switcher compact-asset-switcher">
-        <details class="asset-status-fold" open>
+        <details class="asset-status-fold">
           <summary>
             <div>
               <h4>资产导航与状态</h4>
@@ -213,7 +220,7 @@
         </details>
       </section>
 
-      <section class="prd-card artifact-view-card">
+      <section v-if="selectedModule" class="prd-card artifact-view-card">
         <div v-if="!selectedModule" class="empty-hint">
           请从左侧模块树选择一个节点。
         </div>
@@ -1119,6 +1126,102 @@ function handleOpenImpactAnalysis() {
 
 .artifact-view-card {
   margin-top: 16px;
+  padding: 16px 18px 18px;
+  overflow: hidden;
+}
+
+.artifact-view-card :deep(.module-prd-view) {
+  min-width: 0;
+}
+
+.artifact-view-card :deep(.compact-reader-toolbar) {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0 0 12px;
+  border-bottom: 0;
+  padding: 0;
+}
+
+.artifact-view-card :deep(.asset-title-copy h3) {
+  margin: 0 0 5px;
+  color: #0f172a;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.artifact-view-card :deep(.asset-title-copy p) {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.artifact-view-card :deep(.compact-reader-actions) {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  min-width: max-content;
+}
+
+.artifact-view-card :deep(.version-badge) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  padding: 0 9px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.artifact-view-card :deep(.view-mode-link) {
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.artifact-view-card :deep(.view-mode-link:hover) {
+  color: #1d4ed8;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact) {
+  margin-top: 2px;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact .document-toolbar.compact) {
+  margin-top: -2px;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact .document-preview) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact .prd-document) {
+  margin-top: 0;
+  border: 0;
+  box-shadow: none;
+  max-height: 690px;
+}
+
+.artifact-view-card :deep(.prd-card-view) {
+  margin-top: 12px;
 }
 
 .ui-contract-summary-card {
@@ -1201,7 +1304,533 @@ function handleOpenImpactAnalysis() {
   line-height: 1.7;
   color: #334155;
 }
+
+/* Workspace visual hierarchy refinement: context strip + collapsible asset status + primary reader */
+.workspace-panel {
+  padding: 5px;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(37, 99, 235, 0.06), transparent 34%),
+    #f8fafc;
+}
+
+.workspace-card {
+  display: grid;
+  gap: 12px;
+}
+
+.workspace-header {
+  margin-bottom: 2px;
+  padding: 0 4px 2px;
+}
+
+.workspace-header h2 {
+  letter-spacing: -0.03em;
+}
+
+.workspace-header p {
+  max-width: 980px;
+}
+
+.selected-module-card.compact-module-card {
+  border: 0;
+  border-radius: 18px;
+  padding: 13px 16px;
+  background:
+    linear-gradient(90deg, rgba(239, 246, 255, 0.96) 0%, rgba(255, 255, 255, 0.98) 68%),
+    #ffffff;
+  box-shadow:
+    inset 3px 0 0 #2563eb,
+    0 1px 0 rgba(148, 163, 184, 0.22),
+    0 10px 26px rgba(15, 23, 42, 0.045);
+}
+
+.selected-module-header.compact {
+  align-items: center;
+}
+
+.selected-module-header.compact h3 {
+  margin: 0 0 3px;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.selected-module-header.compact p {
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.collapse-toggle-button {
+  border-color: #bfdbfe;
+  background: #ffffff;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.08);
+}
+
+.compact-module-summary {
+  margin-top: 8px;
+}
+
+.compact-module-summary span {
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.selected-module-expanded {
+  margin-top: 12px;
+  border-top: 1px dashed #bfdbfe;
+  padding-top: 12px;
+}
+
+.artifact-view-switcher.compact-asset-switcher {
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.asset-status-fold {
+  display: block;
+}
+
+.asset-status-fold > summary {
+  min-height: 54px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 12px 15px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 7px 18px rgba(15, 23, 42, 0.04);
+}
+
+.asset-status-fold summary h4 {
+  margin-bottom: 2px;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+
+.asset-status-fold summary p {
+  font-size: 12px;
+}
+
+.asset-status-fold[open] {
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.055);
+  overflow: hidden;
+}
+
+.asset-status-fold[open] > summary {
+  border: 0;
+  border-bottom: 1px solid #e2e8f0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.folded-actions {
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.folded-actions strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.asset-status-section {
+  padding: 12px 16px 16px;
+}
+
+.advanced-status-fold {
+  margin: 0 16px 16px;
+}
+
+.artifact-view-card {
+  position: relative;
+  margin-top: 0;
+  border: 1px solid #dbeafe;
+  border-radius: 22px;
+  padding: 18px 22px 24px;
+  background: #ffffff;
+  box-shadow:
+    0 18px 42px rgba(15, 23, 42, 0.065),
+    0 1px 0 rgba(37, 99, 235, 0.06);
+}
+
+.artifact-view-card::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 22px;
+  right: 22px;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2563eb, rgba(37, 99, 235, 0.08));
+  opacity: 0.75;
+}
+
+.artifact-view-card :deep(.compact-reader-toolbar) {
+  margin: 0 0 10px;
+  padding-top: 4px;
+}
+
+.artifact-view-card :deep(.asset-title-copy h3) {
+  font-size: 21px;
+  letter-spacing: -0.025em;
+}
+
+.artifact-view-card :deep(.asset-title-copy p) {
+  font-size: 12px;
+}
+
+.artifact-view-card :deep(.compact-reader-actions) {
+  gap: 10px;
+}
+
+.artifact-view-card :deep(.version-badge) {
+  background: #eef4ff;
+}
+
+.artifact-view-card :deep(.view-mode-link) {
+  color: #1d4ed8;
+  font-size: 12px;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact .document-toolbar.compact) {
+  margin-top: 0;
+  padding-bottom: 6px;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact .document-preview) {
+  padding-top: 2px;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact .prd-document) {
+  max-height: 720px;
+}
+
+
+
+/* Sticky asset reader: keep the asset title/actions visible while the document body scrolls */
+.artifact-view-card {
+  max-height: calc(100vh - 182px);
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: 0;
+}
+
+.artifact-view-card::before {
+  left: 22px;
+  right: 22px;
+  z-index: 2;
+}
+
+.artifact-view-card :deep(.compact-reader-toolbar) {
+  position: sticky;
+  top: 0;
+  z-index: 32;
+  margin: 0;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 18px 22px 13px;
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(10px);
+}
+
+.artifact-view-card :deep(.compact-reader-actions) {
+  align-items: center;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact) {
+  padding: 14px 22px 24px;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact .document-toolbar.compact) {
+  position: sticky;
+  top: 68px;
+  z-index: 28;
+  margin: 0 0 10px;
+  border-bottom: 1px solid #f1f5f9;
+  padding: 0 0 10px;
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(8px);
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact .document-preview) {
+  min-height: 0;
+  overflow: visible;
+  padding: 0 4px 22px;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact .prd-document) {
+  max-height: none;
+  overflow: visible;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.fullscreen) {
+  padding: 0;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.fullscreen .document-toolbar.compact) {
+  position: sticky;
+  top: 0;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 12px 18px;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.fullscreen .document-preview) {
+  overflow: auto;
+}
+
+
+
+/* Asset reader sticky header polish: single header area, actions tucked under view switch. */
+.artifact-view-card {
+  padding: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.artifact-view-card::before {
+  display: none;
+}
+
+.artifact-view-card :deep(.compact-reader-toolbar) {
+  position: sticky;
+  top: 0;
+  z-index: 42;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0;
+  border-bottom: 1px solid #e5e7eb;
+  border-radius: 22px 22px 0 0;
+  padding: 14px 18px 48px 20px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.035);
+  backdrop-filter: blur(10px);
+}
+
+.artifact-view-card :deep(.asset-title-copy) {
+  min-width: 0;
+}
+
+.artifact-view-card :deep(.asset-title-copy h3) {
+  margin: 0 0 6px;
+}
+
+.artifact-view-card :deep(.asset-title-copy p) {
+  margin: 0;
+}
+
+.artifact-view-card :deep(.compact-reader-actions) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: nowrap;
+  min-width: max-content;
+}
+
+.artifact-view-card :deep(.view-mode-link) {
+  white-space: nowrap;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact:not(.fullscreen)) {
+  position: relative;
+  margin-top: 0;
+  padding: 0 20px 24px;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact:not(.fullscreen) .document-toolbar.compact) {
+  position: sticky;
+  top: 62px;
+  z-index: 43;
+  height: 0;
+  margin: -42px 0 42px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact:not(.fullscreen) .document-actions) {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  pointer-events: auto;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact:not(.fullscreen) .document-preview) {
+  padding: 0 0 22px;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.fullscreen) {
+  padding: 0;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.fullscreen .document-toolbar.compact) {
+  position: sticky;
+  top: 0;
+  height: auto;
+  margin: 0;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 12px 18px;
+  background: rgba(255, 255, 255, 0.97);
+  pointer-events: auto;
+}
+
+
+
+/* Final asset sticky header adjustment: restore the blue accent line, keep comfortable spacing,
+   and make the sticky header touch the top edge of the asset card while actions stay tucked on the right. */
+.artifact-view-card {
+  position: relative;
+  padding: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.artifact-view-card::before {
+  display: block;
+  content: '';
+  position: sticky;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 46;
+  width: 100%;
+  height: 3px;
+  border-radius: 22px 22px 0 0;
+  background: linear-gradient(90deg, #2563eb 0%, rgba(59, 130, 246, 0.32) 58%, rgba(59, 130, 246, 0.06) 100%);
+  opacity: 0.9;
+}
+
+.artifact-view-card :deep(.compact-reader-toolbar) {
+  position: sticky;
+  top: 3px;
+  z-index: 45;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin: -3px 0 0;
+  border-bottom: 1px solid #e5e7eb;
+  border-radius: 22px 22px 0 0;
+  padding: 20px 22px 50px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.035);
+  backdrop-filter: blur(10px);
+}
+
+.artifact-view-card :deep(.asset-title-copy h3) {
+  margin: 0 0 7px;
+}
+
+.artifact-view-card :deep(.asset-title-copy p) {
+  margin: 0;
+}
+
+.artifact-view-card :deep(.compact-reader-actions) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: nowrap;
+  min-width: max-content;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact:not(.fullscreen)) {
+  position: relative;
+  margin-top: 0;
+  padding: 0 20px 24px;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact:not(.fullscreen) .document-toolbar.compact) {
+  position: sticky;
+  top: 70px;
+  z-index: 47;
+  height: 0;
+  margin: -44px 0 44px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact:not(.fullscreen) .document-actions) {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  pointer-events: auto;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.compact:not(.fullscreen) .document-preview) {
+  padding: 16px 0 22px;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.fullscreen) {
+  padding: 0;
+}
+
+.artifact-view-card :deep(.artifact-document-shell.fullscreen .document-toolbar.compact) {
+  position: sticky;
+  top: 0;
+  height: auto;
+  margin: 0;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 12px 18px;
+  background: rgba(255, 255, 255, 0.97);
+  pointer-events: auto;
+}
+
+
+.workspace-empty-state {
+  margin-top: 28px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(239, 246, 255, 0.86), rgba(255, 255, 255, 0.94));
+  padding: 34px 36px;
+  color: #334155;
+}
+
+.workspace-empty-state .empty-state-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 10px;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.workspace-empty-state h3 {
+  margin: 0 0 8px;
+  color: #0f172a;
+  font-size: 20px;
+}
+
+.workspace-empty-state p {
+  max-width: 760px;
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
 </style>
+
 
 
 

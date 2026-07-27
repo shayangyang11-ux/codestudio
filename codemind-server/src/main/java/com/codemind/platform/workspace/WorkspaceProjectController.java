@@ -8,6 +8,7 @@ import com.codemind.platform.workspace.dto.WorkspaceSummaryResponse;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @CrossOrigin(origins = "*")
@@ -43,6 +44,24 @@ public class WorkspaceProjectController {
         return workspaceProjectService.createProject(
                 workspaceId,
                 request
+        );
+    }
+
+    @DeleteMapping("/workspaces/{workspaceId}/projects/{projectCode}")
+    public Map<String, Object> deleteProject(
+            @PathVariable UUID workspaceId,
+            @PathVariable String projectCode
+    ) {
+        workspaceProjectService.deleteProject(
+                workspaceId,
+                projectCode
+        );
+
+        return Map.of(
+                "deleted",
+                true,
+                "projectCode",
+                projectCode
         );
     }
 

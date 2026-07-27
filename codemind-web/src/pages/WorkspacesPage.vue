@@ -7,9 +7,11 @@
     :projects="projects"
     :loading-projects="loadingProjects"
     :creating-project="creatingProject"
+    :deleting-project-code="deletingProjectCode"
     @select-workspace="handleSelectWorkspace"
     @open-project="handleOpenProject"
     @create-project="handleCreateProject"
+    @delete-project="handleDeleteProject"
     @logout="handleLogoutAndRedirect"
   />
 
@@ -42,10 +44,12 @@ const {
   projects,
   loadingProjects,
   creatingProject,
+  deletingProjectCode,
 
   bootstrapAuth,
   selectWorkspace,
   createProject,
+  deleteProject,
   openProject,
   handleLogout,
 } = useAppSession()
@@ -91,6 +95,10 @@ async function handleCreateProject(payload: CreateProjectRequest) {
       projectCode: createdProject.projectCode,
     },
   })
+}
+
+async function handleDeleteProject(project: ProjectSummary) {
+  await deleteProject(project)
 }
 
 async function handleLogoutAndRedirect() {

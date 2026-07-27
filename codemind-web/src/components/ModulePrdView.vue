@@ -1,45 +1,34 @@
 
 <template>
   <section class="module-prd-view">
-    <div class="prd-view-toolbar">
-      <div>
+    <div class="prd-view-toolbar compact-reader-toolbar">
+      <div class="asset-title-copy">
         <h3>模块 PRD</h3>
-        <p v-if="artifact?.artifactId">
-          Artifact：{{ artifact.artifactId }}
-        </p>
-        <p v-else>
+        <p v-if="!artifact?.artifactId">
           当前模块尚未生成 PRD。
         </p>
       </div>
 
-      <div class="prd-view-actions">
+      <div class="prd-view-actions compact-reader-actions">
         <span v-if="artifact?.versionNo" class="version-badge">
           v{{ artifact.versionNo }}
         </span>
 
         <button
-          class="view-toggle-button"
-          :class="{ active: activeView === 'cards' }"
-          @click="activeView = 'cards'"
+          type="button"
+          class="view-mode-link"
+          @click="activeView = activeView === 'markdown' ? 'cards' : 'markdown'"
         >
-          卡片视图
-        </button>
-
-        <button
-          class="view-toggle-button"
-          :class="{ active: activeView === 'markdown' }"
-          @click="activeView = 'markdown'"
-        >
-          文档视图
+          {{ activeView === 'markdown' ? '切换到卡片视图' : '切换回文档视图' }}
         </button>
       </div>
     </div>
 
     <ManualDocumentCardView
-      v-if="activeView === 'cards' && isManualDocumentEdited"
-      title="模块 PRD"
-      :artifact="artifact"
-      :markdown="markdown"
+        v-if="activeView === 'cards' && isManualDocumentEdited"
+        title="模块 PRD"
+        :artifact="artifact"
+        :markdown="markdown"
     />
 
     <div v-else-if="activeView === 'cards'" class="prd-card-view">
@@ -88,9 +77,9 @@
 
         <div class="role-grid">
           <article
-            v-for="role in userRoles"
-            :key="role.role_key"
-            class="role-card"
+              v-for="role in userRoles"
+              :key="role.role_key"
+              class="role-card"
           >
             <h5>{{ role.role_name }}</h5>
             <span>{{ role.role_key }}</span>
@@ -107,9 +96,9 @@
 
         <div class="requirement-list">
           <article
-            v-for="item in functionalRequirements"
-            :key="item.requirement_key"
-            class="requirement-card"
+              v-for="item in functionalRequirements"
+              :key="item.requirement_key"
+              class="requirement-card"
           >
             <div class="requirement-card-header">
               <div>
@@ -136,9 +125,9 @@
               <strong>前置条件</strong>
               <div>
                 <span
-                  v-for="condition in item.preconditions || []"
-                  :key="condition"
-                  class="soft-tag"
+                    v-for="condition in item.preconditions || []"
+                    :key="condition"
+                    class="soft-tag"
                 >
                   {{ condition }}
                 </span>
@@ -149,9 +138,9 @@
               <strong>后置条件</strong>
               <div>
                 <span
-                  v-for="condition in item.postconditions || []"
-                  :key="condition"
-                  class="soft-tag"
+                    v-for="condition in item.postconditions || []"
+                    :key="condition"
+                    class="soft-tag"
                 >
                   {{ condition }}
                 </span>
@@ -169,9 +158,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in businessRules"
-            :key="item.rule_key"
-            class="compact-card"
+              v-for="item in businessRules"
+              :key="item.rule_key"
+              class="compact-card"
           >
             <h5>{{ item.title }}</h5>
             <span>{{ item.rule_key }}</span>
@@ -190,9 +179,9 @@
 
         <div class="state-flow-list">
           <article
-            v-for="item in stateRules"
-            :key="item.state_key"
-            class="state-card"
+              v-for="item in stateRules"
+              :key="item.state_key"
+              class="state-card"
           >
             <h5>{{ item.state_name }}</h5>
             <span>{{ item.state_key }}</span>
@@ -201,9 +190,9 @@
               <strong>可流转至</strong>
               <div>
                 <span
-                  v-for="target in item.allowed_transitions || []"
-                  :key="target"
-                  class="flow-tag"
+                    v-for="target in item.allowed_transitions || []"
+                    :key="target"
+                    class="flow-tag"
                 >
                   {{ target }}
                 </span>
@@ -221,9 +210,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in pageRequirements"
-            :key="item.page_key"
-            class="compact-card"
+              v-for="item in pageRequirements"
+              :key="item.page_key"
+              class="compact-card"
           >
             <h5>{{ item.page_name }}</h5>
             <span>{{ item.page_key }}</span>
@@ -242,9 +231,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in dataRequirements"
-            :key="item.entity_key"
-            class="compact-card"
+              v-for="item in dataRequirements"
+              :key="item.entity_key"
+              class="compact-card"
           >
             <h5>{{ item.entity_name }}</h5>
             <span>{{ item.entity_key }}</span>
@@ -263,9 +252,9 @@
 
         <div class="api-list">
           <article
-            v-for="item in apiRequirements"
-            :key="item.api_key"
-            class="api-card"
+              v-for="item in apiRequirements"
+              :key="item.api_key"
+              class="api-card"
           >
             <div class="api-card-header">
               <span class="method-badge">{{ item.method }}</span>
@@ -288,9 +277,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in permissionRequirements"
-            :key="item.permission_key"
-            class="compact-card"
+              v-for="item in permissionRequirements"
+              :key="item.permission_key"
+              class="compact-card"
           >
             <h5>{{ item.permission_name }}</h5>
             <span>{{ item.permission_key }}</span>
@@ -308,9 +297,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in exceptionScenarios"
-            :key="item.scenario_key"
-            class="compact-card danger-card"
+              v-for="item in exceptionScenarios"
+              :key="item.scenario_key"
+              class="compact-card danger-card"
           >
             <h5>{{ item.title }}</h5>
             <span>{{ item.scenario_key }}</span>
@@ -328,9 +317,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in acceptanceCriteria"
-            :key="item.criterion_key"
-            class="compact-card success-card"
+              v-for="item in acceptanceCriteria"
+              :key="item.criterion_key"
+              class="compact-card success-card"
           >
             <h5>{{ item.criterion_key }}</h5>
             <p>{{ item.description }}</p>
@@ -347,9 +336,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in nonFunctionalRequirements"
-            :key="item.nfr_key"
-            class="compact-card"
+              v-for="item in nonFunctionalRequirements"
+              :key="item.nfr_key"
+              class="compact-card"
           >
             <h5>{{ item.category }}</h5>
             <span>{{ item.nfr_key }}</span>
@@ -367,8 +356,8 @@
             <h5>业务流程</h5>
             <ul>
               <li
-                v-for="item in downstreamHints.business_flow_hints || []"
-                :key="item"
+                  v-for="item in downstreamHints.business_flow_hints || []"
+                  :key="item"
               >
                 {{ item }}
               </li>
@@ -379,8 +368,8 @@
             <h5>页面规范</h5>
             <ul>
               <li
-                v-for="item in downstreamHints.page_spec_hints || []"
-                :key="item"
+                  v-for="item in downstreamHints.page_spec_hints || []"
+                  :key="item"
               >
                 {{ item }}
               </li>
@@ -391,8 +380,8 @@
             <h5>数据模型</h5>
             <ul>
               <li
-                v-for="item in downstreamHints.data_model_hints || []"
-                :key="item"
+                  v-for="item in downstreamHints.data_model_hints || []"
+                  :key="item"
               >
                 {{ item }}
               </li>
@@ -403,8 +392,8 @@
             <h5>接口契约</h5>
             <ul>
               <li
-                v-for="item in downstreamHints.api_contract_hints || []"
-                :key="item"
+                  v-for="item in downstreamHints.api_contract_hints || []"
+                  :key="item"
               >
                 {{ item }}
               </li>
@@ -415,8 +404,8 @@
             <h5>测试规格</h5>
             <ul>
               <li
-                v-for="item in downstreamHints.test_spec_hints || []"
-                :key="item"
+                  v-for="item in downstreamHints.test_spec_hints || []"
+                  :key="item"
               >
                 {{ item }}
               </li>
@@ -427,8 +416,8 @@
             <h5>开发交接包</h5>
             <ul>
               <li
-                v-for="item in downstreamHints.dev_handoff_hints || []"
-                :key="item"
+                  v-for="item in downstreamHints.dev_handoff_hints || []"
+                  :key="item"
               >
                 {{ item }}
               </li>
@@ -444,14 +433,15 @@
     </div>
 
     <ArtifactDocumentEditor
-      v-else
-      title="模块 PRD"
-      artifact-type="MODULE_PRD"
-      :artifact="artifact"
-      :markdown="markdown"
-      :editable="true"
-      :saving="manualEditSaving"
-      @save="$emit('save-manual-edit', $event)"
+        compact
+        v-else
+        title="模块 PRD"
+        artifact-type="MODULE_PRD"
+        :artifact="artifact"
+        :markdown="markdown"
+        :editable="true"
+        :saving="manualEditSaving"
+        @save="$emit('save-manual-edit', $event)"
     />
   </section>
 </template>
@@ -475,7 +465,7 @@ defineEmits<{
   'save-manual-edit': [payload: ManualArtifactEditPayload]
 }>()
 
-const activeView = ref<'cards' | 'markdown'>('cards')
+const activeView = ref<'cards' | 'markdown'>('markdown')
 
 
 const prd = computed<any>(() => props.artifact?.content || {})
@@ -517,3 +507,4 @@ function joinList(value: unknown): string {
   return value.join('；')
 }
 </script>
+

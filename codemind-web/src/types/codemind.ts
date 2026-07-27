@@ -1,4 +1,3 @@
-
 export interface ModuleTreeNode {
   id?: string
   parentId?: string | null
@@ -606,7 +605,7 @@ export interface ProjectSummary {
 }
 
 export interface CreateProjectRequest {
-  projectCode: string
+  projectCode?: string
   projectName: string
   description?: string
   techStack?: Record<string, unknown>

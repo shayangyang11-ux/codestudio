@@ -1,29 +1,21 @@
 
 <template>
   <div class="module-prd-view">
-    <div class="prd-view-toolbar">
-      <div>
+    <div class="prd-view-toolbar compact-reader-toolbar">
+      <div class="asset-title-copy">
         <h3>开发交接包</h3>
         <p>面向开发 Agent、测试 Agent 和人工开发人员的最终工程交接资产。</p>
       </div>
 
-      <div class="prd-view-actions">
+      <div class="prd-view-actions compact-reader-actions">
         <span class="version-badge">DEV_HANDOFF_PACKAGE</span>
 
         <button
-          class="view-toggle-button"
-          :class="{ active: activeView === 'cards' }"
-          @click="activeView = 'cards'"
+          type="button"
+          class="view-mode-link"
+          @click="activeView = activeView === 'markdown' ? 'cards' : 'markdown'"
         >
-          卡片视图
-        </button>
-
-        <button
-          class="view-toggle-button"
-          :class="{ active: activeView === 'markdown' }"
-          @click="activeView = 'markdown'"
-        >
-          文档视图
+          {{ activeView === 'markdown' ? '切换到卡片视图' : '切换回文档视图' }}
         </button>
       </div>
     </div>
@@ -77,9 +69,9 @@
 
         <div v-if="developmentObjectives.length" class="compact-card-list">
           <article
-            v-for="item in developmentObjectives"
-            :key="item.objective_key || item.title"
-            class="compact-card"
+              v-for="item in developmentObjectives"
+              :key="item.objective_key || item.title"
+              class="compact-card"
           >
             <h5>{{ item.title }}</h5>
             <p>{{ item.description }}</p>
@@ -101,9 +93,9 @@
 
         <div v-if="moduleBoundaries.length" class="compact-card-list">
           <article
-            v-for="item in moduleBoundaries"
-            :key="item.boundary_key || item.responsibility"
-            class="compact-card"
+              v-for="item in moduleBoundaries"
+              :key="item.boundary_key || item.responsibility"
+              class="compact-card"
           >
             <h5>{{ item.boundary_key }}</h5>
             <p><strong>职责：</strong>{{ item.responsibility }}</p>
@@ -124,9 +116,9 @@
 
         <div v-if="frontendItems.length" class="requirement-list">
           <article
-            v-for="item in frontendItems"
-            :key="item.item_key || item.page_key"
-            class="requirement-card"
+              v-for="item in frontendItems"
+              :key="item.item_key || item.page_key"
+              class="requirement-card"
           >
             <div class="requirement-card-header">
               <h5>{{ item.page_name }}</h5>
@@ -152,9 +144,9 @@
 
         <div v-if="backendItems.length" class="requirement-list">
           <article
-            v-for="item in backendItems"
-            :key="item.item_key || item.service_name"
-            class="requirement-card"
+              v-for="item in backendItems"
+              :key="item.item_key || item.service_name"
+              class="requirement-card"
           >
             <div class="requirement-card-header">
               <h5>{{ item.service_name }}</h5>
@@ -180,9 +172,9 @@
 
         <div v-if="apiItems.length" class="api-list">
           <article
-            v-for="item in apiItems"
-            :key="item.item_key || item.api_key"
-            class="api-card"
+              v-for="item in apiItems"
+              :key="item.item_key || item.api_key"
+              class="api-card"
           >
             <div class="api-card-header">
               <span class="method-badge">{{ item.method || 'GET' }}</span>
@@ -209,9 +201,9 @@
 
         <div v-if="dataItems.length" class="compact-card-list">
           <article
-            v-for="item in dataItems"
-            :key="item.item_key || item.entity_key"
-            class="compact-card"
+              v-for="item in dataItems"
+              :key="item.item_key || item.entity_key"
+              class="compact-card"
           >
             <h5>{{ item.entity_key }}</h5>
             <p><strong>建议表名：</strong>{{ item.table_name || '无' }}</p>
@@ -233,9 +225,9 @@
 
         <div v-if="permissionAndSecurityItems.length" class="compact-card-list">
           <article
-            v-for="item in permissionAndSecurityItems"
-            :key="item.item_key || item.security_type"
-            class="compact-card"
+              v-for="item in permissionAndSecurityItems"
+              :key="item.item_key || item.security_type"
+              class="compact-card"
           >
             <h5>{{ item.security_type }}</h5>
             <p>{{ item.description }}</p>
@@ -255,9 +247,9 @@
 
         <div v-if="fileGenerationPlan.length" class="compact-card-list">
           <article
-            v-for="item in fileGenerationPlan"
-            :key="item.file_key || item.suggested_path"
-            class="compact-card"
+              v-for="item in fileGenerationPlan"
+              :key="item.file_key || item.suggested_path"
+              class="compact-card"
           >
             <h5>{{ item.suggested_path }}</h5>
             <p>{{ item.file_purpose }}</p>
@@ -280,9 +272,9 @@
 
         <div v-if="developmentSequence.length" class="state-flow-list">
           <article
-            v-for="item in developmentSequence"
-            :key="item.step_key || item.title"
-            class="state-card"
+              v-for="item in developmentSequence"
+              :key="item.step_key || item.title"
+              class="state-card"
           >
             <h5>{{ item.step_order }}. {{ item.title }}</h5>
             <p>{{ item.description }}</p>
@@ -302,9 +294,9 @@
 
         <div v-if="testAndAcceptanceHandoff.length" class="compact-card-list">
           <article
-            v-for="item in testAndAcceptanceHandoff"
-            :key="item.item_key || item.test_type"
-            class="compact-card"
+              v-for="item in testAndAcceptanceHandoff"
+              :key="item.item_key || item.test_type"
+              class="compact-card"
           >
             <h5>{{ item.test_type }}</h5>
             <p><strong>参考用例：</strong>{{ joinList(item.reference_cases) }}</p>
@@ -324,9 +316,9 @@
 
         <div v-if="risksAndAttention.length" class="compact-card-list">
           <article
-            v-for="item in risksAndAttention"
-            :key="item.risk_key || item.title"
-            class="compact-card danger-card"
+              v-for="item in risksAndAttention"
+              :key="item.risk_key || item.title"
+              class="compact-card danger-card"
           >
             <h5>{{ item.title }}</h5>
             <p><strong>风险等级：</strong>{{ item.risk_level }}</p>
@@ -348,12 +340,13 @@
     </div>
 
     <ArtifactDocumentEditor
-      v-else
-      title="开发交接包"
-      artifact-type="DEV_HANDOFF_PACKAGE"
-      :artifact="artifact"
-      :markdown="markdown"
-      :editable="false"
+        compact
+        v-else
+        title="开发交接包"
+        artifact-type="DEV_HANDOFF_PACKAGE"
+        :artifact="artifact"
+        :markdown="markdown"
+        :editable="false"
     />
   </div>
 </template>
@@ -368,7 +361,7 @@ const props = defineProps<{
   markdown: string
 }>()
 
-const activeView = ref<'cards' | 'markdown'>('cards')
+const activeView = ref<'cards' | 'markdown'>('markdown')
 
 
 const packageData = computed<any>(() => props.artifact?.content || {})
@@ -405,3 +398,4 @@ function joinList(value: unknown): string {
   return value.map((item) => String(item)).join('；')
 }
 </script>
+

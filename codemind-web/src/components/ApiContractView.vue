@@ -1,36 +1,25 @@
 
 <template>
   <section class="module-prd-view">
-    <div class="prd-view-toolbar">
-      <div>
+    <div class="prd-view-toolbar compact-reader-toolbar">
+      <div class="asset-title-copy">
         <h3>接口契约</h3>
-        <p v-if="artifact?.artifactId">
-          Artifact：{{ artifact.artifactId }}
-        </p>
-        <p v-else>
+        <p v-if="!artifact?.artifactId">
           当前模块尚未生成接口契约。
         </p>
       </div>
 
-      <div class="prd-view-actions">
+      <div class="prd-view-actions compact-reader-actions">
         <span v-if="artifact?.versionNo" class="version-badge">
           v{{ artifact.versionNo }}
         </span>
 
         <button
-          class="view-toggle-button"
-          :class="{ active: activeView === 'cards' }"
-          @click="activeView = 'cards'"
+          type="button"
+          class="view-mode-link"
+          @click="activeView = activeView === 'markdown' ? 'cards' : 'markdown'"
         >
-          卡片视图
-        </button>
-
-        <button
-          class="view-toggle-button"
-          :class="{ active: activeView === 'markdown' }"
-          @click="activeView = 'markdown'"
-        >
-          文档视图
+          {{ activeView === 'markdown' ? '切换到卡片视图' : '切换回文档视图' }}
         </button>
       </div>
     </div>
@@ -76,9 +65,9 @@
 
         <div class="api-list">
           <article
-            v-for="endpoint in endpoints"
-            :key="endpoint.api_key"
-            class="api-card"
+              v-for="endpoint in endpoints"
+              :key="endpoint.api_key"
+              class="api-card"
           >
             <div class="api-card-header">
               <span class="method-badge">{{ endpoint.method }}</span>
@@ -111,9 +100,9 @@
 
             <div class="compact-card-list">
               <article
-                v-for="param in asArray(endpoint.request_parameters)"
-                :key="param.param_key"
-                class="compact-card"
+                  v-for="param in asArray(endpoint.request_parameters)"
+                  :key="param.param_key"
+                  class="compact-card"
               >
                 <h5>请求参数：{{ param.name }}</h5>
                 <span>{{ param.in_location }} / {{ param.data_type }}</span>
@@ -122,9 +111,9 @@
               </article>
 
               <article
-                v-for="field in asArray(endpoint.request_body_fields)"
-                :key="field.field_key"
-                class="compact-card"
+                  v-for="field in asArray(endpoint.request_body_fields)"
+                  :key="field.field_key"
+                  class="compact-card"
               >
                 <h5>请求体：{{ field.name }}</h5>
                 <span>{{ field.data_type }}</span>
@@ -134,9 +123,9 @@
               </article>
 
               <article
-                v-for="field in asArray(endpoint.response_fields)"
-                :key="field.field_key"
-                class="compact-card success-card"
+                  v-for="field in asArray(endpoint.response_fields)"
+                  :key="field.field_key"
+                  class="compact-card success-card"
               >
                 <h5>响应字段：{{ field.name }}</h5>
                 <span>{{ field.data_type }}</span>
@@ -146,9 +135,9 @@
               </article>
 
               <article
-                v-for="error in asArray(endpoint.error_codes)"
-                :key="error.error_key"
-                class="compact-card danger-card"
+                  v-for="error in asArray(endpoint.error_codes)"
+                  :key="error.error_key"
+                  class="compact-card danger-card"
               >
                 <h5>{{ error.error_code }}</h5>
                 <span>HTTP {{ error.http_status }}</span>
@@ -169,9 +158,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in permissionRequirements"
-            :key="item.permission_key"
-            class="compact-card"
+              v-for="item in permissionRequirements"
+              :key="item.permission_key"
+              class="compact-card"
           >
             <h5>{{ item.permission_name }}</h5>
             <span>{{ item.permission_key }}</span>
@@ -190,9 +179,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in dataMappings"
-            :key="item.mapping_key"
-            class="compact-card"
+              v-for="item in dataMappings"
+              :key="item.mapping_key"
+              class="compact-card"
           >
             <h5>{{ item.mapping_key }}</h5>
             <span>{{ item.api_key }} / {{ item.entity_key }}</span>
@@ -211,9 +200,9 @@
 
         <div class="state-flow-list">
           <article
-            v-for="item in workflowBindings"
-            :key="item.binding_key"
-            class="state-card"
+              v-for="item in workflowBindings"
+              :key="item.binding_key"
+              class="state-card"
           >
             <h5>{{ item.api_key }} → {{ item.flow_step_key }}</h5>
             <span>{{ item.trigger_timing }}</span>
@@ -230,9 +219,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in securityRequirements"
-            :key="item.security_key"
-            class="compact-card danger-card"
+              v-for="item in securityRequirements"
+              :key="item.security_key"
+              class="compact-card danger-card"
           >
             <h5>{{ item.security_type }}</h5>
             <span>{{ item.api_key }}</span>
@@ -249,12 +238,13 @@
     </div>
 
     <ArtifactDocumentEditor
-      v-else
-      title="接口契约"
-      artifact-type="API_CONTRACT"
-      :artifact="artifact"
-      :markdown="markdown"
-      :editable="false"
+        compact
+        v-else
+        title="接口契约"
+        artifact-type="API_CONTRACT"
+        :artifact="artifact"
+        :markdown="markdown"
+        :editable="false"
     />
   </section>
 </template>
@@ -269,7 +259,7 @@ const props = defineProps<{
   markdown: string
 }>()
 
-const activeView = ref<'cards' | 'markdown'>('cards')
+const activeView = ref<'cards' | 'markdown'>('markdown')
 
 
 const contract = computed<any>(() => props.artifact?.content || {})
@@ -294,3 +284,4 @@ function joinList(value: unknown): string {
   return value.join('；')
 }
 </script>
+

@@ -8,28 +8,78 @@
           ← 返回项目首页
         </button>
 
-        <div>
+        <div class="workspace-project-meta">
           <strong>{{ project.projectName }}</strong>
           <span>{{ workspace.workspaceName }} / {{ project.projectCode }}</span>
         </div>
       </div>
 
-      <button class="logout-button" @click="openProjectTaskCenter">
-        项目任务中心
-      </button>
+      <div class="workspace-topbar-right">
+        <div class="workspace-actions-menu" @keydown.esc="projectActionMenuOpen = false">
+          <button
+            type="button"
+            class="workspace-actions-trigger"
+            :aria-expanded="projectActionMenuOpen"
+            aria-haspopup="menu"
+            @click="projectActionMenuOpen = !projectActionMenuOpen"
+          >
+            <span>项目操作</span>
+            <span class="workspace-actions-trigger-chevron">▾</span>
+          </button>
 
-      <button class="logout-button" @click="handleExportProjectZip">
-        导出项目交付包
-      </button>
+          <nav
+            v-if="projectActionMenuOpen && !themeProfileDrawerVisible"
+            class="workspace-actions-popover"
+            role="menu"
+            aria-label="项目操作"
+          >
+            <button
+              class="workspace-action-item"
+              type="button"
+              role="menuitem"
+              @click="projectActionMenuOpen = false; openProjectTaskCenter()"
+            >
+              项目任务中心
+            </button>
 
-      <button class="logout-button" @click="openThemeProfileDrawer">
-        项目风格
-      </button>
+            <button
+              class="workspace-action-item"
+              type="button"
+              role="menuitem"
+              @click="projectActionMenuOpen = false; handleExportProjectZip()"
+            >
+              导出项目交付包
+            </button>
 
-      <button class="logout-button" @click="handleLogout">
-        退出登录
-      </button>
+            <button
+              class="workspace-action-item"
+              type="button"
+              role="menuitem"
+              @click="projectActionMenuOpen = false; openThemeProfileDrawer()"
+            >
+              项目风格
+            </button>
+
+            <button
+              class="workspace-action-item danger"
+              type="button"
+              role="menuitem"
+              @click="projectActionMenuOpen = false; handleLogout()"
+            >
+              退出登录
+            </button>
+          </nav>
+        </div>
+      </div>
     </div>
+
+    <button
+      v-if="projectActionMenuOpen && !themeProfileDrawerVisible"
+      class="workspace-actions-backdrop"
+      type="button"
+      aria-label="关闭项目操作菜单"
+      @click="projectActionMenuOpen = false"
+    />
 
     <div class="main-layout with-workspace-topbar">
       <ModuleTreePanel :modules="modules" :selected-module-id="selectedModule?.id" @select="handleSelectModule"
@@ -294,6 +344,7 @@ defineEmits<{
 }>()
 
 const activeTab = ref<AgentTab>('requirement')
+const projectActionMenuOpen = ref(false)
 const modules = ref<ModuleTreeNode[]>([])
 const aiAssistantCollapsed = ref(false)
 const latestAssistantResponse = ref<AssistantMessageResponse | null>(null)
@@ -3403,6 +3454,7 @@ async function handleConfirmUiContractSnapshot(payload: {
 }
 
 function openThemeProfileDrawer() {
+  projectActionMenuOpen.value = false
   themeProfileDrawerVisible.value = true
 }
 
@@ -4581,8 +4633,189 @@ function handleLogout() {
 </script>
 
 <style scoped>
+
+.workspace-topbar {
+  position: relative;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(10px);
+}
+
+.workspace-topbar-left,
+.workspace-topbar-right {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.workspace-topbar-left {
+  gap: 14px;
+}
+
+.workspace-topbar-right {
+  position: relative;
+  z-index: 42;
+  margin-left: auto;
+}
+
+.back-home-button {
+  flex: 0 0 auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 8px 13px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.back-home-button:hover {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.workspace-project-meta {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.workspace-project-meta strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 15px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-project-meta span {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-actions-menu {
+  position: relative;
+  z-index: 91;
+}
+
+.workspace-actions-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 92px;
+  border: 1px solid #d5e3ff;
+  border-radius: 10px;
+  height: 34px;
+  padding: 0 14px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.06);
+  transition: all 0.16s ease;
+}
+
+.workspace-actions-trigger:hover,
+.workspace-actions-trigger[aria-expanded='true'] {
+  border-color: #93c5fd;
+  background: #f8fbff;
+  color: #1d4ed8;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1);
+}
+
+.workspace-actions-trigger-chevron {
+  color: currentColor;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  height: 10px;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.72;
+  transform-origin: 50% 50%;
+  transition: transform 0.16s ease;
+}
+
+.workspace-actions-trigger[aria-expanded='true'] .workspace-actions-trigger-chevron {
+  transform: rotate(180deg);
+}
+
+.workspace-actions-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.workspace-actions-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 92;
+  display: grid;
+  gap: 4px;
+  width: 176px;
+  border: 1px solid #dbe4ef;
+  border-radius: 14px;
+  padding: 6px;
+  background: #ffffff;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+}
+
+.workspace-action-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  padding: 9px 11px;
+  background: transparent;
+  color: #334155;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.workspace-action-item:hover {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.workspace-action-item.danger {
+  color: #b91c1c;
+}
+
+.workspace-action-item.danger:hover {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
 .main-layout {
   display: flex;
+  gap: 0px;
   min-height: calc(100vh - 128px);
   background: #f8fafc;
   overflow: hidden;
@@ -4600,7 +4833,7 @@ function handleLogout() {
 .theme-profile-mask {
   position: fixed;
   inset: 0;
-  z-index: 1100;
+  z-index: 6000;
   display: flex;
   justify-content: flex-end;
   background: rgba(15, 23, 42, 0.42);
@@ -4608,6 +4841,8 @@ function handleLogout() {
 }
 
 .theme-profile-drawer {
+  position: relative;
+  z-index: 1;
   width: min(520px, 96vw);
   height: 100%;
   overflow: auto;

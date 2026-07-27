@@ -1,38 +1,34 @@
 
 <template>
   <div class="module-prd-view">
-    <div class="prd-view-toolbar">
-      <div>
+    <div class="prd-view-toolbar compact-reader-toolbar">
+      <div class="asset-title-copy">
         <h3>测试规格</h3>
-        <p>面向测试 Agent、开发 Agent 和验收流程的结构化测试资产。</p>
+        <p v-if="!artifact?.artifactId">
+          当前模块尚未生成测试规格。
+        </p>
       </div>
 
-      <div class="prd-view-actions">
-        <span class="version-badge">TEST_SPEC</span>
+      <div class="prd-view-actions compact-reader-actions">
+        <span v-if="artifact?.versionNo" class="version-badge">
+          v{{ artifact.versionNo }}
+        </span>
 
         <button
-          class="view-toggle-button"
-          :class="{ active: activeView === 'cards' }"
-          @click="activeView = 'cards'"
+          type="button"
+          class="view-mode-link"
+          @click="activeView = activeView === 'markdown' ? 'cards' : 'markdown'"
         >
-          卡片视图
-        </button>
-
-        <button
-          class="view-toggle-button"
-          :class="{ active: activeView === 'markdown' }"
-          @click="activeView = 'markdown'"
-        >
-          文档视图
+          {{ activeView === 'markdown' ? '切换到卡片视图' : '切换回文档视图' }}
         </button>
       </div>
     </div>
 
     <ManualDocumentCardView
-      v-if="activeView === 'cards' && isManualDocumentEdited"
-      title="测试规格"
-      :artifact="artifact"
-      :markdown="markdown"
+        v-if="activeView === 'cards' && isManualDocumentEdited"
+        title="测试规格"
+        :artifact="artifact"
+        :markdown="markdown"
     />
 
     <div v-else-if="activeView === 'cards'" class="prd-card-view">
@@ -84,9 +80,9 @@
 
         <div v-if="testScope.length" class="compact-card-list">
           <article
-            v-for="item in testScope"
-            :key="item.scope_key || item.scope_name"
-            class="compact-card"
+              v-for="item in testScope"
+              :key="item.scope_key || item.scope_name"
+              class="compact-card"
           >
             <h5>{{ item.scope_name }}</h5>
             <p>{{ item.description }}</p>
@@ -108,9 +104,9 @@
 
         <div v-if="acceptanceCriteria.length" class="compact-card-list">
           <article
-            v-for="item in acceptanceCriteria"
-            :key="item.criterion_key || item.title"
-            class="compact-card"
+              v-for="item in acceptanceCriteria"
+              :key="item.criterion_key || item.title"
+              class="compact-card"
           >
             <h5>{{ item.title }}</h5>
             <p>{{ item.description }}</p>
@@ -131,9 +127,9 @@
 
         <div v-if="functionalCases.length" class="requirement-list">
           <article
-            v-for="item in functionalCases"
-            :key="item.case_key || item.title"
-            class="requirement-card"
+              v-for="item in functionalCases"
+              :key="item.case_key || item.title"
+              class="requirement-card"
           >
             <div class="requirement-card-header">
               <h5>{{ item.title }}</h5>
@@ -158,9 +154,9 @@
 
         <div v-if="apiCases.length" class="api-list">
           <article
-            v-for="item in apiCases"
-            :key="item.case_key || item.api_key"
-            class="api-card"
+              v-for="item in apiCases"
+              :key="item.case_key || item.api_key"
+              class="api-card"
           >
             <div class="api-card-header">
               <span class="method-badge">{{ item.method || 'GET' }}</span>
@@ -187,9 +183,9 @@
 
         <div v-if="flowCases.length" class="state-flow-list">
           <article
-            v-for="item in flowCases"
-            :key="item.case_key || item.flow_key"
-            class="state-card"
+              v-for="item in flowCases"
+              :key="item.case_key || item.flow_key"
+              class="state-card"
           >
             <h5>{{ item.title }}</h5>
             <p><strong>流程 Key：</strong>{{ item.flow_key }}</p>
@@ -210,9 +206,9 @@
 
         <div v-if="permissionCases.length" class="compact-card-list">
           <article
-            v-for="item in permissionCases"
-            :key="item.case_key || item.permission_key"
-            class="compact-card"
+              v-for="item in permissionCases"
+              :key="item.case_key || item.permission_key"
+              class="compact-card"
           >
             <h5>{{ item.title }}</h5>
             <p><strong>角色：</strong>{{ item.role }}</p>
@@ -234,9 +230,9 @@
 
         <div v-if="dataValidationCases.length" class="compact-card-list">
           <article
-            v-for="item in dataValidationCases"
-            :key="item.case_key || item.field_name"
-            class="compact-card"
+              v-for="item in dataValidationCases"
+              :key="item.case_key || item.field_name"
+              class="compact-card"
           >
             <h5>{{ item.title }}</h5>
             <p><strong>实体：</strong>{{ item.entity_key }}</p>
@@ -259,9 +255,9 @@
 
         <div v-if="exceptionCases.length" class="compact-card-list">
           <article
-            v-for="item in exceptionCases"
-            :key="item.case_key || item.title"
-            class="compact-card danger-card"
+              v-for="item in exceptionCases"
+              :key="item.case_key || item.title"
+              class="compact-card danger-card"
           >
             <h5>{{ item.title }}</h5>
             <p><strong>异常类型：</strong>{{ item.exception_type }}</p>
@@ -282,9 +278,9 @@
 
         <div v-if="testDataRequirements.length" class="compact-card-list">
           <article
-            v-for="item in testDataRequirements"
-            :key="item.data_key || item.data_name"
-            class="compact-card"
+              v-for="item in testDataRequirements"
+              :key="item.data_key || item.data_name"
+              class="compact-card"
           >
             <h5>{{ item.data_name }}</h5>
             <p>{{ item.description }}</p>
@@ -306,9 +302,9 @@
 
         <div v-if="automationHints.length" class="compact-card-list">
           <article
-            v-for="item in automationHints"
-            :key="item.hint_key || item.target"
-            class="compact-card"
+              v-for="item in automationHints"
+              :key="item.hint_key || item.target"
+              class="compact-card"
           >
             <h5>{{ item.target }}</h5>
             <p>{{ item.recommendation }}</p>
@@ -328,9 +324,9 @@
 
         <ul v-if="riskNotes.length" class="requirement-list">
           <li
-            v-for="item in riskNotes"
-            :key="item"
-            class="compact-card"
+              v-for="item in riskNotes"
+              :key="item"
+              class="compact-card"
           >
             {{ item }}
           </li>
@@ -349,14 +345,15 @@
     </div>
 
     <ArtifactDocumentEditor
-      v-else
-      title="测试规格"
-      artifact-type="TEST_SPEC"
-      :artifact="artifact"
-      :markdown="markdown"
-      :editable="true"
-      :saving="manualEditSaving"
-      @save="$emit('save-manual-edit', $event)"
+        compact
+        v-else
+        title="测试规格"
+        artifact-type="TEST_SPEC"
+        :artifact="artifact"
+        :markdown="markdown"
+        :editable="true"
+        :saving="manualEditSaving"
+        @save="$emit('save-manual-edit', $event)"
     />
   </div>
 </template>
@@ -380,7 +377,7 @@ defineEmits<{
   'save-manual-edit': [payload: ManualArtifactEditPayload]
 }>()
 
-const activeView = ref<'cards' | 'markdown'>('cards')
+const activeView = ref<'cards' | 'markdown'>('markdown')
 
 
 const spec = computed<any>(() => props.artifact?.content || {})
@@ -400,12 +397,12 @@ const riskNotes = computed<string[]>(() => asArray(spec.value.risk_notes).map(St
 
 const totalCaseCount = computed(() => {
   return (
-    functionalCases.value.length +
-    apiCases.value.length +
-    flowCases.value.length +
-    permissionCases.value.length +
-    dataValidationCases.value.length +
-    exceptionCases.value.length
+      functionalCases.value.length +
+      apiCases.value.length +
+      flowCases.value.length +
+      permissionCases.value.length +
+      dataValidationCases.value.length +
+      exceptionCases.value.length
   )
 })
 
@@ -432,3 +429,4 @@ function joinList(value: unknown): string {
   return value.map((item) => String(item)).join('；')
 }
 </script>
+

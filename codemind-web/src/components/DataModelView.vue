@@ -1,36 +1,25 @@
 
 <template>
   <section class="module-prd-view">
-    <div class="prd-view-toolbar">
-      <div>
+    <div class="prd-view-toolbar compact-reader-toolbar">
+      <div class="asset-title-copy">
         <h3>数据模型</h3>
-        <p v-if="artifact?.artifactId">
-          Artifact：{{ artifact.artifactId }}
-        </p>
-        <p v-else>
+        <p v-if="!artifact?.artifactId">
           当前模块尚未生成数据模型。
         </p>
       </div>
 
-      <div class="prd-view-actions">
+      <div class="prd-view-actions compact-reader-actions">
         <span v-if="artifact?.versionNo" class="version-badge">
           v{{ artifact.versionNo }}
         </span>
 
         <button
-          class="view-toggle-button"
-          :class="{ active: activeView === 'cards' }"
-          @click="activeView = 'cards'"
+          type="button"
+          class="view-mode-link"
+          @click="activeView = activeView === 'markdown' ? 'cards' : 'markdown'"
         >
-          卡片视图
-        </button>
-
-        <button
-          class="view-toggle-button"
-          :class="{ active: activeView === 'markdown' }"
-          @click="activeView = 'markdown'"
-        >
-          文档视图
+          {{ activeView === 'markdown' ? '切换到卡片视图' : '切换回文档视图' }}
         </button>
       </div>
     </div>
@@ -76,9 +65,9 @@
 
         <div class="requirement-list">
           <article
-            v-for="entity in entities"
-            :key="entity.entity_key"
-            class="requirement-card"
+              v-for="entity in entities"
+              :key="entity.entity_key"
+              class="requirement-card"
           >
             <div class="requirement-card-header">
               <div>
@@ -103,9 +92,9 @@
 
             <div class="compact-card-list">
               <article
-                v-for="field in asArray(entity.fields)"
-                :key="field.field_key"
-                class="compact-card"
+                  v-for="field in asArray(entity.fields)"
+                  :key="field.field_key"
+                  class="compact-card"
               >
                 <h5>{{ field.field_name }}</h5>
                 <span>{{ field.column_name }} / {{ field.data_type }}{{ field.length ? `(${field.length})` : '' }}</span>
@@ -127,9 +116,9 @@
 
         <div class="state-flow-list">
           <article
-            v-for="item in relationships"
-            :key="item.relationship_key"
-            class="state-card"
+              v-for="item in relationships"
+              :key="item.relationship_key"
+              class="state-card"
           >
             <h5>{{ item.source_entity_key }} → {{ item.target_entity_key }}</h5>
             <span>{{ item.relationship_type }}</span>
@@ -148,9 +137,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in indexes"
-            :key="item.index_key"
-            class="compact-card"
+              v-for="item in indexes"
+              :key="item.index_key"
+              class="compact-card"
           >
             <h5>{{ item.index_name }}</h5>
             <span>{{ item.index_type }} / {{ item.table_name }}</span>
@@ -168,9 +157,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in constraints"
-            :key="item.constraint_key"
-            class="compact-card"
+              v-for="item in constraints"
+              :key="item.constraint_key"
+              class="compact-card"
           >
             <h5>{{ item.constraint_key }}</h5>
             <span>{{ item.constraint_type }} / {{ item.entity_key }}</span>
@@ -189,9 +178,9 @@
 
         <div class="state-flow-list">
           <article
-            v-for="item in statusModels"
-            :key="item.status_key"
-            class="state-card"
+              v-for="item in statusModels"
+              :key="item.status_key"
+              class="state-card"
           >
             <h5>{{ item.status_key }}</h5>
             <span>{{ item.entity_key }} / {{ item.status_field }}</span>
@@ -211,9 +200,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in pageBindings"
-            :key="item.binding_key"
-            class="compact-card"
+              v-for="item in pageBindings"
+              :key="item.binding_key"
+              class="compact-card"
           >
             <h5>{{ item.page_name }}</h5>
             <span>{{ item.page_key }} / {{ item.entity_key }}</span>
@@ -231,9 +220,9 @@
 
         <div class="api-list">
           <article
-            v-for="item in apiUsageHints"
-            :key="item.api_hint_key"
-            class="api-card"
+              v-for="item in apiUsageHints"
+              :key="item.api_hint_key"
+              class="api-card"
           >
             <div class="api-card-header">
               <span class="method-badge">{{ item.method }}</span>
@@ -256,9 +245,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in dataSecurity"
-            :key="item.security_key"
-            class="compact-card danger-card"
+              v-for="item in dataSecurity"
+              :key="item.security_key"
+              class="compact-card danger-card"
           >
             <h5>{{ item.security_key }}</h5>
             <span>{{ item.entity_key }} / {{ item.security_level }}</span>
@@ -275,12 +264,13 @@
     </div>
 
     <ArtifactDocumentEditor
-      v-else
-      title="数据模型"
-      artifact-type="DATA_MODEL"
-      :artifact="artifact"
-      :markdown="markdown"
-      :editable="false"
+        compact
+        v-else
+        title="数据模型"
+        artifact-type="DATA_MODEL"
+        :artifact="artifact"
+        :markdown="markdown"
+        :editable="false"
     />
   </section>
 </template>
@@ -295,7 +285,7 @@ const props = defineProps<{
   markdown: string
 }>()
 
-const activeView = ref<'cards' | 'markdown'>('cards')
+const activeView = ref<'cards' | 'markdown'>('markdown')
 
 
 const model = computed<any>(() => props.artifact?.content || {})
@@ -323,3 +313,4 @@ function joinList(value: unknown): string {
   return value.join('；')
 }
 </script>
+

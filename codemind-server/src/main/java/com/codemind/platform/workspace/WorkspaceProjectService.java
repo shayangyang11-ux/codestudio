@@ -135,7 +135,14 @@ public class WorkspaceProjectService {
         WorkspaceRecord workspace = resolveAccessibleWorkspace(workspaceId);
         CurrentUser currentUser = currentUserProvider.getCurrentUser();
 
-        String projectCode = normalizeRequiredText(request.projectCode(), "projectCode");
+        if (request == null) {
+            throw new IllegalArgumentException("Create project request is required.");
+        }
+
+        String requestedProjectCode = normalizeOptionalText(request.projectCode());
+        String projectCode = requestedProjectCode == null
+                ? generateNextProjectCode(workspace.id())
+                : requestedProjectCode;
         String projectName = normalizeRequiredText(request.projectName(), "projectName");
         String description = normalizeOptionalText(request.description());
 
@@ -215,6 +222,42 @@ public class WorkspaceProjectService {
         );
 
         return getProjectSummary(workspace.id(), projectCode);
+    }
+
+    @Transactional
+    public void deleteProject(
+            UUID workspaceId,
+            String projectCode
+    ) {
+        WorkspaceRecord workspace = resolveAccessibleWorkspace(workspaceId);
+        ProjectRecord project = resolveManageableProject(
+                workspace.id(),
+                projectCode
+        );
+        CurrentUser currentUser = currentUserProvider.getCurrentUser();
+
+        String sql = """
+                UPDATE project
+                SET
+                    status = 'DELETED',
+                    updated_by = :updatedBy,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :projectId
+                  AND workspace_id = :workspaceId
+                  AND status = 'ACTIVE'
+                """;
+
+        int updatedRows = jdbcTemplate.update(
+                sql,
+                new MapSqlParameterSource()
+                        .addValue("projectId", project.id())
+                        .addValue("workspaceId", workspace.id())
+                        .addValue("updatedBy", currentUser.username())
+        );
+
+        if (updatedRows == 0) {
+            throw new IllegalArgumentException("Project not found or already deleted: " + projectCode);
+        }
     }
 
     public ProjectWorkspaceStateResponse getProjectWorkspaceState(
@@ -415,6 +458,62 @@ public class WorkspaceProjectService {
         }
     }
 
+    private ProjectRecord resolveManageableProject(
+            UUID workspaceId,
+            String projectCode
+    ) {
+        CurrentUser currentUser = currentUserProvider.getCurrentUser();
+
+        String sql = """
+                SELECT
+                    p.id,
+                    p.project_code,
+                    p.workspace_id
+                FROM project p
+                JOIN workspace_member wm
+                    ON wm.workspace_id = p.workspace_id
+                   AND wm.user_id = :userId
+                   AND wm.status = 'ACTIVE'
+                LEFT JOIN project_member pm
+                    ON pm.project_id = p.id
+                   AND pm.user_id = :userId
+                   AND pm.status = 'ACTIVE'
+                WHERE p.workspace_id = :workspaceId
+                  AND p.project_code = :projectCode
+                  AND p.status = 'ACTIVE'
+                  AND (
+                        p.owner_user_id = :userId
+                        OR p.created_by = :username
+                        OR pm.project_role IN ('OWNER', 'MAINTAINER')
+                        OR wm.member_role IN ('OWNER', 'ADMIN')
+                  )
+                LIMIT 1
+                """;
+
+        try {
+            return jdbcTemplate.queryForObject(
+                    sql,
+                    new MapSqlParameterSource()
+                            .addValue("workspaceId", workspaceId)
+                            .addValue("projectCode", projectCode)
+                            .addValue("userId", currentUser.userId())
+                            .addValue("username", currentUser.username()),
+                    (rs, rowNum) -> new ProjectRecord(
+                            rs.getObject("id", UUID.class),
+                            rs.getString("project_code"),
+                            rs.getObject("workspace_id", UUID.class)
+                    )
+            );
+        } catch (EmptyResultDataAccessException e) {
+            throw new IllegalArgumentException(
+                    "Project delete is not allowed. workspaceId="
+                            + workspaceId
+                            + ", projectCode="
+                            + projectCode
+            );
+        }
+    }
+
     private ProjectSummaryResponse getProjectSummary(
             UUID workspaceId,
             String projectCode
@@ -425,6 +524,52 @@ public class WorkspaceProjectService {
                 .filter(project -> project.projectCode().equals(projectCode))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("Project not found after creation: " + projectCode));
+    }
+
+    private String generateNextProjectCode(UUID workspaceId) {
+        Integer maxSequence = jdbcTemplate.queryForObject(
+                """
+                SELECT COALESCE(MAX(CAST(SUBSTRING(project_code FROM 2) AS INTEGER)), 0)
+                FROM project
+                WHERE workspace_id = :workspaceId
+                  AND project_code ~ '^P[0-9]+$'
+                """,
+                new MapSqlParameterSource()
+                        .addValue("workspaceId", workspaceId),
+                Integer.class
+        );
+
+        int nextSequence = maxSequence == null ? 1 : maxSequence + 1;
+
+        for (int sequence = nextSequence; sequence < nextSequence + 1000; sequence++) {
+            String candidate = String.format("P%03d", sequence);
+
+            if (!projectCodeExists(workspaceId, candidate)) {
+                return candidate;
+            }
+        }
+
+        throw new IllegalStateException("Failed to allocate project code for workspace: " + workspaceId);
+    }
+
+    private boolean projectCodeExists(
+            UUID workspaceId,
+            String projectCode
+    ) {
+        Integer count = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM project
+                WHERE workspace_id = :workspaceId
+                  AND project_code = :projectCode
+                """,
+                new MapSqlParameterSource()
+                        .addValue("workspaceId", workspaceId)
+                        .addValue("projectCode", projectCode),
+                Integer.class
+        );
+
+        return count != null && count > 0;
     }
 
     private void validateSelectedReferences(

@@ -1,45 +1,34 @@
 
 <template>
   <section class="module-prd-view">
-    <div class="prd-view-toolbar">
-      <div>
+    <div class="prd-view-toolbar compact-reader-toolbar">
+      <div class="asset-title-copy">
         <h3>页面规范</h3>
-        <p v-if="artifact?.artifactId">
-          Artifact：{{ artifact.artifactId }}
-        </p>
-        <p v-else>
-          当前模块尚未生成页面规范。
+        <p v-if="!artifact?.artifactId">
+          当前页面尚未生成页面规范。
         </p>
       </div>
 
-      <div class="prd-view-actions">
+      <div class="prd-view-actions compact-reader-actions">
         <span v-if="artifact?.versionNo" class="version-badge">
           v{{ artifact.versionNo }}
         </span>
 
         <button
-          class="view-toggle-button"
-          :class="{ active: activeView === 'cards' }"
-          @click="activeView = 'cards'"
+          type="button"
+          class="view-mode-link"
+          @click="activeView = activeView === 'markdown' ? 'cards' : 'markdown'"
         >
-          卡片视图
-        </button>
-
-        <button
-          class="view-toggle-button"
-          :class="{ active: activeView === 'markdown' }"
-          @click="activeView = 'markdown'"
-        >
-          文档视图
+          {{ activeView === 'markdown' ? '切换到卡片视图' : '切换回文档视图' }}
         </button>
       </div>
     </div>
 
     <ManualDocumentCardView
-      v-if="activeView === 'cards' && isManualDocumentEdited"
-      title="页面规范"
-      :artifact="artifact"
-      :markdown="markdown"
+        v-if="activeView === 'cards' && isManualDocumentEdited"
+        title="页面规范"
+        :artifact="artifact"
+        :markdown="markdown"
     />
 
     <div v-else-if="activeView === 'cards'" class="prd-card-view">
@@ -83,9 +72,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in layoutSections"
-            :key="item.section_key"
-            class="compact-card"
+              v-for="item in layoutSections"
+              :key="item.section_key"
+              class="compact-card"
           >
             <h5>{{ item.section_name }}</h5>
             <span>{{ item.section_key }}</span>
@@ -104,9 +93,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in componentSpecs"
-            :key="item.component_key"
-            class="compact-card"
+              v-for="item in componentSpecs"
+              :key="item.component_key"
+              class="compact-card"
           >
             <h5>{{ item.component_name }}</h5>
             <span>{{ item.component_key }} / {{ item.component_type }}</span>
@@ -126,9 +115,9 @@
 
         <div class="requirement-list">
           <article
-            v-for="item in actionSpecs"
-            :key="item.action_key"
-            class="requirement-card"
+              v-for="item in actionSpecs"
+              :key="item.action_key"
+              class="requirement-card"
           >
             <div class="requirement-card-header">
               <div>
@@ -166,9 +155,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in formFields"
-            :key="item.field_key"
-            class="compact-card"
+              v-for="item in formFields"
+              :key="item.field_key"
+              class="compact-card"
           >
             <h5>{{ item.field_name }}</h5>
             <span>{{ item.field_key }} / {{ item.field_type }}</span>
@@ -188,9 +177,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in tableColumns"
-            :key="item.column_key"
-            class="compact-card"
+              v-for="item in tableColumns"
+              :key="item.column_key"
+              class="compact-card"
           >
             <h5>{{ item.column_name }}</h5>
             <span>{{ item.column_key }}</span>
@@ -210,9 +199,9 @@
 
         <div class="api-list">
           <article
-            v-for="item in apiBindings"
-            :key="item.api_key"
-            class="api-card"
+              v-for="item in apiBindings"
+              :key="item.api_key"
+              class="api-card"
           >
             <div class="api-card-header">
               <span class="method-badge">{{ item.method }}</span>
@@ -235,9 +224,9 @@
 
         <div class="state-flow-list">
           <article
-            v-for="item in pageStates"
-            :key="item.state_key"
-            class="state-card"
+              v-for="item in pageStates"
+              :key="item.state_key"
+              class="state-card"
           >
             <h5>{{ item.state_name }}</h5>
             <span>{{ item.state_key }}</span>
@@ -255,9 +244,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in permissionSpecs"
-            :key="item.permission_key"
-            class="compact-card"
+              v-for="item in permissionSpecs"
+              :key="item.permission_key"
+              class="compact-card"
           >
             <h5>{{ item.permission_name }}</h5>
             <span>{{ item.permission_key }}</span>
@@ -276,9 +265,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in exceptionSpecs"
-            :key="item.exception_key"
-            class="compact-card danger-card"
+              v-for="item in exceptionSpecs"
+              :key="item.exception_key"
+              class="compact-card danger-card"
           >
             <h5>{{ item.title }}</h5>
             <span>{{ item.exception_key }}</span>
@@ -297,9 +286,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in acceptanceCriteria"
-            :key="item.criterion_key"
-            class="compact-card success-card"
+              v-for="item in acceptanceCriteria"
+              :key="item.criterion_key"
+              class="compact-card success-card"
           >
             <h5>{{ item.criterion_key }}</h5>
             <p>{{ item.description }}</p>
@@ -315,14 +304,15 @@
     </div>
 
     <ArtifactDocumentEditor
-      v-else
-      title="页面规范"
-      artifact-type="PAGE_SPEC"
-      :artifact="artifact"
-      :markdown="markdown"
-      :editable="true"
-      :saving="manualEditSaving"
-      @save="$emit('save-manual-edit', $event)"
+        compact
+        v-else
+        title="页面规范"
+        artifact-type="PAGE_SPEC"
+        :artifact="artifact"
+        :markdown="markdown"
+        :editable="true"
+        :saving="manualEditSaving"
+        @save="$emit('save-manual-edit', $event)"
     />
   </section>
 </template>
@@ -346,7 +336,7 @@ defineEmits<{
   'save-manual-edit': [payload: ManualArtifactEditPayload]
 }>()
 
-const activeView = ref<'cards' | 'markdown'>('cards')
+const activeView = ref<'cards' | 'markdown'>('markdown')
 
 
 const spec = computed<any>(() => props.artifact?.content || {})
@@ -386,3 +376,4 @@ function joinList(value: unknown): string {
   return value.join('；')
 }
 </script>
+

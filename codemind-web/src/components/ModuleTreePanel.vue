@@ -1,7 +1,7 @@
 <template>
   <aside class="module-tree-panel">
     <div class="panel-title">
-      <div>
+      <div class="panel-title-text">
         <h2>模块树</h2>
         <p>按业务域、模块、页面和功能点组织需求结构</p>
       </div>
@@ -16,10 +16,18 @@
     </div>
 
     <div v-else class="tree-list">
-      <ModuleTreeNodeItem v-for="node in modules" :key="node.id || node.moduleKey || node.key" :node="node"
-        :selected-module-id="selectedModuleId" @select="$emit('select', $event)"
-        @create-child="$emit('create-child', $event)" @rename="$emit('rename-node', $event)"
-        @move="$emit('move-node', $event)" @delete="$emit('delete-node', $event)" />
+      <ModuleTreeNodeItem
+        v-for="node in modules"
+        :key="node.id || node.moduleKey || node.key"
+        :node="node"
+        :level="0"
+        :selected-module-id="selectedModuleId"
+        @select="$emit('select', $event)"
+        @create-child="$emit('create-child', $event)"
+        @rename="$emit('rename-node', $event)"
+        @move="$emit('move-node', $event)"
+        @delete="$emit('delete-node', $event)"
+      />
     </div>
   </aside>
 </template>
@@ -45,11 +53,11 @@ defineEmits<{
 
 <style scoped>
 .module-tree-panel {
-  width: 300px;
+  width: 285px;
   min-width: 280px;
   border-right: 1px solid #e2e8f0;
   background: #ffffff;
-  padding: 18px 14px;
+  padding: 0;
   overflow-y: auto;
 }
 
@@ -58,22 +66,30 @@ defineEmits<{
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 16px;
+  padding: 10px 15px 8px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.panel-title-text {
+  min-width: 0;
 }
 
 .panel-title h2 {
   margin: 0;
   font-size: 18px;
+  line-height: 1.25;
   color: #0f172a;
 }
 
 .panel-title p {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   font-size: 12px;
+  line-height: 1.35;
   color: #64748b;
 }
 
 .add-root-button {
+  flex: 0 0 auto;
   width: 28px;
   height: 28px;
   border: 1px solid #bfdbfe;
@@ -90,6 +106,7 @@ defineEmits<{
 }
 
 .empty-tree {
+  margin: 10px 8px;
   border: 1px dashed #cbd5e1;
   border-radius: 12px;
   padding: 14px;
@@ -101,6 +118,7 @@ defineEmits<{
 .tree-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 3px;
+  padding: 10px 8px 18px;
 }
 </style>

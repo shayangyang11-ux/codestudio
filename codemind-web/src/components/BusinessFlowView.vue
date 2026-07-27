@@ -1,45 +1,34 @@
 
 <template>
   <section class="module-prd-view">
-    <div class="prd-view-toolbar">
-      <div>
+    <div class="prd-view-toolbar compact-reader-toolbar">
+      <div class="asset-title-copy">
         <h3>业务流程</h3>
-        <p v-if="artifact?.artifactId">
-          Artifact：{{ artifact.artifactId }}
-        </p>
-        <p v-else>
+        <p v-if="!artifact?.artifactId">
           当前模块尚未生成业务流程。
         </p>
       </div>
 
-      <div class="prd-view-actions">
+      <div class="prd-view-actions compact-reader-actions">
         <span v-if="artifact?.versionNo" class="version-badge">
           v{{ artifact.versionNo }}
         </span>
 
         <button
-          class="view-toggle-button"
-          :class="{ active: activeView === 'cards' }"
-          @click="activeView = 'cards'"
+          type="button"
+          class="view-mode-link"
+          @click="activeView = activeView === 'markdown' ? 'cards' : 'markdown'"
         >
-          卡片视图
-        </button>
-
-        <button
-          class="view-toggle-button"
-          :class="{ active: activeView === 'markdown' }"
-          @click="activeView = 'markdown'"
-        >
-          文档视图
+          {{ activeView === 'markdown' ? '切换到卡片视图' : '切换回文档视图' }}
         </button>
       </div>
     </div>
 
     <ManualDocumentCardView
-      v-if="activeView === 'cards' && isManualDocumentEdited"
-      title="业务流程"
-      :artifact="artifact"
-      :markdown="markdown"
+        v-if="activeView === 'cards' && isManualDocumentEdited"
+        title="业务流程"
+        :artifact="artifact"
+        :markdown="markdown"
     />
 
     <div v-else-if="activeView === 'cards'" class="prd-card-view">
@@ -88,9 +77,9 @@
 
         <div class="role-grid">
           <article
-            v-for="item in participants"
-            :key="item.role_key"
-            class="role-card"
+              v-for="item in participants"
+              :key="item.role_key"
+              class="role-card"
           >
             <h5>{{ item.role_name }}</h5>
             <span>{{ item.role_key }}</span>
@@ -107,9 +96,9 @@
 
         <div class="requirement-list">
           <article
-            v-for="item in sortedMainSteps"
-            :key="item.step_key"
-            class="requirement-card"
+              v-for="item in sortedMainSteps"
+              :key="item.step_key"
+              class="requirement-card"
           >
             <div class="requirement-card-header">
               <div>
@@ -136,9 +125,9 @@
               <strong>业务规则</strong>
               <div>
                 <span
-                  v-for="rule in item.business_rules || []"
-                  :key="rule"
-                  class="soft-tag"
+                    v-for="rule in item.business_rules || []"
+                    :key="rule"
+                    class="soft-tag"
                 >
                   {{ rule }}
                 </span>
@@ -149,9 +138,9 @@
               <strong>异常点</strong>
               <div>
                 <span
-                  v-for="point in item.exception_points || []"
-                  :key="point"
-                  class="flow-tag"
+                    v-for="point in item.exception_points || []"
+                    :key="point"
+                    class="flow-tag"
                 >
                   {{ point }}
                 </span>
@@ -169,9 +158,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in branches"
-            :key="item.branch_key"
-            class="compact-card"
+              v-for="item in branches"
+              :key="item.branch_key"
+              class="compact-card"
           >
             <h5>{{ item.branch_name }}</h5>
             <span>{{ item.branch_key }}</span>
@@ -190,9 +179,9 @@
 
         <div class="state-flow-list">
           <article
-            v-for="item in stateTransitions"
-            :key="`${item.from_state}-${item.event}-${item.to_state}`"
-            class="state-card"
+              v-for="item in stateTransitions"
+              :key="`${item.from_state}-${item.event}-${item.to_state}`"
+              class="state-card"
           >
             <h5>{{ item.from_state }} → {{ item.to_state }}</h5>
             <span>{{ item.event }}</span>
@@ -209,9 +198,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in exceptionScenarios"
-            :key="item.scenario_key"
-            class="compact-card danger-card"
+              v-for="item in exceptionScenarios"
+              :key="item.scenario_key"
+              class="compact-card danger-card"
           >
             <h5>{{ item.title }}</h5>
             <span>{{ item.scenario_key }}</span>
@@ -230,9 +219,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in dataInteractions"
-            :key="item.entity_key"
-            class="compact-card"
+              v-for="item in dataInteractions"
+              :key="item.entity_key"
+              class="compact-card"
           >
             <h5>{{ item.entity_name }}</h5>
             <span>{{ item.entity_key }}</span>
@@ -251,9 +240,9 @@
 
         <div class="api-list">
           <article
-            v-for="item in apiInteractions"
-            :key="item.api_key"
-            class="api-card"
+              v-for="item in apiInteractions"
+              :key="item.api_key"
+              class="api-card"
           >
             <div class="api-card-header">
               <span class="method-badge">{{ item.method }}</span>
@@ -275,9 +264,9 @@
 
         <div class="compact-card-list">
           <article
-            v-for="item in permissionPoints"
-            :key="item.permission_key"
-            class="compact-card"
+              v-for="item in permissionPoints"
+              :key="item.permission_key"
+              class="compact-card"
           >
             <h5>{{ item.permission_name }}</h5>
             <span>{{ item.permission_key }}</span>
@@ -296,8 +285,8 @@
             <h5>页面规范</h5>
             <ul>
               <li
-                v-for="item in downstreamHints.page_spec_hints || []"
-                :key="item"
+                  v-for="item in downstreamHints.page_spec_hints || []"
+                  :key="item"
               >
                 {{ item }}
               </li>
@@ -308,8 +297,8 @@
             <h5>数据模型</h5>
             <ul>
               <li
-                v-for="item in downstreamHints.data_model_hints || []"
-                :key="item"
+                  v-for="item in downstreamHints.data_model_hints || []"
+                  :key="item"
               >
                 {{ item }}
               </li>
@@ -320,8 +309,8 @@
             <h5>接口契约</h5>
             <ul>
               <li
-                v-for="item in downstreamHints.api_contract_hints || []"
-                :key="item"
+                  v-for="item in downstreamHints.api_contract_hints || []"
+                  :key="item"
               >
                 {{ item }}
               </li>
@@ -332,8 +321,8 @@
             <h5>测试规格</h5>
             <ul>
               <li
-                v-for="item in downstreamHints.test_spec_hints || []"
-                :key="item"
+                  v-for="item in downstreamHints.test_spec_hints || []"
+                  :key="item"
               >
                 {{ item }}
               </li>
@@ -344,8 +333,8 @@
             <h5>开发交接包</h5>
             <ul>
               <li
-                v-for="item in downstreamHints.dev_handoff_hints || []"
-                :key="item"
+                  v-for="item in downstreamHints.dev_handoff_hints || []"
+                  :key="item"
               >
                 {{ item }}
               </li>
@@ -361,14 +350,15 @@
     </div>
 
     <ArtifactDocumentEditor
-      v-else
-      title="业务流程"
-      artifact-type="BUSINESS_FLOW"
-      :artifact="artifact"
-      :markdown="markdown"
-      :editable="true"
-      :saving="manualEditSaving"
-      @save="$emit('save-manual-edit', $event)"
+        compact
+        v-else
+        title="业务流程"
+        artifact-type="BUSINESS_FLOW"
+        :artifact="artifact"
+        :markdown="markdown"
+        :editable="true"
+        :saving="manualEditSaving"
+        @save="$emit('save-manual-edit', $event)"
     />
   </section>
 </template>
@@ -392,7 +382,7 @@ defineEmits<{
   'save-manual-edit': [payload: ManualArtifactEditPayload]
 }>()
 
-const activeView = ref<'cards' | 'markdown'>('cards')
+const activeView = ref<'cards' | 'markdown'>('markdown')
 
 
 const flow = computed<any>(() => props.artifact?.content || {})
@@ -439,3 +429,4 @@ function joinList(value: unknown): string {
   return value.join('；')
 }
 </script>
+

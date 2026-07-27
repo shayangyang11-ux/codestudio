@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import {
   clearAuthStorage,
   createWorkspaceProject,
+  deleteWorkspaceProject,
   fetchCurrentUser,
   fetchCurrentUserWorkspaces,
   fetchWorkspaceProjects,
@@ -31,6 +32,7 @@ const currentProject = ref<ProjectSummary | null>(null)
 
 const loadingProjects = ref(false)
 const creatingProject = ref(false)
+const deletingProjectCode = ref<string | null>(null)
 
 const hasToken = computed(() => Boolean(getStoredAccessToken()))
 
@@ -151,6 +153,37 @@ export function useAppSession() {
     }
   }
 
+  async function deleteProject(project: ProjectSummary) {
+    const workspace = selectedWorkspace.value
+
+    if (!workspace) {
+      return
+    }
+
+    deletingProjectCode.value = project.projectCode
+
+    try {
+      await deleteWorkspaceProject(
+        workspace.workspaceId,
+        project.projectCode,
+      )
+
+      projects.value = projects.value.filter(
+        (item) => item.projectCode !== project.projectCode,
+      )
+
+      if (currentProject.value?.projectCode === project.projectCode) {
+        currentProject.value = null
+      }
+
+      if (localStorage.getItem(lastProjectKey) === project.projectCode) {
+        localStorage.removeItem(lastProjectKey)
+      }
+    } finally {
+      deletingProjectCode.value = null
+    }
+  }
+
   async function openProject(project: ProjectSummary) {
     currentProject.value = project
     localStorage.setItem(lastProjectKey, project.projectCode)
@@ -237,6 +270,7 @@ export function useAppSession() {
 
     loadingProjects.value = false
     creatingProject.value = false
+    deletingProjectCode.value = null
   }
 
   return {
@@ -253,6 +287,7 @@ export function useAppSession() {
 
     loadingProjects,
     creatingProject,
+    deletingProjectCode,
 
     bootstrapAuth,
     handleLoginSuccess,
@@ -260,6 +295,7 @@ export function useAppSession() {
     loadInitialHomeData,
     selectWorkspace,
     createProject,
+    deleteProject,
     openProject,
     ensureWorkspaceSelected,
     ensureProjectSelected,

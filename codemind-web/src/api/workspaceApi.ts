@@ -29,3 +29,15 @@ export async function createWorkspaceProject(
     },
   )
 }
+
+export async function deleteWorkspaceProject(
+  workspaceId: string,
+  projectCode: string,
+): Promise<void> {
+  await authFetch<void>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/projects/${encodeURIComponent(projectCode)}`,
+    {
+      method: 'DELETE',
+    },
+  )
+}
