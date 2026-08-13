@@ -1,12 +1,20 @@
+// A9.10.14.4.3.15.4.4_STYLE_OVERRIDE_LOCK
 export type ProjectIndustry =
   | 'GENERAL'
   | 'COMMERCE'
+  | 'FOREIGN_TRADE'
+  | 'WORK_ORDER'
+  | 'WAREHOUSE'
+  | 'MANUFACTURING'
+  | 'CRM'
+  | 'SAAS'
   | 'TECH'
   | 'INDUSTRIAL'
   | 'FINANCE'
   | 'GOV'
   | 'EDUCATION'
   | 'HEALTHCARE'
+  | 'MEDICAL'
 
 export type ProjectThemeKey =
   | 'enterprise_default'
@@ -99,6 +107,36 @@ export const PROJECT_INDUSTRY_OPTIONS: Array<{
     description: '适合商城、订单、会员、用户中心等场景。',
   },
   {
+    value: 'FOREIGN_TRADE',
+    label: '外贸跨境',
+    description: '适合询盘、报价、客户跟进、出口、物流和跨境业务。',
+  },
+  {
+    value: 'WORK_ORDER',
+    label: '工单服务',
+    description: '适合派单、受理、处理、SLA、维修和客户服务流程。',
+  },
+  {
+    value: 'WAREHOUSE',
+    label: '仓储供应链',
+    description: '适合入库、出库、库存、盘点、库位、供应商和 WMS。',
+  },
+  {
+    value: 'MANUFACTURING',
+    label: '制造生产',
+    description: '适合生产、设备、产线、MES、质检、排产和工艺管理。',
+  },
+  {
+    value: 'CRM',
+    label: '客户关系',
+    description: '适合客户、线索、商机、跟进、联系人和销售过程管理。',
+  },
+  {
+    value: 'SAAS',
+    label: '现代 SaaS',
+    description: '适合数据平台、AI 平台、云服务、运营后台和现代工作台。',
+  },
+  {
     value: 'TECH',
     label: '科技平台',
     description: '适合 SaaS、AI、数据平台和数字化系统。',
@@ -171,6 +209,12 @@ export function defaultThemeKeyForIndustry(
   industry: ProjectIndustry,
 ): ProjectThemeKey {
   if (industry === 'COMMERCE') return 'commerce_light'
+  if (industry === 'FOREIGN_TRADE') return 'enterprise_default'
+  if (industry === 'WORK_ORDER') return 'tech_modern'
+  if (industry === 'WAREHOUSE') return 'industrial_pro'
+  if (industry === 'MANUFACTURING') return 'industrial_pro'
+  if (industry === 'CRM') return 'enterprise_default'
+  if (industry === 'SAAS') return 'tech_modern'
   if (industry === 'TECH') return 'tech_modern'
   if (industry === 'INDUSTRIAL') return 'industrial_pro'
   if (industry === 'FINANCE') return 'finance_stable'
@@ -194,6 +238,7 @@ export function visualToneForTheme(
 export function defaultPrimaryColorForTheme(
   themeKey: ProjectThemeKey,
 ): string {
+  if (themeKey === 'commerce_light') return '#f97316'
   if (themeKey === 'tech_modern') return '#4f46e5'
   if (themeKey === 'industrial_pro') return '#0f766e'
   if (themeKey === 'finance_stable') return '#1e3a8a'

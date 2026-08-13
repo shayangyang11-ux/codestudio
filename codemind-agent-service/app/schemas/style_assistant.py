@@ -1,10 +1,11 @@
+# A9.10.14.4.3.15.4.4_STYLE_OVERRIDE_LOCK
 from __future__ import annotations
 
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-ProjectIndustry = Literal["GENERAL", "COMMERCE", "TECH", "INDUSTRIAL", "FINANCE", "GOV", "EDUCATION", "HEALTHCARE"]
+ProjectIndustry = Literal["GENERAL", "COMMERCE", "FOREIGN_TRADE", "WORK_ORDER", "WAREHOUSE", "MANUFACTURING", "CRM", "SAAS", "TECH", "INDUSTRIAL", "FINANCE", "GOV", "EDUCATION", "HEALTHCARE", "MEDICAL"]
 ProjectThemeKey = Literal["enterprise_default", "tech_modern", "commerce_light", "industrial_pro", "finance_stable", "gov_clean"]
 ProjectVisualTone = Literal["CLEAN", "TECH", "COMMERCE", "INDUSTRIAL", "FINANCE", "GOV"]
 ProjectThemeDensity = Literal["COMPACT", "STANDARD", "COMFORTABLE"]

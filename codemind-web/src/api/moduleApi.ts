@@ -1,6 +1,8 @@
 import type {
   ApplyModuleTreePatchRequest,
   CreateProjectModuleNodeRequest,
+  CompleteModuleTreeFromPrdRequest,
+  CompleteModuleTreeFromPrdResponse,
   ModuleTreeNode,
   ModuleTreePatchApplyResponse,
   ModuleTreePatchProposalResponse,
@@ -45,6 +47,34 @@ export async function createProjectModuleNode(
   )
 
   return normalizeMutationResponse(raw)
+}
+
+
+// A9.10.14.4.3.15.4.10.4.4_PRD_TREE_MANUAL_COMPLETION
+export async function completeModuleTreeFromModulePrd(
+  workspaceId: string,
+  projectCode: string,
+  moduleId: string,
+  payload: CompleteModuleTreeFromPrdRequest,
+): Promise<CompleteModuleTreeFromPrdResponse> {
+  const raw = await authFetch<CompleteModuleTreeFromPrdResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}` +
+      `/projects/${encodeURIComponent(projectCode)}/modules` +
+      `/${encodeURIComponent(moduleId)}/complete-from-module-prd`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    },
+  )
+
+  return {
+    ...raw,
+    node: raw.node || null,
+    tree: normalizeModuleNodes(raw.tree || []),
+  }
 }
 
 export async function updateProjectModuleNode(

@@ -80,6 +80,21 @@ public class AssistantIntentRouterService {
                 attachmentContexts
         );
 
+        if (
+                llmResult != null &&
+                        moduleTreeExists &&
+                        INTENT_GENERATE_MODULE_TREE.equals(normalizeIntent(llmResult.getIntent()))
+        ) {
+            AssistantIntentClassificationResult guarded = AssistantIntentClassificationResult.of(
+                    INTENT_PROPOSE_MODULE_TREE_PATCH,
+                    "LLM_GUARDED",
+                    0.82,
+                    "当前项目已经存在模块树，Assistant 不直接重建或覆盖模块树，转为生成可审查的模块树变更提案。"
+            );
+            guarded.setNormalizedMessage(messageText);
+            return guarded;
+        }
+
         if (isUsableLlmResult(llmResult)) {
             return llmResult;
         }
@@ -146,6 +161,20 @@ public class AssistantIntentRouterService {
             );
             result.setNormalizedMessage(messageText);
             applyRuleArtifactHints(result, messageText);
+            return result;
+        }
+
+        // A9.10.14.4.3.15.2.4_EXTERNAL_PRD_IMPORT_AND_LEGACY_PRD_MIGRATION_ASSISTANT_INTENT_ROUTER
+        if (hasParsedAttachmentText && isExternalPrdImportIntent(messageText)) {
+            AssistantIntentClassificationResult result = AssistantIntentClassificationResult.of(
+                    INTENT_PROPOSE_MODULE_TREE_PATCH,
+                    "RULE",
+                    0.91,
+                    "用户上传外部/旧 PRD 并要求导入或迁移到系统，先进入附件驱动迁移分析，再生成可审查模块树 Patch。"
+            );
+            result.setNormalizedMessage(messageText);
+            result.setArtifactType("MODULE_PRD");
+            result.setTaskType("GENERATE_MODULE_PRD");
             return result;
         }
 
@@ -869,11 +898,52 @@ public class AssistantIntentRouterService {
         );
     }
 
+    private boolean isExternalPrdImportIntent(
+            String messageText
+    ) {
+        if (messageText == null || messageText.isBlank()) {
+            return false;
+        }
+
+        String normalized = messageText.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", "");
+        boolean mentionsPrd = containsAny(
+                normalized,
+                List.of(
+                        "prd",
+                        "需求文档",
+                        "需求说明",
+                        "旧需求",
+                        "外部需求"
+                )
+        );
+        boolean mentionsImport = containsAny(
+                normalized,
+                List.of(
+                        "导入",
+                        "迁移",
+                        "识别",
+                        "转换",
+                        "转成",
+                        "匹配",
+                        "映射",
+                        "接入",
+                        "上传",
+                        "解析"
+                )
+        );
+
+        return mentionsPrd && mentionsImport;
+    }
+
     private boolean isAttachmentDrivenRequirementChangeIntent(
             String messageText
     ) {
         if (messageText == null || messageText.isBlank()) {
             return false;
+        }
+
+        if (isExternalPrdImportIntent(messageText)) {
+            return true;
         }
 
         boolean hasAttachmentReference = containsAny(

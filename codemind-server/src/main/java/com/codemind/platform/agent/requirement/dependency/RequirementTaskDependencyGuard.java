@@ -119,20 +119,19 @@ public class RequirementTaskDependencyGuard {
      * UI_CONTRACT does not use the old "all previous core assets" rule.
      *
      * Generic task dependency:
-     * - PAGE_SPEC only.
+     * - none for UI_CONTRACT. PAGE_SPEC is hidden/internal and must not block prototype generation.
      *
      * Dedicated readiness validation before generation:
      * - selected node is PAGE;
-     * - interactive PAGE has FEATURE children;
-     * - every FEATURE has a usable MODULE_PRD or complete structured extra;
-     * - BUSINESS_FLOW / DATA_MODEL / API_CONTRACT / TEST_SPEC are warnings.
+     * - hidden module/function/page prototype context is preferred;
+     * - missing engineering assets become readiness warnings, not task dependency blockers.
      */
     private List<String> requiredNodeAwareModuleArtifacts(
             AgentTaskEntity task,
             TaskType taskType
     ) {
         if (TaskType.GENERATE_UI_CONTRACT.equals(taskType)) {
-            return List.of("PAGE_SPEC");
+            return List.of();
         }
 
         if (task.getModuleId() == null) {

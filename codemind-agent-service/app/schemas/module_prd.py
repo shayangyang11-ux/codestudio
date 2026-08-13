@@ -1,3 +1,5 @@
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -48,6 +50,24 @@ class PageRequirement(BaseModel):
     description: str
     main_components: list[str]
     user_actions: list[str]
+    # A9.10.14.4.3.14.3_MODULE_PRD_PAGE_TREE_SYNC_FIX
+    # MODULE_PRD must be a readable PRD plus a machine-readable page contract,
+    # not only free text.  These fields are optional for backward compatibility;
+    # ModulePrdAgent deterministically completes them from MODULE_TREE.
+    page_type: str = ""
+    route_path: str = ""
+    layout_type: str = ""
+    primary_entity: str = ""
+    parent_feature_key: str = ""
+    parent_feature_name: str = ""
+    source_page_id: str = ""
+    sync_status: str = ""
+    filter_fields: list[str] = Field(default_factory=list)
+    table_columns: list[str] = Field(default_factory=list)
+    form_fields: list[str] = Field(default_factory=list)
+    primary_actions: list[str] = Field(default_factory=list)
+    row_actions: list[str] = Field(default_factory=list)
+    navigation_targets: list[str] = Field(default_factory=list)
 
 
 class DataRequirement(BaseModel):
@@ -95,6 +115,17 @@ class NonFunctionalRequirement(BaseModel):
     target: str
 
 
+# A9.10.14.4.3.15.4.10.2.2_PRD_IMPACT_COMPAT_CLOSURE
+class CustomSection(BaseModel):
+    section_id: str = Field(default="", description="用户自定义栏目稳定标识，普通用户不可见。")
+    title: str = Field(default="补充说明", description="自由栏目标题，允许用户修改。")
+    body: str = Field(default="", description="自由栏目正文，文档级内容，不直接影响模块树或原型。")
+    order: int = Field(default=0, description="自由栏目展示顺序。")
+    visibility: str = Field(default="USER_VISIBLE", description="USER_VISIBLE / HIDDEN。")
+    source: str = Field(default="USER", description="USER / LEGACY_PRD / UPLOADED_PRD / SYSTEM。")
+    impact_policy: str = Field(default="DOCUMENT_ONLY", description="默认 DOCUMENT_ONLY，不直接触发 PAGE_SPEC/UI_CONTRACT 更新。")
+
+
 class DownstreamArtifactHints(BaseModel):
     business_flow_hints: list[str]
     page_spec_hints: list[str]
@@ -118,6 +149,7 @@ class ModulePrdLlmOutput(BaseModel):
     exception_scenarios: list[ExceptionScenario]
     acceptance_criteria: list[AcceptanceCriterion]
     non_functional_requirements: list[NonFunctionalRequirement]
+    custom_sections: list[CustomSection] = Field(default_factory=list)
     downstream_artifact_hints: DownstreamArtifactHints
     development_notes: list[str]
     testing_notes: list[str]
@@ -126,6 +158,16 @@ class ModulePrdLlmOutput(BaseModel):
 
 class ModulePrdArtifact(BaseModel):
     artifact_type: str = "MODULE_PRD"
+    # A9.10.14.4.2_PRD_SEMANTIC_BACKBONE
+    # User-facing PRD remains markdown/module sections.  The fields below
+    # are hidden/system-facing semantic indexes used by downstream agents.
+    prd_contract_version: str = "2.0"
+    public_document: dict[str, Any] = Field(default_factory=dict)
+    structured_requirements: list[dict[str, Any]] = Field(default_factory=list)
+    navigation_requirements: list[dict[str, Any]] = Field(default_factory=list)
+    traceability_map: dict[str, Any] = Field(default_factory=dict)
+    semantic_sync_policy: dict[str, Any] = Field(default_factory=dict)
+    source_outline: dict[str, Any] = Field(default_factory=dict)
     module_basic_info: ModuleBasicInfo
     business_background: str
     user_roles: list[UserRole]
@@ -139,6 +181,7 @@ class ModulePrdArtifact(BaseModel):
     exception_scenarios: list[ExceptionScenario]
     acceptance_criteria: list[AcceptanceCriterion]
     non_functional_requirements: list[NonFunctionalRequirement]
+    custom_sections: list[CustomSection] = Field(default_factory=list)
     downstream_artifact_hints: DownstreamArtifactHints
     development_notes: list[str]
     testing_notes: list[str]
@@ -289,6 +332,20 @@ MODULE_PRD_LLM_JSON_SCHEMA = {
                     "description": {"type": "string"},
                     "main_components": {"type": "array", "items": {"type": "string"}},
                     "user_actions": {"type": "array", "items": {"type": "string"}},
+                    "page_type": {"type": "string"},
+                    "route_path": {"type": "string"},
+                    "layout_type": {"type": "string"},
+                    "primary_entity": {"type": "string"},
+                    "parent_feature_key": {"type": "string"},
+                    "parent_feature_name": {"type": "string"},
+                    "source_page_id": {"type": "string"},
+                    "sync_status": {"type": "string"},
+                    "filter_fields": {"type": "array", "items": {"type": "string"}},
+                    "table_columns": {"type": "array", "items": {"type": "string"}},
+                    "form_fields": {"type": "array", "items": {"type": "string"}},
+                    "primary_actions": {"type": "array", "items": {"type": "string"}},
+                    "row_actions": {"type": "array", "items": {"type": "string"}},
+                    "navigation_targets": {"type": "array", "items": {"type": "string"}},
                 },
             },
         },
@@ -410,6 +467,24 @@ MODULE_PRD_LLM_JSON_SCHEMA = {
                     "category": {"type": "string"},
                     "description": {"type": "string"},
                     "target": {"type": "string"},
+                },
+            },
+        },
+
+        "custom_sections": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["title", "body"],
+                "properties": {
+                    "section_id": {"type": "string"},
+                    "title": {"type": "string"},
+                    "body": {"type": "string"},
+                    "order": {"type": "integer"},
+                    "visibility": {"type": "string"},
+                    "source": {"type": "string"},
+                    "impact_policy": {"type": "string"},
                 },
             },
         },

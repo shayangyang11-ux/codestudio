@@ -1,11 +1,15 @@
 package com.codemind.platform.agent.common.gateway;
 
+
+
+
+
+import com.codemind.platform.task.AgentTaskEntity;
+import com.codemind.platform.project.ProjectEntity;
+import com.codemind.platform.module.ProjectModuleEntity;
+import com.codemind.platform.agent.common.log.AgentExecutionLogService;
 import com.codemind.platform.agent.common.client.PythonAgentClient;
 import com.codemind.platform.agent.requirement.dto.*;
-import com.codemind.platform.agent.common.log.AgentExecutionLogService;
-import com.codemind.platform.module.ProjectModuleEntity;
-import com.codemind.platform.project.ProjectEntity;
-import com.codemind.platform.task.AgentTaskEntity;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
@@ -99,7 +103,6 @@ public class AgentGatewayService {
                 )
         );
     }
-
     public Object generatePageSpec(
             AgentTaskEntity task,
             ProjectEntity project,
@@ -107,24 +110,37 @@ public class AgentGatewayService {
             GeneratePageSpecRequest request,
             Map<String, Object> contextPackage
     ) {
+        String taskType = "GENERATE_PAGE_MAP".equals(task.getTaskType())
+                ? "GENERATE_PAGE_MAP"
+                : "GENERATE_PAGE_SPEC";
+        String artifactType = "GENERATE_PAGE_MAP".equals(taskType)
+                ? "PAGE_MAP"
+                : "PAGE_SPEC";
+        String modelName = "GENERATE_PAGE_MAP".equals(taskType)
+                ? "page_map_gateway"
+                : "page_spec_gateway";
+
         return callProjectAgent(
                 task,
                 project,
                 module,
-                "page_spec_gateway",
-                "GENERATE_PAGE_SPEC",
+                modelName,
+                taskType,
                 request.getRequirementText(),
-                () -> pythonAgentClient.generatePageSpec(
+                () -> pythonAgentClient.generatePageArtifact(
                         task.getId(),
                         project.getId(),
                         project.getProjectCode(),
                         module.getId(),
                         module,
                         request,
-                        contextPackage
+                        contextPackage,
+                        taskType,
+                        artifactType
                 )
         );
     }
+
 
     public Object generateDataModel(
             AgentTaskEntity task,

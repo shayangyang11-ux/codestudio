@@ -252,6 +252,7 @@ public class ModuleTreePersistenceService {
         payload.put("project_code", project.getProjectCode());
         payload.put("task_type", TaskType.GENERATE_MODULE_TREE.name());
         payload.put("requirement_text", request.getRequirementText());
+        payload.put("modeling_mode", request.getModelingMode());
 
         if (workspaceId != null) {
             payload.put("workspace_id", workspaceId.toString());
@@ -333,6 +334,8 @@ public class ModuleTreePersistenceService {
         } else {
             node.put("canGenerateUiContract", false);
         }
+
+        node.put("requirementMode", resolveGeneratedRequirementMode(moduleType, node));
 
         entity.setModuleType(moduleType);
         entity.setModulePath(modulePath);
@@ -505,6 +508,66 @@ public class ModuleTreePersistenceService {
         return String.valueOf(value);
     }
 
+
+    private String resolveGeneratedRequirementMode(
+            String moduleType,
+            Map<String, Object> node
+    ) {
+        String normalizedType = normalizeModuleType(moduleType);
+
+        if ("FEATURE".equals(normalizedType)) {
+            return "FUNCTION_POINT";
+        }
+
+        if ("PAGE".equals(normalizedType)) {
+            return "PAGE_CONTRACT";
+        }
+
+        if (!"MODULE".equals(normalizedType)) {
+            return normalizedType;
+        }
+
+        Object explicit = node.get("requirementMode");
+        if (explicit == null) {
+            explicit = node.get("requirement_mode");
+        }
+
+        if (explicit != null && !String.valueOf(explicit).isBlank()) {
+            return String.valueOf(explicit).trim();
+        }
+
+        boolean hasChildModule = false;
+        boolean hasFeatureOrPage = false;
+
+        Object childrenObj = node.get("children");
+        if (childrenObj instanceof List<?> children) {
+            for (Object childObj : children) {
+                Map<String, Object> child = toMap(childObj);
+                String childType = normalizeModuleType(
+                        readString(child, "moduleType", "type", "nodeType")
+                );
+
+                if ("MODULE".equals(childType)) {
+                    hasChildModule = true;
+                }
+
+                if ("FEATURE".equals(childType) || "PAGE".equals(childType)) {
+                    hasFeatureOrPage = true;
+                }
+            }
+        }
+
+        if (hasChildModule) {
+            return "GROUP_MODULE";
+        }
+
+        if (hasFeatureOrPage) {
+            return "REQUIREMENT_MODULE";
+        }
+
+        return "DRAFT_MODULE";
+    }
+
     private String normalizeModuleType(
             String rawType
     ) {
@@ -515,9 +578,9 @@ public class ModuleTreePersistenceService {
         String value = rawType.trim().toUpperCase(Locale.ROOT);
 
         return switch (value) {
-            case "DOMAIN", "DOMAIN_MODULE", "BUSINESS_DOMAIN" -> "DOMAIN";
+            case "DOMAIN", "DOMAIN_MODULE", "BUSINESS_DOMAIN" -> "MODULE";
             case "MODULE", "BUSINESS_MODULE", "FEATURE_MODULE", "INTEGRATION_MODULE", "INFRA_MODULE" -> "MODULE";
-            case "SUBMODULE", "SUB_MODULE", "SCENE", "BUSINESS_SCENE" -> "SUBMODULE";
+            case "SUBMODULE", "SUB_MODULE", "SCENE", "BUSINESS_SCENE" -> "MODULE";
             case "PAGE", "PAGE_MODULE", "SCREEN", "VIEW" -> "PAGE";
             case "FEATURE", "FUNCTION", "ACTION", "OPERATION" -> "FEATURE";
             default -> "MODULE";

@@ -542,7 +542,7 @@ public class ArtifactService {
         return List.of(
                 required("01_DOMAIN_OVERVIEW.md", "MODULE_PRD", "业务域概览"),
                 required("02_DOMAIN_BUSINESS_FLOW.md", "BUSINESS_FLOW", "业务域流程总览"),
-                required("03_DOMAIN_PAGE_MAP.md", "PAGE_SPEC", "模块/页面地图"),
+                required("03_DOMAIN_PAGE_MAP.md", "PAGE_MAP", "模块/页面地图"),
                 optional("04_DOMAIN_DATA_TOPICS.md", "DATA_MODEL", "数据主题总览"),
                 optional("05_DOMAIN_API_BOUNDARY.md", "API_CONTRACT", "接口域总览"),
                 optional("06_DOMAIN_TEST_SCOPE.md", "TEST_SPEC", "业务域测试范围"),

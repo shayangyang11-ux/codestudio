@@ -17,6 +17,7 @@ from app.runtime.llm_runtime_exceptions import (
 )
 from app.runtime.llm_runtime_metrics import LlmRuntimeMetrics
 from app.runtime.provider_circuit_breaker import ProviderCircuitBreaker
+from app.services.llm_model_router import LlmModelRouter
 
 T = TypeVar("T")
 
@@ -182,6 +183,7 @@ class LlmRuntimeManager:
                 "request_timeout_seconds": self.settings.request_timeout_seconds,
                 "max_output_tokens": self.settings.max_output_tokens,
             },
+            "model_routing": LlmModelRouter().status(),
             "metrics": self.metrics.snapshot().to_dict(),
             "circuits": {
                 provider: asdict(circuit.snapshot())
@@ -233,10 +235,17 @@ class LlmRuntimeManager:
 
         return self._circuit_breakers[provider]
 
+    # A9.10.14.4.3.12.1_TOKEN_GUARD_AND_PRD_UI_SYNC_PATCH_LLM_RUNTIME
     def _is_retryable(
         self,
         exc: BaseException,
     ) -> bool:
+        """Only retry provider/transport transient failures.
+
+        Never retry Python post-processing, JSON parsing, validation, schema,
+        or Agent code errors. Those failures often happen after a paid model
+        response has already returned; retrying them simply burns more tokens.
+        """
         if isinstance(exc, LlmProviderCircuitOpenError):
             return False
 
@@ -249,7 +258,7 @@ class LlmRuntimeManager:
         if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError, httpx.TransportError)):
             return True
 
-        return True
+        return False
 
     def _retry_delay_seconds(
         self,

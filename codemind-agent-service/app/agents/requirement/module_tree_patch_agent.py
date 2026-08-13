@@ -1,8 +1,9 @@
+
 from __future__ import annotations
+import re
 
 import hashlib
 import json
-import re
 from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field
@@ -112,7 +113,7 @@ class ModuleTreePatchAgent:
     """
 
     ALLOWED_OPS = {"ADD_NODE", "UPDATE_NODE", "MOVE_NODE", "DELETE_NODE"}
-    ALLOWED_TYPES = {"DOMAIN", "MODULE", "SUBMODULE", "PAGE", "FEATURE"}
+    ALLOWED_TYPES = {"MODULE", "FEATURE", "PAGE"}
 
     def __init__(self) -> None:
         self.llm = LlmService()
@@ -221,7 +222,7 @@ class ModuleTreePatchAgent:
                 "你的任务是把用户的自然语言模块树修改要求，转成可审查的模块树 Patch 提案。",
                 "只能输出提案，不能声称已经应用，不能直接修改模块树。",
                 "操作类型只能是 ADD_NODE、UPDATE_NODE、MOVE_NODE、DELETE_NODE。",
-                "节点层级只能使用 DOMAIN、MODULE、SUBMODULE、PAGE、FEATURE。",
+                "节点层级只能使用 MODULE、FEATURE、PAGE。MODULE 可嵌套；FEATURE 表示业务功能点，位于 PAGE 之上。",
                 "必须尽量复用现有节点 id；新增节点时必须给出 parentId、moduleName、moduleKey、moduleType。",
                 "不要输出不存在于当前 module_tree 的 nodeId；如不确定，写入 riskNotes，而不是胡编 id。",
                 "当前选中节点只是用户界面上下文，不是强制父节点；用户显式提到的位置或节点必须优先于当前选中节点。",
@@ -614,7 +615,7 @@ class ModuleTreePatchAgent:
                 target_name=module_name,
             )
             parent_id = str(parent["id"]) if parent and parent.get("id") else selected_node_id
-            if not parent_id and module_type != "DOMAIN":
+            if not parent_id and module_type != "MODULE":
                 notes.append("未定位到父节点，新增节点将作为根级节点提案；应用前建议补充父节点。")
 
             return [
@@ -951,7 +952,7 @@ class ModuleTreePatchAgent:
             result.extend(["PAGE_SPEC", "UI_CONTRACT", "TEST_SPEC", "DEV_HANDOFF_PACKAGE"])
         elif "FEATURE" in types:
             result.extend(["PAGE_SPEC", "TEST_SPEC", "UI_CONTRACT"])
-        elif "MODULE" in types or "SUBMODULE" in types or "DOMAIN" in types:
+        elif "MODULE" in types or "MODULE" in types or "MODULE" in types:
             result.extend(["BUSINESS_FLOW", "PAGE_SPEC", "DATA_MODEL", "API_CONTRACT", "TEST_SPEC"])
 
         if "DELETE_NODE" in ops or "MOVE_NODE" in ops:
@@ -1026,12 +1027,12 @@ class ModuleTreePatchAgent:
     def _normalize_module_type(self, value: Any, module_name: str | None = None) -> str | None:
         raw = str(value or "").strip().upper()
         aliases = {
-            "DOMAIN_MODULE": "DOMAIN",
-            "BUSINESS_DOMAIN": "DOMAIN",
+            "DOMAIN_MODULE": "MODULE",
+            "BUSINESS_DOMAIN": "MODULE",
             "BUSINESS_MODULE": "MODULE",
             "MODULE_NODE": "MODULE",
-            "SUB_MODULE": "SUBMODULE",
-            "SUBMODULE_NODE": "SUBMODULE",
+            "SUB_MODULE": "MODULE",
+            "SUBMODULE_NODE": "MODULE",
             "PAGE_NODE": "PAGE",
             "FEATURE_NODE": "FEATURE",
             "FUNCTION": "FEATURE",
@@ -1047,7 +1048,7 @@ class ModuleTreePatchAgent:
             if module_name.endswith(("功能", "功能点")):
                 return "FEATURE"
             if module_name.endswith("子模块"):
-                return "SUBMODULE"
+                return "MODULE"
             if module_name.endswith("模块"):
                 return "MODULE"
 
@@ -1059,7 +1060,7 @@ class ModuleTreePatchAgent:
         if kind in {"功能", "功能点"}:
             return "FEATURE"
         if kind == "子模块":
-            return "SUBMODULE"
+            return "MODULE"
         if kind == "模块":
             return "MODULE"
         return self._normalize_module_type(None, name) or "PAGE"
@@ -1111,8 +1112,8 @@ class ModuleTreePatchAgent:
             "PAGE": "page",
             "FEATURE": "feature",
             "MODULE": "module",
-            "SUBMODULE": "submodule",
-            "DOMAIN": "domain",
+            "MODULE": "module",
+            "MODULE": "module",
         }.get(str(module_type or "").upper())
 
         if suffix and not text.endswith(f"_{suffix}") and text != suffix:
@@ -1213,3 +1214,75 @@ class ModuleTreePatchAgent:
         if len(text) <= max_chars:
             return text
         return text[:max_chars] + "\n...[TRUNCATED]"
+
+# A9.10.14.4.3.14.3_MODULE_PRD_PAGE_TREE_SYNC_FIX
+# Ensure module-tree CRUD proposals advertise MODULE_PRD impact.  Java still
+# validates and applies the tree patch; this keeps the user-facing impact model
+# aligned with the new PRD page contract policy.
+try:
+    _A9_10_14_4_3_14_3_ORIGINAL_MODULE_TREE_PATCH_RUN = ModuleTreePatchAgent.run
+except NameError:  # pragma: no cover
+    _A9_10_14_4_3_14_3_ORIGINAL_MODULE_TREE_PATCH_RUN = None
+
+
+def _a9_14_3_patch_touches_page(artifact: Any) -> bool:
+    try:
+        proposal = getattr(artifact, "proposal", None)
+        if not isinstance(proposal, dict):
+            return False
+        operations = proposal.get("operations")
+        if not isinstance(operations, list):
+            return False
+        for op in operations:
+            if not isinstance(op, dict):
+                continue
+            op_name = str(op.get("op") or "").upper()
+            node_type = str(op.get("moduleType") or op.get("module_type") or op.get("type") or "").upper()
+            name_text = str(op.get("moduleName") or op.get("moduleKey") or op.get("nodeId") or "")
+            if node_type == "PAGE" or any(token in name_text for token in ["页", "页面", "PAGE", "page"]):
+                return op_name in {"ADD_NODE", "UPDATE_NODE", "MOVE_NODE", "DELETE_NODE"}
+    except Exception:
+        return False
+    return False
+
+
+def _a9_14_3_add_prd_impact(artifact: Any) -> Any:
+    if not _a9_14_3_patch_touches_page(artifact):
+        return artifact
+    proposal = getattr(artifact, "proposal", None)
+    if not isinstance(proposal, dict):
+        return artifact
+    impact = proposal.get("impact")
+    if not isinstance(impact, dict):
+        impact = {}
+        proposal["impact"] = impact
+    affected = impact.get("affectedArtifacts")
+    if not isinstance(affected, list):
+        affected = []
+    for item in ["MODULE_PRD", "PAGE_SPEC", "UI_CONTRACT", "MODULE_APP_CONTRACT", "MODULE_PROTOTYPE_SNAPSHOT", "DEV_HANDOFF_PACKAGE"]:
+        if item not in affected:
+            affected.append(item)
+    impact["affectedArtifacts"] = affected
+    risk_notes = impact.get("riskNotes")
+    if not isinstance(risk_notes, list):
+        risk_notes = []
+    msg = "页面级模块树变更会同步影响 MODULE_PRD.page_requirements，并使相关 PAGE_SPEC/UI_CONTRACT/开发基线需要重新确认。"
+    if msg not in risk_notes:
+        risk_notes.append(msg)
+    impact["riskNotes"] = risk_notes
+    try:
+        return artifact.model_copy(update={"proposal": proposal})
+    except Exception:
+        setattr(artifact, "proposal", proposal)
+        return artifact
+
+
+async def _a9_14_3_module_tree_patch_run(self: ModuleTreePatchAgent, request: AgentTaskRequest):
+    if _A9_10_14_4_3_14_3_ORIGINAL_MODULE_TREE_PATCH_RUN is None:
+        raise RuntimeError("Original ModuleTreePatchAgent.run is unavailable")
+    artifact = await _A9_10_14_4_3_14_3_ORIGINAL_MODULE_TREE_PATCH_RUN(self, request)
+    return _a9_14_3_add_prd_impact(artifact)
+
+
+ModuleTreePatchAgent.run = _a9_14_3_module_tree_patch_run  # type: ignore[assignment]
+

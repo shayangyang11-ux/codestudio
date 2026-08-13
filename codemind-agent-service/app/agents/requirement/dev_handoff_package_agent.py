@@ -1,9 +1,12 @@
+
 from __future__ import annotations
-from app.graphs.requirement.context.prompt_context_builder import RequirementPromptContextBuilder
+
 import json
 from pathlib import Path
 from typing import Any
 
+from app.graphs.requirement.context.prompt_context_builder import RequirementPromptContextBuilder
+from app.graphs.requirement.prompt_template_renderer import PromptTemplateRenderer
 from app.schemas.agent_protocol import AgentTaskRequest
 from app.schemas.dev_handoff_package import (
     DEV_HANDOFF_PACKAGE_LLM_JSON_SCHEMA,
@@ -11,7 +14,6 @@ from app.schemas.dev_handoff_package import (
     DevHandoffPackageLlmOutput,
 )
 from app.services.llm_service import LlmService
-from app.graphs.requirement.prompt_template_renderer import PromptTemplateRenderer
 
 
 class DevHandoffPackageAgent:
@@ -45,36 +47,23 @@ class DevHandoffPackageAgent:
             parsed = self._build_fallback_output(request, exc)
 
         markdown = self._build_markdown(parsed)
+        payload = parsed.model_dump()
+        payload["markdown"] = markdown
 
-        return DevHandoffPackageArtifact(
-            basic_info=parsed.basic_info,
-            development_objectives=parsed.development_objectives,
-            module_boundaries=parsed.module_boundaries,
-            frontend_implementation_items=parsed.frontend_implementation_items,
-            backend_implementation_items=parsed.backend_implementation_items,
-            api_implementation_items=parsed.api_implementation_items,
-            data_implementation_items=parsed.data_implementation_items,
-            permission_and_security_items=parsed.permission_and_security_items,
-            file_generation_plan=parsed.file_generation_plan,
-            development_sequence=parsed.development_sequence,
-            test_and_acceptance_handoff=parsed.test_and_acceptance_handoff,
-            risks_and_attention=parsed.risks_and_attention,
-            downstream_hints=parsed.downstream_hints,
-            analysis_summary=parsed.analysis_summary,
-            markdown=markdown,
-        )
+        return DevHandoffPackageArtifact.model_validate(payload)
 
     def _build_user_prompt(self, request: AgentTaskRequest) -> str:
         sections = [
-            "请为当前指定模块生成企业级 DEV_HANDOFF_PACKAGE 开发交接包资产。",
+            "请为当前指定节点生成企业级 DEV_HANDOFF_PACKAGE v2 开发交接包资产。",
             "",
             "【强制限制】",
             "1. 必须输出完整可解析 JSON。",
             "2. 不要输出 markdown 字段。",
             "3. 不要输出 JSON 代码块。",
             "4. 不要输出解释性文字。",
-            "5. 内容要面向后续开发 Agent、测试 Agent 和人工开发人员。",
-            "6. 内容保持精炼，避免超长 JSON。",
+            "5. 内容面向后续 Dev Agent、前端生成器、后端生成器、数据生成器、测试生成器和人工开发人员。",
+            "6. 必须保持语言无关，不得把 Node.js、Express、Vue、React、Spring Boot、FastAPI、Prisma、SQLite、Jest、Playwright 等写成实现要求。",
+            "7. 内容要精炼，禁止把上游资产全文拼接进 JSON。",
             "",
         ]
 
@@ -86,32 +75,35 @@ class DevHandoffPackageAgent:
                     "MODULE_PRD",
                     "BUSINESS_FLOW",
                     "PAGE_SPEC",
+                    "UI_CONTRACT",
                     "DATA_MODEL",
                     "API_CONTRACT",
                     "TEST_SPEC",
                 ],
                 artifact_title_map={
                     "MODULE_TREE": "模块树摘要",
-                    "MODULE_PRD": "当前模块 PRD 摘要",
-                    "BUSINESS_FLOW": "当前模块业务流程摘要",
-                    "PAGE_SPEC": "当前模块页面规范摘要",
-                    "DATA_MODEL": "当前模块数据模型摘要",
-                    "API_CONTRACT": "当前模块接口契约摘要",
-                    "TEST_SPEC": "当前模块测试规格摘要",
+                    "MODULE_PRD": "需求说明摘要",
+                    "BUSINESS_FLOW": "业务流程摘要",
+                    "PAGE_SPEC": "页面规范摘要",
+                    "UI_CONTRACT": "UI 契约摘要",
+                    "DATA_MODEL": "数据模型摘要",
+                    "API_CONTRACT": "接口契约摘要",
+                    "TEST_SPEC": "测试规格摘要",
                 },
-                max_artifact_chars=3000,
+                max_artifact_chars=2600,
             )
         )
 
         sections.extend(
             [
                 "【生成要求】",
-                "1. 开发交接包必须面向真实开发落地，不能只做概念总结。",
-                "2. 前端实现清单要引用 PAGE_SPEC 和 API_CONTRACT。",
-                "3. 后端实现清单要引用 DATA_MODEL、API_CONTRACT 和 BUSINESS_FLOW。",
-                "4. 测试与验收交接要引用 TEST_SPEC 和 API_CONTRACT。",
-                "5. 文件生成计划要给出后端、前端、数据库、测试相关文件建议。",
-                "6. 如果上游资产缺失，应生成保守但可执行的最小开发交接包。",
+                "1. dev_blueprint 是主输出，必须让后续任意技术栈生成器都能消费。",
+                "2. 只提炼页面、功能、接口、数据、权限、验收和来源引用，不写具体代码实现。",
+                "3. PAGE_SPEC / UI_CONTRACT 共同决定页面与交互；API_CONTRACT 决定接口能力；DATA_MODEL 决定数据语义；TEST_SPEC 决定验收。",
+                "4. source_reference_matrix 必须说明每类来源资产用于什么决策，避免 Dev Agent 重新读取大段全文。",
+                "5. readiness 要清楚说明是否可进入 Dev Agent；缺失必需资产时列 blockers，待人工确认项列 warnings。",
+                "6. supported_stack_modes 可以列 NODEJS_FULLSTACK、JAVA_SPRING_BOOT、PYTHON_FASTAPI 等候选模式，但不得指定当前必须使用某个技术栈。",
+                "7. 若信息不足，生成 conservative blueprint，并把缺口放入 unresolved_questions / blockers / warnings。",
                 "",
             ]
         )
@@ -119,7 +111,7 @@ class DevHandoffPackageAgent:
         sections.extend(self.prompt_context_builder.build_json_output_rules())
 
         return "\n".join(sections)
-    
+
     def _build_fallback_output(
         self,
         request: AgentTaskRequest,
@@ -127,404 +119,293 @@ class DevHandoffPackageAgent:
     ) -> DevHandoffPackageLlmOutput:
         context_package = request.context_package or {}
         input_payload = request.input or {}
+        current_module = self._extract_current_module(context_package, input_payload)
 
-        current_module = self._extract_current_module(
-            context_package,
-            input_payload,
-        )
-
-        module_key = (
+        module_key = str(
             current_module.get("module_key")
+            or current_module.get("moduleKey")
             or current_module.get("key")
-            or "current_module"
+            or "current_node"
         )
-
-        module_name = (
+        module_name = str(
             current_module.get("module_name")
+            or current_module.get("moduleName")
             or current_module.get("name")
-            or "当前模块"
+            or "当前节点"
         )
+        node_type = str(
+            current_module.get("module_type")
+            or current_module.get("moduleType")
+            or current_module.get("node_type")
+            or current_module.get("nodeType")
+            or "MODULE"
+        ).upper()
+
+        artifacts = self._extract_artifacts(context_package)
+        source_reference_matrix = self._build_source_references(artifacts)
+        required_sources = self._required_sources_for_node(node_type)
+        missing_required = [item for item in required_sources if item not in artifacts]
+
+        ready = len(missing_required) == 0
+        readiness_level = "READY" if ready else "WARNING"
 
         fallback_payload = {
             "basic_info": {
                 "package_key": f"{module_key}_dev_handoff_package",
                 "package_name": f"{module_name}开发交接包",
-                "related_module_key": str(module_key),
-                "related_module_name": str(module_name),
-                "package_goal": "为当前模块开发 Agent、测试 Agent 和人工开发人员提供稳定的核心开发输入。",
+                "related_module_key": module_key,
+                "related_module_name": module_name,
+                "related_node_type": node_type,
+                "package_goal": "为后续 Dev Agent 提供语言无关、可转换为多技术栈代码的开发蓝图。",
                 "target_agents": [
-                    "backend_agent",
-                    "frontend_agent",
-                    "test_agent",
-                    "integration_agent",
+                    "dev_agent",
+                    "frontend_generator",
+                    "backend_generator",
+                    "data_generator",
+                    "test_generator",
                 ],
-                "implementation_scope": "覆盖当前模块核心页面、核心接口、核心数据模型、权限安全、测试验收和开发顺序。",
+                "implementation_scope": "覆盖当前节点直接相关的页面、功能、接口、数据、权限、验收和开发边界。",
+                "blueprint_version": "2.0",
+                "language_neutral": True,
             },
+            "dev_blueprint": {
+                "blueprint_key": f"{module_key}_dev_blueprint",
+                "blueprint_name": f"{module_name}语言无关开发蓝图",
+                "scope_type": node_type,
+                "target_node_key": module_key,
+                "target_node_name": module_name,
+                "target_node_type": node_type,
+                "business_goal": "基于当前需求资产实现该节点的核心业务能力，并保持后续可转换为不同技术栈实现。",
+                "stack_policy": "LANGUAGE_NEUTRAL_REQUIREMENT_BLUEPRINT",
+                "supported_stack_modes": [
+                    "NODEJS_FULLSTACK",
+                    "JAVA_SPRING_BOOT",
+                    "PYTHON_FASTAPI",
+                ],
+                "generation_boundaries": [
+                    "不得擅自改变 PAGE_SPEC 与 UI_CONTRACT 定义的页面能力和交互契约。",
+                    "不得把预览场景数据作为最终业务逻辑。",
+                    "具体框架、目录结构、数据库方言和测试框架由 Dev Agent 的 targetStack 决定。",
+                ],
+                "pages": [
+                    {
+                        "page_key": f"{module_key}_main_page",
+                        "page_name": f"{module_name}主页面",
+                        "page_goal": "承载当前节点核心用户任务。",
+                        "route_semantics": "当前节点主入口",
+                        "ui_contract_refs": ["UI_CONTRACT"] if "UI_CONTRACT" in artifacts else [],
+                        "page_spec_refs": ["PAGE_SPEC"] if "PAGE_SPEC" in artifacts else [],
+                        "interactions": ["查看", "录入", "提交", "反馈"],
+                        "state_rules": ["加载中", "空状态", "校验失败", "提交成功", "提交失败"],
+                        "api_dependencies": ["API_CONTRACT"] if "API_CONTRACT" in artifacts else [],
+                        "validation_points": ["必填校验", "格式校验", "权限校验"],
+                    }
+                ] if node_type in {"PAGE", "FEATURE", "MODULE", "SUBMODULE"} else [],
+                "features": [
+                    {
+                        "feature_key": f"{module_key}_core_feature",
+                        "feature_name": f"{module_name}核心功能",
+                        "parent_page_key": f"{module_key}_main_page",
+                        "trigger": "用户在当前节点相关页面执行核心操作。",
+                        "input_summary": "当前节点核心业务输入。",
+                        "output_summary": "返回处理结果、状态变化和用户反馈。",
+                        "business_rules": ["执行前校验输入和权限。", "处理失败时返回可理解的错误信息。"],
+                        "api_dependencies": ["API_CONTRACT"] if "API_CONTRACT" in artifacts else [],
+                        "acceptance_refs": ["TEST_SPEC"] if "TEST_SPEC" in artifacts else [],
+                    }
+                ],
+                "apis": [
+                    {
+                        "api_key": f"{module_key}_core_api",
+                        "capability": "当前节点核心业务处理能力。",
+                        "method": "POST",
+                        "path": f"/api/{module_key.replace('_', '-')}/core-action",
+                        "request_summary": "提交核心业务输入。",
+                        "response_summary": "返回处理结果、业务状态和错误信息。",
+                        "data_entities": ["core_entity"],
+                        "permission_keys": [f"{module_key}_operate"],
+                        "error_scenarios": ["参数错误", "权限不足", "业务状态不允许"],
+                        "idempotency": "写操作如涉及重复提交，需要在目标技术栈中实现幂等保护。",
+                        "test_refs": ["TEST_SPEC"] if "TEST_SPEC" in artifacts else [],
+                    }
+                ] if "API_CONTRACT" in artifacts else [],
+                "data_entities": [
+                    {
+                        "entity_key": "core_entity",
+                        "entity_name": f"{module_name}核心实体",
+                        "business_meaning": "承载当前节点核心业务数据。",
+                        "fields": ["id：唯一标识", "name：业务名称", "status：业务状态", "createdAt：创建时间"],
+                        "relationships": [],
+                        "constraints": ["业务名称不能为空", "状态值必须合法"],
+                        "lifecycle_states": ["草稿", "有效", "停用"],
+                        "security_notes": ["敏感字段需要按业务要求脱敏或限制访问"],
+                    }
+                ] if "DATA_MODEL" in artifacts else [],
+                "ui_contracts": [
+                    {
+                        "ui_key": f"{module_key}_ui_contract",
+                        "page_key": f"{module_key}_main_page",
+                        "layout_summary": "遵循 UI_CONTRACT 的页面布局、控件层级和交互反馈。",
+                        "key_regions": ["标题区", "操作区", "内容区", "反馈区"],
+                        "controls": ["输入控件", "操作按钮", "状态提示"],
+                        "interaction_rules": ["校验失败需要就近提示", "提交中需要展示处理中状态"],
+                        "visual_consistency_rules": ["不得擅自改变 UI_CONTRACT 已确认的布局和关键控件位置"],
+                        "preview_data_policy": "可使用预览场景数据验证页面状态，但不得作为最终业务实现。",
+                    }
+                ] if "UI_CONTRACT" in artifacts else [],
+                "permission_rules": [
+                    {
+                        "rule_key": f"{module_key}_permission",
+                        "rule_type": "PERMISSION",
+                        "description": "当前节点写操作需要对应业务权限。",
+                        "applies_to": [f"{module_key}_core_api", f"{module_key}_core_feature"],
+                        "confirmation_needed": True,
+                    }
+                ],
+                "acceptance_criteria": [
+                    {
+                        "acceptance_key": f"{module_key}_main_flow_acceptance",
+                        "title": "主流程可完成",
+                        "scenario_type": "MAIN_FLOW",
+                        "preconditions": ["用户具备必要权限", "测试数据已准备"],
+                        "steps": ["打开页面", "输入有效数据", "提交操作", "查看成功反馈"],
+                        "expected_result": "核心业务操作成功，页面状态和后端数据保持一致。",
+                        "source_refs": ["TEST_SPEC"] if "TEST_SPEC" in artifacts else [],
+                    }
+                ],
+                "unresolved_questions": missing_required,
+            },
+            "source_reference_matrix": source_reference_matrix,
             "development_objectives": [
                 {
-                    "objective_key": "obj_core_feature",
-                    "title": "实现当前模块核心业务能力",
-                    "description": "完成当前模块核心数据创建、查询、编辑、提交和状态处理能力。",
+                    "objective_key": "obj_language_neutral_blueprint",
+                    "title": "形成语言无关开发蓝图",
+                    "description": "把需求资产整理成可被多技术栈 Dev Agent 转换的稳定输入。",
                     "priority": "P0",
-                    "acceptance_reference": [
-                        "核心功能可用",
-                        "接口调用成功",
-                    ],
-                },
-                {
-                    "objective_key": "obj_permission_security",
-                    "title": "实现权限与安全控制",
-                    "description": "确保未登录、无权限和越权操作被正确拦截。",
-                    "priority": "P0",
-                    "acceptance_reference": [
-                        "权限控制有效",
-                    ],
-                },
-                {
-                    "objective_key": "obj_testable_delivery",
-                    "title": "形成可测试交付",
-                    "description": "接口、页面和数据校验应支持测试 Agent 生成自动化测试。",
-                    "priority": "P1",
-                    "acceptance_reference": [
-                        "测试规格核心用例通过",
-                    ],
-                },
+                    "source_refs": list(artifacts.keys())[:6],
+                    "acceptance_reference": ["Dev Agent 可读取并转换为目标技术栈开发计划"],
+                }
             ],
             "module_boundaries": [
                 {
-                    "boundary_key": "boundary_current_module",
-                    "responsibility": "当前模块负责自身核心业务数据和业务流程处理。",
-                    "included_scope": [
-                        "核心业务页面",
-                        "核心接口",
-                        "核心数据实体",
-                        "权限校验",
-                    ],
-                    "excluded_scope": [
-                        "跨模块复杂编排",
-                        "第三方系统深度集成",
-                    ],
-                    "dependency_modules": [
-                        "用户权限模块",
-                        "基础数据模块",
-                    ],
-                },
-            ],
-            "frontend_implementation_items": [
-                {
-                    "item_key": "fe_core_page",
-                    "page_key": "core_page",
-                    "page_name": "当前模块核心页面",
-                    "route_path": "/current-module",
-                    "components": [
-                        "列表组件",
-                        "表单组件",
-                        "详情组件",
-                    ],
-                    "interactions": [
-                        "查询",
-                        "保存",
-                        "提交",
-                    ],
-                    "api_dependencies": [
-                        "core_create_or_save",
-                        "core_query_detail",
-                    ],
-                    "validation_points": [
-                        "必填字段校验",
-                        "状态操作校验",
-                    ],
-                },
-            ],
-            "backend_implementation_items": [
-                {
-                    "item_key": "be_core_service",
-                    "service_name": "CurrentModuleService",
-                    "responsibility": "处理当前模块核心业务规则、数据持久化、状态流转和权限校验。",
-                    "api_keys": [
-                        "core_create_or_save",
-                        "core_query_detail",
-                    ],
-                    "entity_keys": [
-                        "core_entity",
-                    ],
-                    "business_rules": [
-                        "保存前校验必填字段",
-                        "状态流转必须合法",
-                        "写操作必须校验权限",
-                    ],
-                    "transaction_notes": [
-                        "保存业务数据需开启事务",
-                        "状态变更和记录写入保持一致",
-                    ],
-                },
-            ],
-            "api_implementation_items": [
-                {
-                    "item_key": "api_save",
-                    "api_key": "core_create_or_save",
-                    "method": "POST",
-                    "path": "/api/current-module/save",
-                    "request_summary": "提交当前模块核心业务数据。",
-                    "response_summary": "返回保存后的业务数据和处理状态。",
-                    "permission_keys": [
-                        "current_module_write",
-                    ],
-                    "error_handling": [
-                        "PARAM_ERROR",
-                        "PERMISSION_DENIED",
-                    ],
-                    "test_reference": [
-                        "核心业务创建成功",
-                        "必填字段校验",
-                    ],
-                },
-                {
-                    "item_key": "api_detail",
-                    "api_key": "core_query_detail",
-                    "method": "GET",
-                    "path": "/api/current-module/{id}",
-                    "request_summary": "根据 ID 查询当前模块详情。",
-                    "response_summary": "返回当前模块核心详情数据。",
-                    "permission_keys": [
-                        "current_module_read",
-                    ],
-                    "error_handling": [
-                        "NOT_FOUND",
-                    ],
-                    "test_reference": [
-                        "核心接口成功调用",
-                    ],
-                },
-            ],
-            "data_implementation_items": [
-                {
-                    "item_key": "data_core_entity",
-                    "entity_key": "core_entity",
-                    "table_name": "t_current_module",
-                    "important_fields": [
-                        "id",
-                        "name",
-                        "status",
-                        "created_at",
-                    ],
-                    "constraints": [
-                        "核心名称不能为空",
-                        "状态值必须合法",
-                    ],
-                    "indexes": [
-                        "主键索引",
-                        "状态查询索引",
-                    ],
-                    "migration_notes": [
-                        "创建核心业务表",
-                        "根据实际业务补充唯一约束",
-                    ],
-                },
-            ],
-            "permission_and_security_items": [
-                {
-                    "item_key": "security_auth",
-                    "security_type": "AUTH",
-                    "description": "当前模块接口需要登录后访问。",
-                    "implementation_hint": "通过 JWT 或统一认证中间件校验登录状态。",
-                    "related_api_keys": [
-                        "core_create_or_save",
-                        "core_query_detail",
-                    ],
-                },
-                {
-                    "item_key": "security_permission",
-                    "security_type": "PERMISSION",
-                    "description": "写操作需要当前模块写权限。",
-                    "implementation_hint": "在 Controller 或 Service 层进行权限校验。",
-                    "related_api_keys": [
-                        "core_create_or_save",
-                    ],
-                },
-            ],
-            "file_generation_plan": [
-                {
-                    "file_key": "backend_controller",
-                    "layer": "backend",
-                    "suggested_path": "src/main/java/.../CurrentModuleController.java",
-                    "file_purpose": "提供当前模块接口入口。",
-                    "generation_priority": "P0",
-                    "depends_on": [
-                        "backend_service",
-                    ],
-                },
-                {
-                    "file_key": "backend_service",
-                    "layer": "backend",
-                    "suggested_path": "src/main/java/.../CurrentModuleService.java",
-                    "file_purpose": "实现核心业务逻辑、权限校验和事务控制。",
-                    "generation_priority": "P0",
-                    "depends_on": [
-                        "backend_entity",
-                    ],
-                },
-                {
-                    "file_key": "backend_entity",
-                    "layer": "backend",
-                    "suggested_path": "src/main/java/.../CurrentModuleEntity.java",
-                    "file_purpose": "定义当前模块核心数据实体。",
-                    "generation_priority": "P0",
-                    "depends_on": [],
-                },
-                {
-                    "file_key": "frontend_page",
-                    "layer": "frontend",
-                    "suggested_path": "src/pages/current-module/index.vue",
-                    "file_purpose": "实现当前模块核心页面。",
-                    "generation_priority": "P1",
-                    "depends_on": [
-                        "api_save",
-                        "api_detail",
-                    ],
-                },
-                {
-                    "file_key": "test_api",
-                    "layer": "test",
-                    "suggested_path": "tests/current-module/api.spec.ts",
-                    "file_purpose": "验证核心接口成功、参数错误和权限错误场景。",
-                    "generation_priority": "P1",
-                    "depends_on": [
-                        "backend_controller",
-                    ],
-                },
+                    "boundary_key": "boundary_current_node",
+                    "responsibility": "当前节点只负责自身业务能力、页面/接口/数据依赖和验收边界。",
+                    "included_scope": ["核心功能", "必要页面", "必要接口", "必要数据语义", "核心验收"],
+                    "excluded_scope": ["无关模块实现", "具体技术栈框架选择", "部署环境细节"],
+                    "dependency_nodes": [],
+                    "dependency_modules": [],
+                }
             ],
             "development_sequence": [
                 {
-                    "step_key": "step_1_data",
+                    "step_key": "step_1_confirm_scope",
                     "step_order": 1,
-                    "title": "实现数据模型",
-                    "description": "创建当前模块核心实体、表结构和基础约束。",
-                    "deliverables": [
-                        "实体类",
-                        "数据库迁移脚本",
-                    ],
+                    "title": "确认开发范围和来源资产",
+                    "description": "确认交接包来源资产版本、审批状态和当前节点边界。",
+                    "deliverables": ["来源资产确认", "范围确认"],
                     "dependencies": [],
                 },
                 {
-                    "step_key": "step_2_backend",
+                    "step_key": "step_2_translate_stack",
                     "step_order": 2,
-                    "title": "实现后端接口",
-                    "description": "实现核心保存和查询接口，补充权限校验和事务控制。",
-                    "deliverables": [
-                        "Controller",
-                        "Service",
-                        "Repository",
-                    ],
-                    "dependencies": [
-                        "数据模型",
-                    ],
+                    "title": "按目标技术栈转换蓝图",
+                    "description": "Dev Agent 根据 targetStack 把语言无关蓝图转换为具体目录、框架、数据库和测试实现。",
+                    "deliverables": ["技术栈开发计划", "文件生成清单"],
+                    "dependencies": ["范围确认"],
                 },
                 {
-                    "step_key": "step_3_frontend",
+                    "step_key": "step_3_generate_and_verify",
                     "step_order": 3,
-                    "title": "实现前端页面",
-                    "description": "实现当前模块核心页面、表单校验和接口联调。",
-                    "deliverables": [
-                        "页面组件",
-                        "接口调用封装",
-                    ],
-                    "dependencies": [
-                        "后端接口",
-                    ],
-                },
-                {
-                    "step_key": "step_4_test",
-                    "step_order": 4,
-                    "title": "完成测试验收",
-                    "description": "执行核心功能、接口、权限和异常场景测试。",
-                    "deliverables": [
-                        "测试用例",
-                        "测试报告",
-                    ],
-                    "dependencies": [
-                        "前后端联调",
-                    ],
+                    "title": "生成代码并验收",
+                    "description": "生成代码后根据 TEST_SPEC 和 UI_CONTRACT 验证功能、接口、数据和页面一致性。",
+                    "deliverables": ["代码提案", "验证结果"],
+                    "dependencies": ["技术栈开发计划"],
                 },
             ],
-            "test_and_acceptance_handoff": [
-                {
-                    "item_key": "test_core_function",
-                    "test_type": "FUNCTION",
-                    "reference_cases": [
-                        "核心业务创建成功",
-                        "必填字段校验",
-                    ],
-                    "acceptance_points": [
-                        "核心功能可用",
-                        "数据校验有效",
-                    ],
-                    "automation_hint": "优先生成页面主流程和核心接口自动化测试。",
-                },
-                {
-                    "item_key": "test_permission",
-                    "test_type": "PERMISSION",
-                    "reference_cases": [
-                        "未登录访问拦截",
-                        "无权限操作拦截",
-                    ],
-                    "acceptance_points": [
-                        "权限控制有效",
-                    ],
-                    "automation_hint": "补充 401、403 场景断言。",
-                },
-            ],
+            "readiness": {
+                "ready_for_dev_agent": ready,
+                "readiness_level": readiness_level,
+                "blockers": [],
+                "warnings": [f"缺少建议来源资产：{item}" for item in missing_required],
+                "required_source_artifacts": required_sources,
+                "recommended_source_artifacts": ["UI_CONTRACT", "TEST_SPEC", "BUSINESS_FLOW"],
+            },
             "risks_and_attention": [
                 {
-                    "risk_key": "risk_context_fallback",
-                    "title": "交接包为兜底精简版本",
+                    "risk_key": "risk_fallback_blueprint",
+                    "title": "当前交接包由兜底策略生成",
                     "risk_level": "MEDIUM",
-                    "description": "本次交接包由兜底策略生成，部分字段、路径和文件名需要后续基于真实资产补全。",
-                    "mitigation": "全局优化阶段引入资产摘要、分层上下文和 JSON 修复重试机制。",
-                },
-                {
-                    "risk_key": "risk_permission",
-                    "title": "权限边界需人工确认",
-                    "risk_level": "HIGH",
-                    "description": "当前模块权限点可能依赖企业实际角色体系。",
-                    "mitigation": "开发前由产品或架构负责人确认权限矩阵。",
-                },
+                    "description": "LLM 生成失败或上下文不足时使用兜底蓝图，部分页面、接口、字段需要基于真实资产进一步确认。",
+                    "mitigation": "补齐 PAGE_SPEC、UI_CONTRACT、API_CONTRACT、DATA_MODEL、TEST_SPEC 后重新生成交接包。",
+                }
             ],
             "downstream_hints": {
-                "backend_agent_hints": [
-                    "优先生成实体、Repository、Service 和 Controller。",
-                    "接口实现需要包含参数校验、权限校验和事务控制。",
-                    "异常返回结构保持稳定。",
+                "dev_agent_hints": [
+                    "先读取 dev_blueprint，再按 targetStack 选择具体生成器。",
+                    "不要把预览场景数据当成最终业务实现。",
                 ],
-                "frontend_agent_hints": [
-                    "优先实现核心页面、表单校验和接口调用。",
-                    "权限不足和异常状态需要友好提示。",
-                ],
-                "test_agent_hints": [
-                    "优先生成核心接口测试和主流程 E2E 测试。",
-                    "补充参数错误、权限错误和状态错误断言。",
-                ],
-                "integration_hints": [
-                    "前后端联调前确认接口路径和字段命名。",
-                    "测试环境需要准备最小可用数据。",
-                ],
+                "frontend_generator_hints": ["页面实现必须遵循 PAGE_SPEC 和 UI_CONTRACT。"],
+                "backend_generator_hints": ["接口实现必须遵循 API_CONTRACT，业务规则来自 PAGE_SPEC / BUSINESS_FLOW。"],
+                "data_generator_hints": ["数据模型转换应以 DATA_MODEL 的业务语义为准。"],
+                "test_generator_hints": ["验收用例以 TEST_SPEC 和 acceptance_criteria 为准。"],
+                "integration_hints": ["前后端联调前确认接口路径、字段命名和权限规则。"],
+                "backend_agent_hints": ["兼容历史字段：后端生成器读取 backend_generator_hints。"],
+                "frontend_agent_hints": ["兼容历史字段：前端生成器读取 frontend_generator_hints。"],
+                "test_agent_hints": ["兼容历史字段：测试生成器读取 test_generator_hints。"],
             },
-            "analysis_summary": f"本开发交接包为当前模块提供核心开发目标、前后端实现清单、接口与数据实现、权限安全、文件计划、开发顺序和测试验收要求。LLM 原始生成失败，已启用兜底策略：{type(error).__name__}。",
+            "analysis_summary": f"已生成 {module_name} 的语言无关 DEV_HANDOFF_PACKAGE v2。LLM 原始生成失败或未通过校验，已启用兜底策略：{type(error).__name__}。",
         }
 
         return DevHandoffPackageLlmOutput.model_validate(fallback_payload)
-    
-    def _get_requirement_text(self, request: AgentTaskRequest) -> str:
-        if request.input.get("requirement_text"):
-            return str(request.input["requirement_text"])
 
-        if request.input.get("supplement"):
-            return str(request.input["supplement"])
+    def _build_source_references(self, artifacts: dict[str, Any]) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        used_for_map = {
+            "MODULE_PRD": ["业务目标", "功能范围", "业务规则"],
+            "BUSINESS_FLOW": ["流程顺序", "分支异常", "状态变化"],
+            "PAGE_SPEC": ["页面能力", "字段操作", "页面状态"],
+            "UI_CONTRACT": ["页面布局", "控件层级", "交互反馈"],
+            "API_CONTRACT": ["接口能力", "请求响应", "错误场景"],
+            "DATA_MODEL": ["实体语义", "字段约束", "数据关系"],
+            "TEST_SPEC": ["验收场景", "边界条件", "测试数据"],
+        }
 
-        if request.requirement_text:
-            return request.requirement_text
+        for artifact_type, artifact in artifacts.items():
+            title = artifact_type
+            version_no: Any = None
+            status: Any = None
 
-        return ""
+            if isinstance(artifact, dict):
+                title = str(artifact.get("title") or artifact.get("artifact_title") or artifact_type)
+                version_no = artifact.get("versionNo") or artifact.get("version_no")
+                status = artifact.get("status")
+
+            result.append(
+                {
+                    "source_key": f"src_{str(artifact_type).lower()}",
+                    "artifact_type": str(artifact_type),
+                    "artifact_title": title,
+                    "version_no": None if version_no is None else str(version_no),
+                    "status": None if status is None else str(status),
+                    "used_for": used_for_map.get(str(artifact_type), ["开发输入"]),
+                    "confidence": "HIGH" if artifact_type in {"PAGE_SPEC", "UI_CONTRACT", "API_CONTRACT", "DATA_MODEL", "TEST_SPEC"} else "MEDIUM",
+                    "notes": "来源资产已纳入交接包引用矩阵。",
+                }
+            )
+
+        return result[:12]
+
+    def _required_sources_for_node(self, node_type: str) -> list[str]:
+        node_type = str(node_type or "MODULE").upper()
+        if node_type == "PAGE":
+            return ["PAGE_SPEC", "UI_CONTRACT", "API_CONTRACT"]
+        if node_type == "FEATURE":
+            return ["MODULE_PRD", "PAGE_SPEC", "TEST_SPEC"]
+        if node_type in {"SUBMODULE", "MODULE"}:
+            return ["MODULE_PRD", "BUSINESS_FLOW"]
+        if node_type == "DOMAIN":
+            return ["MODULE_PRD", "BUSINESS_FLOW"]
+        return ["MODULE_PRD"]
 
     def _extract_current_module(
         self,
@@ -548,198 +429,219 @@ class DevHandoffPackageAgent:
             "module_path": "",
         }
 
-    def _extract_artifact(
+    def _extract_artifacts(
         self,
         context_package: dict[str, Any],
-        artifact_type: str,
-    ) -> Any:
+    ) -> dict[str, Any]:
         artifacts = context_package.get("artifacts")
 
         if isinstance(artifacts, dict):
-            return artifacts.get(artifact_type, {})
+            return artifacts
 
         if isinstance(artifacts, list):
+            result: dict[str, Any] = {}
+
             for artifact in artifacts:
                 if not isinstance(artifact, dict):
                     continue
 
-                if artifact.get("artifact_type") == artifact_type:
-                    return artifact
+                artifact_type = artifact.get("artifact_type") or artifact.get("artifactType") or artifact.get("type")
+                if not artifact_type:
+                    continue
+
+                if isinstance(artifact.get("content"), dict):
+                    result[str(artifact_type)] = artifact["content"]
+                else:
+                    result[str(artifact_type)] = artifact
+
+            return result
 
         return {}
 
-    def _compact_json(
-        self,
-        value: Any,
-        max_chars: int,
-    ) -> str:
-        text = json.dumps(value or {}, ensure_ascii=False, default=str)
-
-        if len(text) <= max_chars:
-            return text
-
-        return (
-            text[:max_chars]
-            + "\n...【上下文已裁剪：请基于已给信息生成开发交接包，保证 JSON 完整】"
-        )
-
     def _build_markdown(self, package: DevHandoffPackageLlmOutput) -> str:
         info = package.basic_info
+        blueprint = package.dev_blueprint
 
         lines: list[str] = [
-            f"# {info.related_module_name} 模块开发交接包",
+            f"# {info.related_module_name} 开发交接包",
             "",
-            "## 1. 开发交接包基本信息",
-            f"- **交接包 Key**：{info.package_key}",
-            f"- **交接包名称**：{info.package_name}",
-            f"- **关联模块**：{info.related_module_name}（{info.related_module_key}）",
-            f"- **目标 Agent**：{self._join_list(info.target_agents)}",
+            "> 本交接包是语言无关 Dev Blueprint，用于后续 Node.js、Java、Python 等不同技术栈生成器消费。它不是具体代码方案。",
+            "",
+            "## 1. 交接概览",
+            f"- **交接包**：{info.package_name}",
+            f"- **关联节点**：{info.related_module_name}（{info.related_module_key}）",
+            f"- **节点层级**：{info.related_node_type or blueprint.target_node_type}",
+            f"- **蓝图版本**：{info.blueprint_version}",
+            f"- **语言无关**：{'是' if info.language_neutral else '否'}",
             f"- **交接目标**：{info.package_goal}",
             f"- **实现范围**：{info.implementation_scope}",
             "",
-            "## 2. 开发目标",
+            "## 2. Dev Blueprint",
+            f"- **蓝图名称**：{blueprint.blueprint_name}",
+            f"- **开发范围**：{blueprint.scope_type}",
+            f"- **业务目标**：{blueprint.business_goal}",
+            f"- **技术栈策略**：{blueprint.stack_policy}",
+            f"- **可转换目标栈**：{self._join_list(blueprint.supported_stack_modes)}",
+            f"- **生成边界**：{self._join_list(blueprint.generation_boundaries)}",
+            "",
         ]
 
-        if package.development_objectives:
-            for item in package.development_objectives:
-                lines.extend(
-                    [
-                        f"- **{item.title}**（{item.objective_key}）",
-                        f"  - 优先级：{item.priority}",
-                        f"  - 说明：{item.description}",
-                        f"  - 验收引用：{self._join_list(item.acceptance_reference)}",
-                    ]
+        lines.extend(["## 3. 来源资产引用矩阵"])
+        if package.source_reference_matrix:
+            lines.extend([
+                "",
+                "| 来源资产 | 版本 | 状态 | 用途 | 可信度 |",
+                "|---|---:|---|---|---|",
+            ])
+            for item in package.source_reference_matrix:
+                lines.append(
+                    f"| {item.artifact_title}（`{item.artifact_type}`） | "
+                    f"{item.version_no or '-'} | {item.status or '-'} | "
+                    f"{self._join_list(item.used_for)} | {item.confidence} |"
                 )
         else:
-            lines.append("- 暂无开发目标。")
+            lines.append("- 暂无来源资产引用。")
 
-        lines.extend(["", "## 3. 模块边界"])
-
-        if package.module_boundaries:
-            for item in package.module_boundaries:
-                lines.extend(
-                    [
-                        f"- **{item.boundary_key}**",
-                        f"  - 模块职责：{item.responsibility}",
-                        f"  - 包含范围：{self._join_list(item.included_scope)}",
-                        f"  - 排除范围：{self._join_list(item.excluded_scope)}",
-                        f"  - 依赖模块：{self._join_list(item.dependency_modules)}",
-                    ]
-                )
-        else:
-            lines.append("- 暂无模块边界说明。")
-
-        lines.extend(["", "## 4. 前端实现清单"])
-
-        if package.frontend_implementation_items:
-            for item in package.frontend_implementation_items:
+        lines.extend(["", "## 4. 页面蓝图"])
+        if blueprint.pages:
+            for item in blueprint.pages:
                 lines.extend(
                     [
                         f"### {item.page_name}（{item.page_key}）",
-                        f"- **建议路由**：{item.route_path or '无'}",
-                        f"- **建议组件**：{self._join_list(item.components)}",
-                        f"- **交互行为**：{self._join_list(item.interactions)}",
-                        f"- **依赖接口**：{self._join_list(item.api_dependencies)}",
-                        f"- **前端校验点**：{self._join_list(item.validation_points)}",
+                        f"- **页面目标**：{item.page_goal}",
+                        f"- **路由语义**：{item.route_semantics or '无'}",
+                        f"- **交互**：{self._join_list(item.interactions)}",
+                        f"- **状态规则**：{self._join_list(item.state_rules)}",
+                        f"- **接口依赖**：{self._join_list(item.api_dependencies)}",
+                        f"- **校验点**：{self._join_list(item.validation_points)}",
                         "",
                     ]
                 )
         else:
-            lines.append("- 暂无前端实现清单。")
+            lines.append("- 当前节点无独立页面蓝图。")
 
-        lines.extend(["", "## 5. 后端实现清单"])
-
-        if package.backend_implementation_items:
-            for item in package.backend_implementation_items:
+        lines.extend(["", "## 5. 功能蓝图"])
+        if blueprint.features:
+            for item in blueprint.features:
                 lines.extend(
                     [
-                        f"### {item.service_name}（{item.item_key}）",
-                        f"- **职责**：{item.responsibility}",
-                        f"- **关联接口**：{self._join_list(item.api_keys)}",
-                        f"- **关联实体**：{self._join_list(item.entity_keys)}",
+                        f"### {item.feature_name}（{item.feature_key}）",
+                        f"- **触发条件**：{item.trigger}",
+                        f"- **输入**：{item.input_summary or '无'}",
+                        f"- **输出**：{item.output_summary or '无'}",
                         f"- **业务规则**：{self._join_list(item.business_rules)}",
-                        f"- **事务说明**：{self._join_list(item.transaction_notes)}",
+                        f"- **接口依赖**：{self._join_list(item.api_dependencies)}",
+                        f"- **验收引用**：{self._join_list(item.acceptance_refs)}",
                         "",
                     ]
                 )
         else:
-            lines.append("- 暂无后端实现清单。")
+            lines.append("- 暂无功能蓝图。")
 
-        lines.extend(["", "## 6. 接口实现清单"])
-
-        if package.api_implementation_items:
-            for item in package.api_implementation_items:
+        lines.extend(["", "## 6. 接口蓝图"])
+        if blueprint.apis:
+            for item in blueprint.apis:
                 lines.extend(
                     [
                         f"### {item.api_key}",
+                        f"- **能力**：{item.capability}",
                         f"- **接口**：`{item.method} {item.path}`",
-                        f"- **请求摘要**：{item.request_summary}",
-                        f"- **响应摘要**：{item.response_summary}",
+                        f"- **请求**：{item.request_summary}",
+                        f"- **响应**：{item.response_summary}",
+                        f"- **关联实体**：{self._join_list(item.data_entities)}",
                         f"- **权限**：{self._join_list(item.permission_keys)}",
-                        f"- **错误处理**：{self._join_list(item.error_handling)}",
-                        f"- **测试引用**：{self._join_list(item.test_reference)}",
+                        f"- **错误场景**：{self._join_list(item.error_scenarios)}",
+                        f"- **幂等要求**：{item.idempotency or '无'}",
                         "",
                     ]
                 )
         else:
-            lines.append("- 暂无接口实现清单。")
+            lines.append("- 暂无接口蓝图。")
 
-        lines.extend(["", "## 7. 数据实现清单"])
-
-        if package.data_implementation_items:
-            for item in package.data_implementation_items:
+        lines.extend(["", "## 7. 数据蓝图"])
+        if blueprint.data_entities:
+            for item in blueprint.data_entities:
                 lines.extend(
                     [
-                        f"### {item.entity_key}",
-                        f"- **建议表名**：{item.table_name or '无'}",
-                        f"- **重要字段**：{self._join_list(item.important_fields)}",
+                        f"### {item.entity_name}（{item.entity_key}）",
+                        f"- **业务含义**：{item.business_meaning}",
+                        f"- **核心字段**：{self._join_list(item.fields)}",
+                        f"- **关系**：{self._join_list(item.relationships)}",
                         f"- **约束**：{self._join_list(item.constraints)}",
-                        f"- **索引**：{self._join_list(item.indexes)}",
-                        f"- **迁移说明**：{self._join_list(item.migration_notes)}",
+                        f"- **生命周期**：{self._join_list(item.lifecycle_states)}",
+                        f"- **安全说明**：{self._join_list(item.security_notes)}",
                         "",
                     ]
                 )
         else:
-            lines.append("- 暂无数据实现清单。")
+            lines.append("- 暂无数据蓝图。")
 
-        lines.extend(["", "## 8. 权限与安全要求"])
-
-        if package.permission_and_security_items:
-            for item in package.permission_and_security_items:
+        lines.extend(["", "## 8. UI 契约引用"])
+        if blueprint.ui_contracts:
+            for item in blueprint.ui_contracts:
                 lines.extend(
                     [
-                        f"- **{item.security_type}**（{item.item_key}）",
-                        f"  - 说明：{item.description}",
-                        f"  - 实现建议：{item.implementation_hint}",
-                        f"  - 关联接口：{self._join_list(item.related_api_keys)}",
+                        f"### {item.ui_key}",
+                        f"- **页面**：{item.page_key}",
+                        f"- **布局摘要**：{item.layout_summary}",
+                        f"- **关键区域**：{self._join_list(item.key_regions)}",
+                        f"- **控件**：{self._join_list(item.controls)}",
+                        f"- **交互规则**：{self._join_list(item.interaction_rules)}",
+                        f"- **一致性约束**：{self._join_list(item.visual_consistency_rules)}",
+                        f"- **预览场景数据边界**：{item.preview_data_policy}",
+                        "",
                     ]
                 )
         else:
-            lines.append("- 暂无权限与安全要求。")
+            lines.append("- 当前节点暂无 UI_CONTRACT 引用。")
 
-        lines.extend(["", "## 9. 文件生成建议"])
-
-        if package.file_generation_plan:
-            for item in package.file_generation_plan:
+        lines.extend(["", "## 9. 权限与验收"])
+        if blueprint.permission_rules:
+            lines.append("### 9.1 权限规则")
+            for item in blueprint.permission_rules:
                 lines.extend(
                     [
-                        f"- **{item.suggested_path}**",
-                        f"  - 层级：{item.layer}",
-                        f"  - 用途：{item.file_purpose}",
-                        f"  - 优先级：{item.generation_priority}",
-                        f"  - 依赖：{self._join_list(item.depends_on)}",
+                        f"- **{item.rule_type}**（{item.rule_key}）：{item.description}",
+                        f"  - 适用范围：{self._join_list(item.applies_to)}",
+                        f"  - 需人工确认：{'是' if item.confirmation_needed else '否'}",
                     ]
                 )
         else:
-            lines.append("- 暂无文件生成建议。")
+            lines.append("### 9.1 权限规则\n- 暂无权限规则。")
 
-        lines.extend(["", "## 10. 开发顺序"])
+        if blueprint.acceptance_criteria:
+            lines.append("\n### 9.2 验收标准")
+            for item in blueprint.acceptance_criteria:
+                lines.extend(
+                    [
+                        f"- **{item.title}**（{item.scenario_type} / {item.acceptance_key}）",
+                        f"  - 前置条件：{self._join_list(item.preconditions)}",
+                        f"  - 步骤：{self._join_list(item.steps)}",
+                        f"  - 期望结果：{item.expected_result}",
+                    ]
+                )
+        else:
+            lines.append("\n### 9.2 验收标准\n- 暂无验收标准。")
 
+        lines.extend(["", "## 10. Dev Agent 就绪度"])
+        readiness = package.readiness
+        lines.extend(
+            [
+                f"- **是否可进入 Dev Agent**：{'是' if readiness.ready_for_dev_agent else '否'}",
+                f"- **就绪等级**：{readiness.readiness_level}",
+                f"- **阻断项**：{self._join_list(readiness.blockers)}",
+                f"- **提醒项**：{self._join_list(readiness.warnings)}",
+                f"- **必需来源资产**：{self._join_list(readiness.required_source_artifacts)}",
+                f"- **建议来源资产**：{self._join_list(readiness.recommended_source_artifacts)}",
+            ]
+        )
+
+        lines.extend(["", "## 11. 开发顺序"])
         if package.development_sequence:
             for item in sorted(package.development_sequence, key=lambda step: step.step_order):
                 lines.extend(
                     [
-                        f"### {item.step_order}. {item.title}（{item.step_key}）",
+                        f"### {item.step_order}. {item.title}",
                         f"- **说明**：{item.description}",
                         f"- **交付物**：{self._join_list(item.deliverables)}",
                         f"- **依赖项**：{self._join_list(item.dependencies)}",
@@ -749,23 +651,7 @@ class DevHandoffPackageAgent:
         else:
             lines.append("- 暂无开发顺序。")
 
-        lines.extend(["", "## 11. 测试与验收交接"])
-
-        if package.test_and_acceptance_handoff:
-            for item in package.test_and_acceptance_handoff:
-                lines.extend(
-                    [
-                        f"- **{item.test_type}**（{item.item_key}）",
-                        f"  - 参考用例：{self._join_list(item.reference_cases)}",
-                        f"  - 验收点：{self._join_list(item.acceptance_points)}",
-                        f"  - 自动化提示：{item.automation_hint or '无'}",
-                    ]
-                )
-        else:
-            lines.append("- 暂无测试与验收交接。")
-
-        lines.extend(["", "## 12. 风险与注意事项"])
-
+        lines.extend(["", "## 12. 风险与待确认"])
         if package.risks_and_attention:
             for item in package.risks_and_attention:
                 lines.extend(
@@ -776,24 +662,29 @@ class DevHandoffPackageAgent:
                     ]
                 )
         else:
-            lines.append("- 暂无风险与注意事项。")
+            lines.append("- 暂无风险与待确认。")
 
         hints = package.downstream_hints
-
         lines.extend(
             [
                 "",
-                "## 13. 下游 Agent 提示",
-                "### 13.1 后端 Agent 提示",
-                self._bullet_list(hints.backend_agent_hints),
+                "## 13. 下游生成器提示",
+                "### 13.1 Dev Agent",
+                self._bullet_list(hints.dev_agent_hints),
                 "",
-                "### 13.2 前端 Agent 提示",
-                self._bullet_list(hints.frontend_agent_hints),
+                "### 13.2 前端生成器",
+                self._bullet_list(hints.frontend_generator_hints or hints.frontend_agent_hints),
                 "",
-                "### 13.3 测试 Agent 提示",
-                self._bullet_list(hints.test_agent_hints),
+                "### 13.3 后端生成器",
+                self._bullet_list(hints.backend_generator_hints or hints.backend_agent_hints),
                 "",
-                "### 13.4 集成提示",
+                "### 13.4 数据生成器",
+                self._bullet_list(hints.data_generator_hints),
+                "",
+                "### 13.5 测试生成器",
+                self._bullet_list(hints.test_generator_hints or hints.test_agent_hints),
+                "",
+                "### 13.6 集成提示",
                 self._bullet_list(hints.integration_hints),
                 "",
                 "## 14. 分析摘要",

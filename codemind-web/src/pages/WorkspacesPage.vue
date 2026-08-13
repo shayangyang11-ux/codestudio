@@ -65,19 +65,30 @@ async function handleSelectWorkspace(workspace: WorkspaceSummary) {
 async function handleOpenProject(project: ProjectSummary) {
   const workspace = selectedWorkspace.value
 
-  if (!workspace) {
+  if (!workspace?.workspaceId || !project?.projectCode) {
+    console.error('OPEN_PROJECT_BLOCKED', {
+      workspace,
+      project,
+    })
+    window.alert('打开项目工作台失败：缺少当前工作空间或项目编号，请刷新项目列表后重试。')
     return
   }
 
   await openProject(project)
 
-  await router.push({
-    name: 'project-workspace',
-    params: {
-      workspaceId: workspace.workspaceId,
-      projectCode: project.projectCode,
-    },
-  })
+  const targetPath = `/workspaces/${encodeURIComponent(workspace.workspaceId)}/projects/${encodeURIComponent(project.projectCode)}`
+
+  try {
+    await router.push(targetPath)
+  } catch (error) {
+    console.error('OPEN_PROJECT_ROUTER_FAILED', error, {
+      workspace,
+      project,
+      targetPath,
+    })
+
+    window.location.href = targetPath
+  }
 }
 
 async function handleCreateProject(payload: CreateProjectRequest) {

@@ -250,7 +250,16 @@ class RequirementGraph:
         if request.task_type == "GENERATE_BUSINESS_FLOW":
             return "generate_business_flow"
 
+        if request.task_type == "GENERATE_PAGE_MAP":
+
+
+            return "generate_page_spec"
+
+
         if request.task_type == "GENERATE_PAGE_SPEC":
+
+
+            return "generate_page_spec"
             return "generate_page_spec"
 
         if request.task_type == "GENERATE_DATA_MODEL":

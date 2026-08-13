@@ -656,9 +656,26 @@ class LlmArtifactWorkflowNodes:
                 notes.append("TEST_SPEC 缺少功能或接口测试用例。")
 
         if self.artifact_type == "DEV_HANDOFF_PACKAGE":
-            if not payload.get("backend_implementation_items") and not payload.get("frontend_implementation_items"):
+            dev_blueprint = payload.get("dev_blueprint") or {}
+            if not dev_blueprint and not payload.get("backend_implementation_items") and not payload.get("frontend_implementation_items"):
                 score -= 30
-                notes.append("DEV_HANDOFF_PACKAGE 缺少前后端实现清单。")
+                notes.append("DEV_HANDOFF_PACKAGE 缺少 dev_blueprint 或历史实现清单。")
+            elif isinstance(dev_blueprint, dict):
+                blueprint_sections = [
+                    dev_blueprint.get("pages"),
+                    dev_blueprint.get("features"),
+                    dev_blueprint.get("apis"),
+                    dev_blueprint.get("data_entities"),
+                    dev_blueprint.get("acceptance_criteria"),
+                ]
+                if not any(isinstance(section, list) and section for section in blueprint_sections):
+                    score -= 20
+                    notes.append("DEV_HANDOFF_PACKAGE 的 dev_blueprint 缺少页面、功能、接口、数据或验收条目。")
+
+            readiness = payload.get("readiness")
+            if isinstance(readiness, dict) and readiness.get("readiness_level") == "BLOCKED":
+                score -= 10
+                notes.append("DEV_HANDOFF_PACKAGE 仍存在 Dev Agent 阻断项。")
 
         if not payload.get("analysis_summary"):
             score -= 10
@@ -797,3 +814,5 @@ class LlmArtifactWorkflowNodes:
 
     def _finalize_node_name(self) -> str:
         return f"{self._node_prefix()}_finalize"
+
+

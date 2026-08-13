@@ -292,6 +292,7 @@ public class AssistantArtifactTaskCommandResolver {
         return switch (value) {
             case "MODULE_PRD" -> TaskType.GENERATE_MODULE_PRD;
             case "BUSINESS_FLOW" -> TaskType.GENERATE_BUSINESS_FLOW;
+            case "PAGE_MAP" -> TaskType.GENERATE_PAGE_MAP;
             case "PAGE_SPEC" -> TaskType.GENERATE_PAGE_SPEC;
             case "DATA_MODEL" -> TaskType.GENERATE_DATA_MODEL;
             case "API_CONTRACT" -> TaskType.GENERATE_API_CONTRACT;
@@ -308,6 +309,7 @@ public class AssistantArtifactTaskCommandResolver {
         return switch (taskType) {
             case GENERATE_MODULE_PRD -> "MODULE_PRD";
             case GENERATE_BUSINESS_FLOW -> "BUSINESS_FLOW";
+            case GENERATE_PAGE_MAP -> "PAGE_MAP";
             case GENERATE_PAGE_SPEC -> "PAGE_SPEC";
             case GENERATE_DATA_MODEL -> "DATA_MODEL";
             case GENERATE_API_CONTRACT -> "API_CONTRACT";
@@ -324,6 +326,7 @@ public class AssistantArtifactTaskCommandResolver {
         return switch (taskType) {
             case GENERATE_MODULE_PRD -> "需求说明";
             case GENERATE_BUSINESS_FLOW -> "流程说明";
+            case GENERATE_PAGE_MAP -> "页面地图";
             case GENERATE_PAGE_SPEC -> "页面/结构说明";
             case GENERATE_DATA_MODEL -> "数据模型";
             case GENERATE_API_CONTRACT -> "接口契约";

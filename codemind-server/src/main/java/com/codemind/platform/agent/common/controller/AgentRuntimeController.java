@@ -22,4 +22,9 @@ public class AgentRuntimeController {
     public Map<String, Object> getLlmRuntimeStatus() {
         return agentRuntimeGatewayService.getLlmRuntimeStatus();
     }
+    @GetMapping("/model-routing/status")
+    public Map<String, Object> getModelRoutingStatus() {
+        return agentRuntimeGatewayService.getModelRoutingStatus();
+    }
+
 }

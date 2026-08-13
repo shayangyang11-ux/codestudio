@@ -4,6 +4,9 @@ import json
 from typing import Any
 
 from app.schemas.agent_protocol import AgentTaskRequest
+from app.graphs.requirement.context.requirement_asset_contract_policy import (
+    RequirementAssetContractPolicy,
+)
 
 
 class RequirementPromptContextBuilder:
@@ -16,6 +19,9 @@ class RequirementPromptContextBuilder:
     3. 统一输出上游资产摘要。
     4. 避免每个 Agent 各自重复处理 context_package。
     """
+
+    def __init__(self) -> None:
+        self.asset_contract_policy = RequirementAssetContractPolicy()
 
     def build_common_sections(
         self,
@@ -50,6 +56,13 @@ class RequirementPromptContextBuilder:
                 "",
             ]
         )
+
+        sections.extend(
+            self.asset_contract_policy.build_prompt_sections(
+                request=request,
+            )
+        )
+        sections.append("")
 
         dependency_status = context_package.get("dependency_status")
         if isinstance(dependency_status, dict):
@@ -168,3 +181,4 @@ class RequirementPromptContextBuilder:
             return text
 
         return text[:max_chars] + f"\n...【上下文已裁剪，原长度 {len(text)}】"
+

@@ -57,6 +57,45 @@ public class AgentRuntimeGatewayService {
         }
     }
 
+
+    public Map<String, Object> getModelRoutingStatus() {
+        long startedNanos = System.nanoTime();
+        LocalDateTime fetchedAt = LocalDateTime.now();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("source", "python-agent");
+        result.put("endpoint", "/agent/runtime/model-routing/status");
+        result.put("fetchedAt", fetchedAt);
+
+        try {
+            Map<String, Object> pythonStatus = pythonAgentClient.getModelRoutingStatus();
+
+            result.put("available", true);
+            result.put("durationMs", elapsedMs(startedNanos));
+            result.put("status", pythonStatus);
+
+            return result;
+
+        } catch (RestClientException exception) {
+            result.put("available", false);
+            result.put("durationMs", elapsedMs(startedNanos));
+            result.put("errorCode", "PYTHON_AGENT_MODEL_ROUTING_STATUS_UNAVAILABLE");
+            result.put("errorMessage", exception.getMessage());
+            result.put("exceptionType", exception.getClass().getName());
+
+            return result;
+
+        } catch (Exception exception) {
+            result.put("available", false);
+            result.put("durationMs", elapsedMs(startedNanos));
+            result.put("errorCode", "AGENT_MODEL_ROUTING_STATUS_PROXY_FAILED");
+            result.put("errorMessage", exception.getMessage());
+            result.put("exceptionType", exception.getClass().getName());
+
+            return result;
+        }
+    }
+
     private long elapsedMs(long startedNanos) {
         return Math.max(
                 0,

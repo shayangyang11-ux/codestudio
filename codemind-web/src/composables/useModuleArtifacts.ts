@@ -29,7 +29,9 @@ export function useModuleArtifacts(
   const businessFlowMarkdown = ref('')
 
   const pageSpecArtifact = ref<ArtifactResponse | null>(null)
+const pageMapArtifact = ref<ArtifactResponse | null>(null)
   const pageSpecMarkdown = ref('')
+const pageMapMarkdown = ref('')
 
   const dataModelArtifact = ref<ArtifactResponse | null>(null)
   const dataModelMarkdown = ref('')
@@ -56,6 +58,10 @@ export function useModuleArtifacts(
 
   async function loadCurrentPageSpec(node: ModuleTreeNode): Promise<boolean> {
     return loadCurrentArtifactByType(node, 'PAGE_SPEC')
+  }
+
+  async function loadCurrentPageMap(node: ModuleTreeNode): Promise<boolean> {
+    return loadCurrentArtifactByType(node, 'PAGE_MAP')
   }
 
   async function loadCurrentDataModel(node: ModuleTreeNode): Promise<boolean> {
@@ -155,6 +161,7 @@ export function useModuleArtifacts(
   ): ArtifactResponse | null {
     if (artifactType === 'MODULE_PRD') return prdArtifact.value
     if (artifactType === 'BUSINESS_FLOW') return businessFlowArtifact.value
+    if (artifactType === 'PAGE_MAP') return pageMapArtifact.value
     if (artifactType === 'PAGE_SPEC') return pageSpecArtifact.value
     if (artifactType === 'DATA_MODEL') return dataModelArtifact.value
     if (artifactType === 'API_CONTRACT') return apiContractArtifact.value
@@ -179,6 +186,12 @@ export function useModuleArtifacts(
     if (artifactType === 'BUSINESS_FLOW') {
       businessFlowArtifact.value = artifact
       businessFlowMarkdown.value = markdown
+      return
+    }
+
+    if (artifactType === 'PAGE_MAP') {
+      pageMapArtifact.value = artifact
+      pageMapMarkdown.value = markdown
       return
     }
 
@@ -300,6 +313,9 @@ export function useModuleArtifacts(
     pageSpecArtifact,
     pageSpecMarkdown,
 
+    pageMapArtifact,
+    pageMapMarkdown,
+
     dataModelArtifact,
     dataModelMarkdown,
 
@@ -318,6 +334,7 @@ export function useModuleArtifacts(
     loadCurrentModulePrd,
     loadCurrentBusinessFlow,
     loadCurrentPageSpec,
+    loadCurrentPageMap,
     loadCurrentDataModel,
     loadCurrentApiContract,
     loadCurrentTestSpec,

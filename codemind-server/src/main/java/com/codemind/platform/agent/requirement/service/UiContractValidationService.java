@@ -1118,8 +1118,39 @@ public class UiContractValidationService {
     ) {
         Set<String> result = new LinkedHashSet<>();
 
-        for (ProjectModuleEntity module : projectModuleRepository
-                .findByProjectIdOrderByLevelNoAscSortOrderAsc(projectId)) {
+        List<ProjectModuleEntity> modules = projectModuleRepository
+                .findByProjectIdOrderByLevelNoAscSortOrderAsc(projectId);
+
+        Map<UUID, ProjectModuleEntity> activeNodeIndex = new LinkedHashMap<>();
+        ProjectModuleEntity currentPage = null;
+
+        for (ProjectModuleEntity module : modules) {
+            if (!ACTIVE.equalsIgnoreCase(module.getStatus())) {
+                continue;
+            }
+
+            activeNodeIndex.put(module.getId(), module);
+
+            if (pageId.equals(module.getId())) {
+                currentPage = module;
+            }
+        }
+
+        // A9_8_2_7_PARENT_FEATURE_MODEL
+        // The current customer-facing tree is MODULE -> FEATURE -> PAGE.
+        // Therefore a PAGE is normally covered by its parent FEATURE.
+        // Keep the old PAGE -> FEATURE fallback for legacy trees only.
+        if (currentPage != null && currentPage.getParentId() != null) {
+            ProjectModuleEntity parent = activeNodeIndex.get(currentPage.getParentId());
+
+            if (parent != null
+                    && "FEATURE".equals(normalizeNodeType(parent.getModuleType()))) {
+                result.add(parent.getId().toString());
+                return result;
+            }
+        }
+
+        for (ProjectModuleEntity module : modules) {
             if (!ACTIVE.equalsIgnoreCase(module.getStatus())) {
                 continue;
             }

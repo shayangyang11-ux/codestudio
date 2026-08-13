@@ -1,3 +1,4 @@
+# A9.10.14.4.3.15.4.4_STYLE_OVERRIDE_LOCK
 from __future__ import annotations
 
 import json
@@ -16,6 +17,12 @@ from app.services.llm_service import LlmService
 class StyleAssistantAgent:
     THEME_BY_INDUSTRY = {
         "COMMERCE": "commerce_light",
+            "FOREIGN_TRADE": "enterprise_default",
+            "WORK_ORDER": "tech_modern",
+            "WAREHOUSE": "industrial_pro",
+            "MANUFACTURING": "industrial_pro",
+            "CRM": "enterprise_default",
+            "SAAS": "tech_modern",
         "TECH": "tech_modern",
         "INDUSTRIAL": "industrial_pro",
         "FINANCE": "finance_stable",

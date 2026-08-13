@@ -454,8 +454,34 @@ export interface ProjectModuleMutationResponse {
   tree: ModuleTreeNode[]
 }
 
+// A9.10.14.4.3.15.4.10.4.4_PRD_TREE_MANUAL_COMPLETION
+export interface CompleteModuleTreeFromPrdRequest {
+  modulePrdContent: Record<string, unknown>
+  sourceArtifactId?: string | null
+  sourceVersionNo?: number | string | null
+}
+
+export interface CompleteModuleTreeFromPrdResponse extends ProjectModuleMutationResponse {
+  source?: string
+  skipped?: boolean
+  reason?: string
+  manualUserAction?: boolean
+  createdFeatureCount?: number
+  createdPageCount?: number
+  updatedFeatureCount?: number
+  updatedPageCount?: number
+  featureCount?: number
+  pageCount?: number
+}
+
+export type ModuleTreeModelingMode =
+  | 'PROGRESSIVE_MODULE_OUTLINE'
+  | 'FULL_ENTERPRISE_BLUEPRINT'
+  | 'ORGANIZE_THEN_GENERATE'
+
 export interface GenerateModuleTreeRequest {
   requirementText: string
+  modelingMode?: ModuleTreeModelingMode
 }
 
 export interface GenerateModulePrdRequest {
@@ -544,6 +570,7 @@ export interface ManualArtifactEditPayload {
   artifactType: string
   contentMarkdown: string
   reason?: string | null
+  content?: Record<string, unknown> | null
 }
 
 export interface ManualArtifactEditRequest {
@@ -551,6 +578,7 @@ export interface ManualArtifactEditRequest {
   artifactType: string
   contentMarkdown: string
   reason?: string | null
+  content?: Record<string, unknown> | null
 }
 
 export interface ManualArtifactEditResponse extends PromptTemplateMetadata {

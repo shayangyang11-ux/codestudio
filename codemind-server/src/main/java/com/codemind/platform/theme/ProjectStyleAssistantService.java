@@ -1,5 +1,7 @@
 package com.codemind.platform.theme;
 
+// A9.10.14.4.3.15.4.4_STYLE_OVERRIDE_LOCK
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 
@@ -15,7 +17,14 @@ import java.util.regex.Pattern;
 @Service
 public class ProjectStyleAssistantService {
 
-    private static final Set<String> INDUSTRIES = Set.of("GENERAL", "COMMERCE", "TECH", "INDUSTRIAL", "FINANCE", "GOV", "EDUCATION", "HEALTHCARE");
+    private static final Set<String> INDUSTRIES = Set.of("GENERAL", "COMMERCE", "TECH", "INDUSTRIAL", "FINANCE", "GOV", "EDUCATION", "HEALTHCARE",
+                "FOREIGN_TRADE",
+                "WORK_ORDER",
+                "WAREHOUSE",
+                "MANUFACTURING",
+                "CRM",
+                "SAAS",
+                "MEDICAL");
     private static final Set<String> THEME_KEYS = Set.of("enterprise_default", "tech_modern", "commerce_light", "industrial_pro", "finance_stable", "gov_clean");
     private static final Set<String> VISUAL_TONES = Set.of("CLEAN", "TECH", "COMMERCE", "INDUSTRIAL", "FINANCE", "GOV");
     private static final Set<String> DENSITIES = Set.of("COMPACT", "STANDARD", "COMFORTABLE");
@@ -504,6 +513,9 @@ public class ProjectStyleAssistantService {
     private String themeKeyForIndustry(String industry) {
         return switch (industry) {
             case "COMMERCE" -> "commerce_light";
+            case "FOREIGN_TRADE", "CRM" -> "enterprise_default";
+            case "WORK_ORDER", "SAAS" -> "tech_modern";
+            case "WAREHOUSE", "MANUFACTURING" -> "industrial_pro";
             case "TECH" -> "tech_modern";
             case "INDUSTRIAL" -> "industrial_pro";
             case "FINANCE" -> "finance_stable";

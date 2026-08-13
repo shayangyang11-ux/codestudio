@@ -3,6 +3,7 @@ package com.codemind.platform.module;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @CrossOrigin(origins = "*")
@@ -85,6 +86,23 @@ public class WorkspaceProjectModuleController {
     /**
      * 推荐前端使用这个 POST 接口修改节点，避免部分开发环境下 PATCH 预检失败。
      */
+
+    // A9.10.14.4.3.15.4.10.4.4_PRD_TREE_MANUAL_COMPLETION
+    @PostMapping("/{moduleId}/complete-from-module-prd")
+    public Map<String, Object> completeModuleChildrenFromModulePrd(
+            @PathVariable UUID workspaceId,
+            @PathVariable String projectCode,
+            @PathVariable UUID moduleId,
+            @RequestBody Map<String, Object> request
+    ) {
+        return projectModuleService.completeRequirementModuleChildrenFromModulePrd(
+                workspaceId,
+                projectCode,
+                moduleId,
+                request
+        );
+    }
+
     @PostMapping("/{moduleId}/update")
     public ProjectModuleMutationResponse updateModuleNodeByPost(
             @PathVariable UUID workspaceId,

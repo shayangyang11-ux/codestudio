@@ -17,6 +17,7 @@ AssistantIntentType = Literal[
 AssistantRequirementArtifactType = Literal[
     "MODULE_PRD",
     "BUSINESS_FLOW",
+    "PAGE_MAP",
     "PAGE_SPEC",
     "DATA_MODEL",
     "API_CONTRACT",
@@ -29,6 +30,7 @@ AssistantRequirementArtifactType = Literal[
 AssistantRequirementTaskType = Literal[
     "GENERATE_MODULE_PRD",
     "GENERATE_BUSINESS_FLOW",
+    "GENERATE_PAGE_MAP",
     "GENERATE_PAGE_SPEC",
     "GENERATE_DATA_MODEL",
     "GENERATE_API_CONTRACT",
@@ -109,7 +111,8 @@ ASSISTANT_INTENT_CLASSIFICATION_JSON_SCHEMA = {
             "enum": [
                 "MODULE_PRD",
                 "BUSINESS_FLOW",
-                "PAGE_SPEC",
+                "PAGE_MAP",
+    "PAGE_SPEC",
                 "DATA_MODEL",
                 "API_CONTRACT",
                 "TEST_SPEC",
@@ -124,7 +127,8 @@ ASSISTANT_INTENT_CLASSIFICATION_JSON_SCHEMA = {
             "enum": [
                 "GENERATE_MODULE_PRD",
                 "GENERATE_BUSINESS_FLOW",
-                "GENERATE_PAGE_SPEC",
+                "GENERATE_PAGE_MAP",
+    "GENERATE_PAGE_SPEC",
                 "GENERATE_DATA_MODEL",
                 "GENERATE_API_CONTRACT",
                 "GENERATE_TEST_SPEC",

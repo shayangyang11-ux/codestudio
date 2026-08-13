@@ -410,12 +410,14 @@ public class AssistantMessageService {
             AssistantIntentClassificationResult classification,
             List<AssistantAttachmentParsedContext> attachmentContexts
     ) {
+        // A9.10.14.4.3.15.2.4_EXTERNAL_PRD_IMPORT_AND_LEGACY_PRD_MIGRATION_ASSISTANT_MESSAGE_SERVICE
         if (AssistantIntentRouterService.INTENT_GENERATE_MODULE_TREE.equals(intent)) {
             return buildGenerateModuleTreeResponse(
                     buildInstructionWithAttachmentContext(
                             messageText,
                             attachmentContexts
-                    )
+                    ),
+                    attachmentContexts
             );
         }
 
@@ -438,6 +440,21 @@ public class AssistantMessageService {
         }
 
         if (AssistantIntentRouterService.INTENT_PROPOSE_MODULE_TREE_PATCH.equals(intent)) {
+            if (shouldRunAttachmentModuleTreeDiffFirst(
+                    request,
+                    messageText,
+                    attachmentContexts
+            )) {
+                return buildAttachmentDrivenChangeProposalResponse(
+                        workspaceId,
+                        projectCode,
+                        request,
+                        messageText,
+                        classification,
+                        attachmentContexts
+                );
+            }
+
             return buildTreePatchProposalResponse(
                     workspaceId,
                     projectCode,
@@ -505,23 +522,104 @@ public class AssistantMessageService {
     }
 
     private AssistantMessageResponse buildGenerateModuleTreeResponse(
-            String messageText
+            String messageText,
+            List<AssistantAttachmentParsedContext> attachmentContexts
     ) {
         Map<String, Object> payload = new LinkedHashMap<>();
+        String modelingMode = inferModuleTreeModelingModeForImport(
+                messageText,
+                attachmentContexts
+        );
+        boolean externalPrdImport = isExternalPrdImportIntent(
+                messageText,
+                attachmentContexts
+        );
+
         payload.put("requirementText", messageText);
+        payload.put("modelingMode", modelingMode);
+        payload.put("source", externalPrdImport
+                ? "EXTERNAL_PRD_IMPORT"
+                : "ASSISTANT_GENERATE_MODULE_TREE");
+
+        String reply = externalPrdImport
+                ? "已识别为外部/旧 PRD 导入。系统会把上传材料中的业务域、模块、功能点和页面入口迁移为 CodeMind 模块树；本次默认使用完整企业蓝图模式，后续 MODULE_PRD 会继续由 Requirement Agent 补齐结构化页面契约。"
+                : "已识别为模块树生成请求。系统会根据需求成熟度和附件资料推荐模块骨架、完整模块树或先整理资料；生成完成后会刷新左侧模块树并给出下一步建议。";
 
         return simpleResponse(
                 AssistantIntentRouterService.INTENT_GENERATE_MODULE_TREE,
-                "当前项目还没有模块树。我已识别为“生成模块树”意图，请确认生成结构化模块树。",
+                reply,
                 false,
                 List.of(
                         AssistantActionResponse.of(
                                 "GENERATE_MODULE_TREE",
-                                "生成模块树",
+                                externalPrdImport ? "导入 PRD 并生成模块树" : "生成模块树",
                                 payload
                         )
                 )
         );
+    }
+
+    private String inferModuleTreeModelingModeForImport(
+            String messageText,
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        String normalized = normalizeForIntent(messageText);
+        if (containsAny(normalized, List.of("模块骨架", "只生成模块", "先生成模块", "不要页面", "不要功能点"))) {
+            return "PROGRESSIVE_MODULE_OUTLINE";
+        }
+        if (containsAny(normalized, List.of("先整理", "整理资料", "资料整理", "整理后生成", "不确定项", "资料太杂"))) {
+            return "ORGANIZE_THEN_GENERATE";
+        }
+        if (containsAny(normalized, List.of("完整模块树", "完整蓝图", "直接生成完整", "功能点和页面"))) {
+            return "FULL_ENTERPRISE_BLUEPRINT";
+        }
+        if (isExternalPrdImportIntent(messageText, attachmentContexts)) {
+            return "FULL_ENTERPRISE_BLUEPRINT";
+        }
+        if (hasParsedAttachmentText(attachmentContexts)) {
+            return "ORGANIZE_THEN_GENERATE";
+        }
+
+        return "PROGRESSIVE_MODULE_OUTLINE";
+    }
+
+    private boolean isExternalPrdImportIntent(
+            String messageText,
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        String normalized = normalizeForIntent(messageText);
+        boolean hasParsedText = hasParsedAttachmentText(attachmentContexts);
+
+        boolean mentionsPrd = containsAny(
+                normalized,
+                List.of(
+                        "prd",
+                        "需求文档",
+                        "需求说明",
+                        "旧需求",
+                        "旧prd",
+                        "外部prd",
+                        "外部需求"
+                )
+        );
+
+        boolean mentionsImport = containsAny(
+                normalized,
+                List.of(
+                        "导入",
+                        "迁移",
+                        "识别",
+                        "转换",
+                        "转成",
+                        "映射",
+                        "匹配",
+                        "接入",
+                        "上传",
+                        "解析"
+                )
+        );
+
+        return mentionsPrd && (mentionsImport || hasParsedText);
     }
 
 
@@ -1503,11 +1601,33 @@ public class AssistantMessageService {
                 attachmentContexts
         );
 
+        AttachmentModuleTreeCoverage moduleTreeCoverage =
+                analyzeAttachmentModuleTreeCoverage(
+                        moduleTree,
+                        attachmentContexts
+                );
+
         String recommendedDispatch = inferAttachmentDrivenExecutionAction(
                 request,
                 messageText,
                 attachmentContexts
         );
+        boolean externalPrdImport = isExternalPrdImportIntent(
+                messageText,
+                attachmentContexts
+        );
+
+        if (externalPrdImport) {
+            recommendedDispatch = "MODULE_TREE_PATCH";
+        }
+
+        if (moduleTreeCoverage.applicable()) {
+            if (moduleTreeCoverage.fullyCovered()) {
+                recommendedDispatch = "ANALYSIS_ONLY";
+            } else if (!moduleTreeCoverage.missingItems().isEmpty()) {
+                recommendedDispatch = "MODULE_TREE_PATCH";
+            }
+        }
 
         Map<String, Object> selectedNode = resolveSelectedNodeContext(
                 request == null ? null : request.getSelectedNodeId(),
@@ -1522,18 +1642,59 @@ public class AssistantMessageService {
                 attachmentContexts
         );
 
+        List<String> riskNotes = buildAttachmentDrivenRiskNotes(
+                attachmentContexts,
+                recommendedDispatch
+        );
+        riskNotes.addAll(moduleTreeCoverage.riskNotes());
+        riskNotes = deduplicate(riskNotes);
+
+        List<String> recommendedSteps = buildAttachmentDrivenRecommendedSteps(
+                recommendedDispatch
+        );
+        if (moduleTreeCoverage.fullyCovered()) {
+            recommendedSteps = List.of(
+                    "当前附件中的主要结构性需求已被模块树覆盖，建议不要重复生成模块树变更提案。",
+                    "如仍需调整，请明确说明要新增、移动、重命名或删除哪个节点。",
+                    "接下来可以选择一个 MODULE 进入“一键准备模块开发资产”，或选择 PAGE 补齐 PAGE_SPEC / UI_CONTRACT。"
+            );
+        } else if (moduleTreeCoverage.applicable()
+                && !moduleTreeCoverage.missingItems().isEmpty()) {
+            recommendedSteps = List.of(
+                    "先检查“可能未覆盖”清单，确认这些内容确实应该成为模块树节点。",
+                    "确认后再点击“生成模块树变更提案”，系统才会进入可审查 Patch 链路。",
+                    "不要直接把附件重复上传产生的大量 ADD_NODE 当成最终结果；Patch 仍需人工确认后才可应用。"
+            );
+        }
+
+        List<Map<String, Object>> candidateActions = buildAttachmentDrivenCandidateActions(
+                affectedArtifacts,
+                recommendedDispatch
+        );
+        if (moduleTreeCoverage.fullyCovered()) {
+            candidateActions = buildCoverageOnlyCandidateActions();
+        }
+
         Map<String, Object> proposal = new LinkedHashMap<>();
         proposal.put("proposalId", UUID.randomUUID().toString());
         proposal.put("source", "ATTACHMENT_DRIVEN_CHANGE");
         proposal.put("status", "DRAFT");
-        proposal.put("phase", "Phase 7-A");
+        proposal.put("phase", "Phase 10-A8.2");
+        if (externalPrdImport) {
+            proposal.put("migrationMode", "EXTERNAL_OR_LEGACY_PRD_IMPORT");
+            proposal.put("migrationTarget", "MODULE_TREE_AND_MODULE_PRD");
+        }
         proposal.put("originalInstruction", messageText);
         proposal.put("summary", buildAttachmentDrivenSummary(
                 messageText,
                 attachmentContexts,
-                recommendedDispatch
+                recommendedDispatch,
+                moduleTreeCoverage
         ));
-        proposal.put("materialInstruction", materialInstruction);
+        proposal.put("materialInstruction", buildMaterialInstructionWithCoverage(
+                materialInstruction,
+                moduleTreeCoverage
+        ));
         proposal.put("recommendedDispatch", recommendedDispatch);
         proposal.put("executionAction", recommendedDispatch);
         proposal.put("targetNode", selectedNode);
@@ -1543,20 +1704,16 @@ public class AssistantMessageService {
                 recommendedDispatch
         ));
         proposal.put("affectedArtifacts", affectedArtifacts);
-        proposal.put("riskNotes", buildAttachmentDrivenRiskNotes(
-                attachmentContexts,
-                recommendedDispatch
-        ));
-        proposal.put("recommendedSteps", buildAttachmentDrivenRecommendedSteps(
-                recommendedDispatch
-        ));
-        proposal.put("candidateActions", buildAttachmentDrivenCandidateActions(
-                affectedArtifacts,
-                recommendedDispatch
-        ));
+        proposal.put("riskNotes", riskNotes);
+        proposal.put("recommendedSteps", recommendedSteps);
+        proposal.put("candidateActions", candidateActions);
+        proposal.put("moduleTreeCoverage", moduleTreeCoverage.toMap());
+        proposal.put("alreadyCoveredItems", moduleTreeCoverage.coveredItems());
+        proposal.put("missingRequirements", moduleTreeCoverage.missingItems());
+        proposal.put("possibleConflicts", moduleTreeCoverage.needsReviewItems());
         proposal.put("attachmentSummary", buildAttachmentSummaryForRequirementChange(attachmentContexts));
         proposal.put("requiresUserConfirmation", true);
-        proposal.put("executionPolicy", "当前仅生成附件驱动变更分析，不会直接修改模块树、覆盖资产或创建生成任务；用户点击动作按钮后才进入对应链路。");
+        proposal.put("executionPolicy", "当前仅生成附件驱动差异分析，不会直接修改模块树、覆盖资产或创建生成任务；只有用户点击后续动作按钮才进入可审查提案链路。");
 
         return proposal;
     }
@@ -1576,10 +1733,509 @@ public class AssistantMessageService {
         ) + "。请在右侧卡片中选择下一步动作。";
     }
 
+    private boolean shouldRunAttachmentModuleTreeDiffFirst(
+            AssistantMessageRequest request,
+            String messageText,
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        if (!hasAttachmentContext(attachmentContexts)) {
+            return false;
+        }
+
+        if (request != null &&
+                request.getExpectedIntent() != null &&
+                !request.getExpectedIntent().isBlank()) {
+            return false;
+        }
+
+        String normalized = normalizeForIntent(messageText);
+
+        /*
+         * Direct user messages with attachments should first produce a diff /
+         * coverage analysis. A real Patch is only produced after the user
+         * explicitly asks for a patch/proposal or clicks the analysis card
+         * action. This prevents re-uploading the same material from creating a
+         * large ADD_NODE proposal immediately.
+         */
+        return !containsAny(
+                normalized,
+                List.of(
+                        "生成模块树变更提案",
+                        "生成变更提案",
+                        "生成模块树提案",
+                        "生成patch",
+                        "生成补丁",
+                        "生成可审查patch",
+                        "直接生成提案",
+                        "请生成提案",
+                        "应用提案",
+                        "应用patch",
+                        "应用补丁"
+                )
+        );
+    }
+
+    private List<Map<String, Object>> buildCoverageOnlyCandidateActions() {
+        return List.of(
+                attachmentCandidateAction(
+                        "ANALYSIS_ONLY",
+                        "仅保留本次检查结论",
+                        "当前附件主要结构已被模块树覆盖，不生成模块树 Patch。",
+                        null
+                ),
+                attachmentCandidateAction(
+                        "ATTACHMENT_ARTIFACT_DIFF",
+                        "对比当前资产差异",
+                        "如果你怀疑附件和当前需求资产内容不一致，可以先对比当前资产差异，而不是修改模块树。",
+                        "MODULE_PRD"
+                )
+        );
+    }
+
+    private String buildMaterialInstructionWithCoverage(
+            String materialInstruction,
+            AttachmentModuleTreeCoverage coverage
+    ) {
+        if (coverage == null || !coverage.applicable()) {
+            return materialInstruction;
+        }
+
+        List<String> lines = new ArrayList<>();
+        lines.add(firstNonBlank(materialInstruction, ""));
+        lines.add("");
+        lines.add("【模块树覆盖检查】");
+        lines.add("覆盖率：" + Math.round(coverage.coverageRatio() * 100) + "%");
+        if (!coverage.coveredItems().isEmpty()) {
+            lines.add("当前模块树已覆盖：" + String.join("、", coverage.coveredItems()));
+        }
+        if (!coverage.missingItems().isEmpty()) {
+            lines.add("可能未覆盖：" + String.join("、", coverage.missingItems()));
+        }
+        if (!coverage.needsReviewItems().isEmpty()) {
+            lines.add("需要人工复核：" + String.join("、", coverage.needsReviewItems()));
+        }
+
+        return String.join("\n", lines).trim();
+    }
+
+    private AttachmentModuleTreeCoverage analyzeAttachmentModuleTreeCoverage(
+            List<ProjectModuleService.ModuleTreeNode> moduleTree,
+            List<AssistantAttachmentParsedContext> attachmentContexts
+    ) {
+        if (moduleTree == null || moduleTree.isEmpty() ||
+                attachmentContexts == null || attachmentContexts.isEmpty()) {
+            return AttachmentModuleTreeCoverage.notApplicable();
+        }
+
+        String attachmentText = attachmentContexts.stream()
+                .map(AssistantAttachmentParsedContext::getParsedTextExcerpt)
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .reduce("", (left, right) -> left + "\n" + right)
+                .trim();
+
+        if (attachmentText.isBlank()) {
+            return AttachmentModuleTreeCoverage.notApplicable();
+        }
+
+        Set<String> treeTokens = new LinkedHashSet<>();
+        List<ProjectModuleService.ModuleTreeNode> flatNodes = new ArrayList<>();
+        flattenModuleTreeForCoverage(moduleTree, flatNodes);
+
+        for (ProjectModuleService.ModuleTreeNode node : flatNodes) {
+            addCoverageToken(treeTokens, node.getModuleName());
+            addCoverageToken(treeTokens, node.getModuleKey());
+            addCoverageToken(treeTokens, node.getModulePath());
+        }
+
+        List<String> candidates = extractAttachmentStructuralCandidates(attachmentText);
+
+        if (candidates.isEmpty()) {
+            return AttachmentModuleTreeCoverage.notApplicable();
+        }
+
+        List<String> covered = new ArrayList<>();
+        List<String> missing = new ArrayList<>();
+        List<String> needsReview = new ArrayList<>();
+
+        for (String candidate : candidates) {
+            if (isCoverageCandidateCovered(candidate, treeTokens)) {
+                covered.add(candidate);
+                continue;
+            }
+
+            if (isWeakCoverageCandidate(candidate)) {
+                needsReview.add(candidate);
+            } else {
+                missing.add(candidate);
+            }
+        }
+
+        int total = covered.size() + missing.size() + needsReview.size();
+        if (total == 0) {
+            return AttachmentModuleTreeCoverage.notApplicable();
+        }
+
+        double coverageRatio = covered.size() * 1.0 / total;
+
+        if (coverageRatio >= 0.78 && missing.size() <= 1) {
+            needsReview.addAll(missing);
+            missing = new ArrayList<>();
+        }
+
+        List<String> riskNotes = new ArrayList<>();
+        riskNotes.add("已先执行附件与当前模块树的覆盖检查，避免重复上传同一附件时直接生成大量 ADD_NODE。");
+
+        if (missing.isEmpty()) {
+            riskNotes.add("当前没有高置信缺失项，不建议生成模块树变更提案；如需调整，请明确说明目标节点。");
+        } else {
+            riskNotes.add("存在可能未覆盖项，但仍需人工确认它们是否应该成为 DOMAIN / MODULE / PAGE / FEATURE 节点。");
+        }
+
+        return new AttachmentModuleTreeCoverage(
+                true,
+                deduplicate(covered),
+                deduplicate(missing),
+                deduplicate(needsReview),
+                coverageRatio,
+                deduplicate(riskNotes)
+        );
+    }
+
+    private void flattenModuleTreeForCoverage(
+            List<ProjectModuleService.ModuleTreeNode> nodes,
+            List<ProjectModuleService.ModuleTreeNode> result
+    ) {
+        if (nodes == null) {
+            return;
+        }
+
+        for (ProjectModuleService.ModuleTreeNode node : nodes) {
+            if (node == null) {
+                continue;
+            }
+
+            result.add(node);
+            flattenModuleTreeForCoverage(node.getChildren(), result);
+        }
+    }
+
+    private void addCoverageToken(
+            Set<String> tokens,
+            String value
+    ) {
+        String normalized = normalizeCoverageText(value);
+
+        if (!normalized.isBlank()) {
+            tokens.add(normalized);
+        }
+    }
+
+    private List<String> extractAttachmentStructuralCandidates(
+            String attachmentText
+    ) {
+        List<String> result = new ArrayList<>();
+
+        List<String> knownStructuralTerms = List.of(
+                "患者端",
+                "医生端",
+                "药师端",
+                "管理端",
+                "管理员",
+                "患者首页",
+                "慢病档案",
+                "慢病档案详情",
+                "续方申请",
+                "续方进度",
+                "待审核列表",
+                "患者详情",
+                "随访记录",
+                "随访记录编辑",
+                "药师审方",
+                "审方列表",
+                "处方审核",
+                "处方审核详情",
+                "运营看板",
+                "慢病运营看板",
+                "管理配置",
+                "药品目录",
+                "随访模板",
+                "疾病标签",
+                "风险等级",
+                "用药提醒",
+                "随访提醒",
+                "异常预警",
+                "操作记录"
+        );
+
+        for (String term : knownStructuralTerms) {
+            if (attachmentText.contains(term)) {
+                result.add(term);
+            }
+        }
+
+        String[] lines = attachmentText.split("\\R+");
+        for (String rawLine : lines) {
+            String line = rawLine == null ? "" : rawLine
+                    .replaceFirst("^\\s*[-*•·\\d.、）)]+\\s*", "")
+                    .trim();
+
+            if (line.isBlank()) {
+                continue;
+            }
+
+            String compact = compactAttachmentCandidateLine(line);
+
+            if (isStructuralCandidateText(compact)) {
+                result.add(compact);
+            }
+        }
+
+        return deduplicate(result).stream()
+                .filter(value -> value.length() >= 2 && value.length() <= 24)
+                .limit(80)
+                .toList();
+    }
+
+    private String compactAttachmentCandidateLine(
+            String line
+    ) {
+        String compact = line
+                .split("[，。；;：:、]")[0]
+                .trim();
+
+        for (String marker : List.of("可以", "支持", "包括", "需要", "必须", "用于", "负责")) {
+            int index = compact.indexOf(marker);
+            if (index > 1) {
+                compact = compact.substring(0, index).trim();
+            }
+        }
+
+        return compact;
+    }
+
+    private boolean isStructuralCandidateText(
+            String value
+    ) {
+        if (value == null || value.isBlank() || value.length() > 24) {
+            return false;
+        }
+
+        String normalized = normalizeForIntent(value);
+
+        return containsAny(
+                normalized,
+                List.of(
+                        "业务域",
+                        "模块",
+                        "子模块",
+                        "页面",
+                        "功能点",
+                        "首页",
+                        "列表",
+                        "详情",
+                        "申请",
+                        "审核",
+                        "审方",
+                        "进度",
+                        "档案",
+                        "记录",
+                        "提醒",
+                        "预警",
+                        "看板",
+                        "目录",
+                        "模板",
+                        "配置",
+                        "管理",
+                        "患者",
+                        "医生",
+                        "药师",
+                        "管理员"
+                )
+        );
+    }
+
+    private boolean isCoverageCandidateCovered(
+            String candidate,
+            Set<String> treeTokens
+    ) {
+        String normalized = normalizeCoverageText(candidate);
+
+        if (normalized.isBlank()) {
+            return true;
+        }
+
+        for (String token : treeTokens) {
+            if (token.isBlank()) {
+                continue;
+            }
+
+            if (token.contains(normalized) || normalized.contains(token)) {
+                return true;
+            }
+
+            if (coverageSimilarity(token, normalized) >= 0.72) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean isWeakCoverageCandidate(
+            String candidate
+    ) {
+        String normalized = normalizeCoverageText(candidate);
+
+        return normalized.length() <= 3 ||
+                containsAny(
+                        normalized,
+                        List.of(
+                                "患者",
+                                "医生",
+                                "药师",
+                                "管理员",
+                                "管理",
+                                "服务"
+                        )
+                );
+    }
+
+    private double coverageSimilarity(
+            String left,
+            String right
+    ) {
+        if (left.isBlank() || right.isBlank()) {
+            return 0;
+        }
+
+        Set<Integer> leftChars = left.codePoints()
+                .boxed()
+                .collect(
+                        LinkedHashSet::new,
+                        LinkedHashSet::add,
+                        LinkedHashSet::addAll
+                );
+        Set<Integer> rightChars = right.codePoints()
+                .boxed()
+                .collect(
+                        LinkedHashSet::new,
+                        LinkedHashSet::add,
+                        LinkedHashSet::addAll
+                );
+
+        if (leftChars.isEmpty() || rightChars.isEmpty()) {
+            return 0;
+        }
+
+        int overlap = 0;
+        for (Integer value : leftChars) {
+            if (rightChars.contains(value)) {
+                overlap++;
+            }
+        }
+
+        int base = Math.min(leftChars.size(), rightChars.size());
+        return overlap * 1.0 / Math.max(1, base);
+    }
+
+    private String normalizeCoverageText(
+            String value
+    ) {
+        return String.valueOf(value == null ? "" : value)
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[\\s\\p{Punct}，。；：、（）()《》“”\"'\\[\\]{}<>/\\\\|_-]+", "")
+                .replace("页面", "页")
+                .replace("子模块", "")
+                .replace("模块", "")
+                .replace("服务", "")
+                .replace("管理平台", "")
+                .trim();
+    }
+
+    private static final class AttachmentModuleTreeCoverage {
+        private final boolean applicable;
+        private final List<String> coveredItems;
+        private final List<String> missingItems;
+        private final List<String> needsReviewItems;
+        private final double coverageRatio;
+        private final List<String> riskNotes;
+
+        private AttachmentModuleTreeCoverage(
+                boolean applicable,
+                List<String> coveredItems,
+                List<String> missingItems,
+                List<String> needsReviewItems,
+                double coverageRatio,
+                List<String> riskNotes
+        ) {
+            this.applicable = applicable;
+            this.coveredItems = coveredItems == null ? List.of() : coveredItems;
+            this.missingItems = missingItems == null ? List.of() : missingItems;
+            this.needsReviewItems = needsReviewItems == null ? List.of() : needsReviewItems;
+            this.coverageRatio = coverageRatio;
+            this.riskNotes = riskNotes == null ? List.of() : riskNotes;
+        }
+
+        private static AttachmentModuleTreeCoverage notApplicable() {
+            return new AttachmentModuleTreeCoverage(
+                    false,
+                    List.of(),
+                    List.of(),
+                    List.of(),
+                    0,
+                    List.of()
+            );
+        }
+
+        private boolean applicable() {
+            return applicable;
+        }
+
+        private boolean fullyCovered() {
+            return applicable &&
+                    missingItems.isEmpty() &&
+                    coverageRatio >= 0.72;
+        }
+
+        private List<String> coveredItems() {
+            return coveredItems;
+        }
+
+        private List<String> missingItems() {
+            return missingItems;
+        }
+
+        private List<String> needsReviewItems() {
+            return needsReviewItems;
+        }
+
+        private double coverageRatio() {
+            return coverageRatio;
+        }
+
+        private List<String> riskNotes() {
+            return riskNotes;
+        }
+
+        private Map<String, Object> toMap() {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("applicable", applicable);
+            result.put("fullyCovered", fullyCovered());
+            result.put("coverageRatio", coverageRatio);
+            result.put("coveredItems", coveredItems);
+            result.put("missingItems", missingItems);
+            result.put("needsReviewItems", needsReviewItems);
+            return result;
+        }
+    }
+
     private String buildAttachmentDrivenSummary(
             String messageText,
             List<AssistantAttachmentParsedContext> attachmentContexts,
-            String recommendedDispatch
+            String recommendedDispatch,
+            AttachmentModuleTreeCoverage moduleTreeCoverage
     ) {
         int attachmentCount = attachmentContexts == null
                 ? 0
@@ -1595,6 +2251,18 @@ public class AssistantMessageService {
             return "已接收图片/原型图类附件。当前阶段不会直接识别或编造图片中的视觉细节，" +
                     "但可以基于图片元数据与用户描述，先生成 PAGE_SPEC 页面规范局部修订提案；" +
                     "PAGE_SPEC 确认后再重新生成或确认 UI_CONTRACT。";
+        }
+
+        if (moduleTreeCoverage != null && moduleTreeCoverage.applicable()) {
+            if (moduleTreeCoverage.fullyCovered()) {
+                return "已读取 " + attachmentCount + " 个附件，并先与当前模块树做了覆盖检查。当前附件中的主要结构性需求已被模块树覆盖，未发现需要立即新增的模块树节点。";
+            }
+
+            if (!moduleTreeCoverage.missingItems().isEmpty()) {
+                return "已读取 " + attachmentCount + " 个附件，并先与当前模块树做了覆盖检查。发现 " +
+                        moduleTreeCoverage.missingItems().size() +
+                        " 项可能未被模块树覆盖的结构性需求，请先审查差异清单，再决定是否生成模块树变更提案。";
+            }
         }
 
         return "已读取 " + attachmentCount + " 个附件，其中 " + parsedTextCount +
@@ -1637,7 +2305,17 @@ public class AssistantMessageService {
                         "根据附件改模块",
                         "按附件改模块",
                         "新增页面",
-                        "新增功能点"
+                        "新增功能点",
+                        "导入prd",
+                        "迁移prd",
+                        "外部prd",
+                        "旧prd",
+                        "导入需求文档",
+                        "迁移需求文档",
+                        "识别成模块树",
+                        "匹配成模块树",
+                        "转成模块树",
+                        "转成系统模块树"
                 )
         )) {
             return "MODULE_TREE_PATCH";

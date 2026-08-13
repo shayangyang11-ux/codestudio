@@ -91,19 +91,48 @@ public class RequirementArtifactAsyncTaskService {
         );
     }
 
+    public AsyncAgentTaskResponse enqueuePageMapGeneration(
+            UUID workspaceId,
+            String projectCode,
+            UUID moduleId,
+            GeneratePageSpecRequest request
+    ) {
+        return enqueueModuleArtifactGeneration(
+                workspaceId,
+                projectCode,
+                moduleId,
+                TaskType.GENERATE_PAGE_MAP,
+                "PAGE_MAP",
+                request == null ? null : request.getRequirementText()
+        );
+    }
+
     public AsyncAgentTaskResponse enqueueUiContractGeneration(
             UUID workspaceId,
             String projectCode,
             UUID moduleId,
             GenerateUiContractRequest request
     ) {
+        // A9.10.14.1.1_FORCE_UI_CONTRACT_REGENERATE: explicit PAGE prototype regeneration must create a fresh task.
+        Map<String, Object> extraPayload = new LinkedHashMap<>();
+
+        if (request != null && request.getThemeProfile() != null) {
+            extraPayload.put("themeProfile", request.getThemeProfile());
+        }
+
+        if (request != null && request.forceRegenerateResolved()) {
+            extraPayload.put("force_regenerate", true);
+        }
+
         return enqueueModuleArtifactGeneration(
                 workspaceId,
                 projectCode,
                 moduleId,
                 TaskType.GENERATE_UI_CONTRACT,
                 "UI_CONTRACT",
-                request == null ? null : request.getRequirementText()
+                request == null ? null : request.getRequirementText(),
+                extraPayload,
+                request != null && request.forceRegenerateResolved()
         );
     }
 
@@ -136,6 +165,7 @@ public class RequirementArtifactAsyncTaskService {
         return switch (taskType) {
             case GENERATE_MODULE_PRD -> "MODULE_PRD";
             case GENERATE_BUSINESS_FLOW -> "BUSINESS_FLOW";
+            case GENERATE_PAGE_MAP -> "PAGE_MAP";
             case GENERATE_PAGE_SPEC -> "PAGE_SPEC";
             case GENERATE_DATA_MODEL -> "DATA_MODEL";
             case GENERATE_API_CONTRACT -> "API_CONTRACT";
@@ -155,6 +185,28 @@ public class RequirementArtifactAsyncTaskService {
             TaskType taskType,
             String artifactType,
             String requirementText
+    ) {
+        return enqueueModuleArtifactGeneration(
+                workspaceId,
+                projectCode,
+                moduleId,
+                taskType,
+                artifactType,
+                requirementText,
+                new LinkedHashMap<>(),
+                false
+        );
+    }
+
+    private AsyncAgentTaskResponse enqueueModuleArtifactGeneration(
+            UUID workspaceId,
+            String projectCode,
+            UUID moduleId,
+            TaskType taskType,
+            String artifactType,
+            String requirementText,
+            Map<String, Object> extraPayload,
+            boolean forceRegenerate
     ) {
         CurrentUser currentUser =
                 currentUserProvider.getCurrentUser();
@@ -188,12 +240,54 @@ public class RequirementArtifactAsyncTaskService {
             uiContractReadiness.assertReady();
         }
 
-        return agentTaskService
-                .findActiveTask(
+        // A9.10.14.4.3.12.1_TOKEN_GUARD_AND_PRD_UI_SYNC_PATCH_ACTIVE_DEDUPE
+        // forceRegenerate means "do not reuse an old artifact"; it must not bypass active-task de-duplication.
+        // Otherwise one visible click can create multiple PAGE_SPEC/UI_CONTRACT tasks and burn LLM tokens.
+        java.util.Optional<AgentTaskEntity> activeTask =
+                agentTaskService.findActiveTask(
                         project.getId(),
                         module.getId(),
                         taskType
-                )
+                );
+
+        if (activeTask.isPresent()) {
+            return toResponse(
+                    activeTask.get(),
+                    projectCode,
+                    true
+            );
+        }
+
+        if (forceRegenerate) {
+            AgentTaskEntity task =
+                    agentTaskService.createQueuedTask(
+                            project.getId(),
+                            module.getId(),
+                            taskType,
+                            buildRequestPayload(
+                                    project,
+                                    workspaceId,
+                                    projectCode,
+                                    module,
+                                    taskType,
+                                    artifactType,
+                                    requirementText,
+                                    currentUser,
+                                    uiContractReadiness,
+                                    extraPayload
+                            ),
+                            currentUser.username()
+                    );
+
+            return toResponse(
+                    task,
+                    projectCode,
+                    false
+            );
+        }
+
+        return java.util.Optional
+                .ofNullable((AgentTaskEntity) null)
                 .map(task -> toResponse(
                         task,
                         projectCode,
@@ -214,7 +308,8 @@ public class RequirementArtifactAsyncTaskService {
                                             artifactType,
                                             requirementText,
                                             currentUser,
-                                            uiContractReadiness
+                                            uiContractReadiness,
+                                            extraPayload
                                     ),
                                     currentUser.username()
                             );
@@ -253,7 +348,8 @@ public class RequirementArtifactAsyncTaskService {
             String artifactType,
             String requirementText,
             CurrentUser currentUser,
-            UiContractGenerationReadinessResult uiContractReadiness
+            UiContractGenerationReadinessResult uiContractReadiness,
+            Map<String, Object> extraPayload
     ) {
         Map<String, Object> requestPayload =
                 new LinkedHashMap<>();
@@ -344,6 +440,10 @@ public class RequirementArtifactAsyncTaskService {
                     "workspace_id",
                     workspaceId.toString()
             );
+        }
+
+        if (extraPayload != null && !extraPayload.isEmpty()) {
+            requestPayload.putAll(extraPayload);
         }
 
         return requestPayload;

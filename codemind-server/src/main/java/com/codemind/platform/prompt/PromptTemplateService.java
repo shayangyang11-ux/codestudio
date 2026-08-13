@@ -13,6 +13,7 @@ public class PromptTemplateService {
             "GENERATE_MODULE_PRD",
             "GENERATE_BUSINESS_FLOW",
             "GENERATE_PAGE_SPEC",
+            "GENERATE_PAGE_MAP",
             "GENERATE_DATA_MODEL",
             "GENERATE_API_CONTRACT",
             "GENERATE_TEST_SPEC",

@@ -1,20 +1,34 @@
 <template>
-  <div class="tree-node" :style="nodeLevelStyle">
+  <div class="tree-node">
     <div
       class="tree-node-row"
       :class="{
-        active: node.id === selectedModuleId,
+        active: isSelected,
+        component: isComponentNode,
         page: isPage,
         feature: isFeature,
         root: level === 0,
       }"
     >
-      <button class="tree-node-button" @click="$emit('select', node)">
-        <span v-if="level > 0" class="node-branch-mark" />
+      <button
+        v-if="hasChildren"
+        type="button"
+        class="tree-expand-toggle"
+        :class="{ collapsed: !expanded }"
+        :aria-label="expanded ? '收起下级节点' : '展开下级节点'"
+        :aria-expanded="expanded"
+        @click.stop="toggleExpanded"
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M5.2 3.7 9.5 8l-4.3 4.3 1.05 1.05L11.6 8 6.25 2.65 5.2 3.7Z" />
+        </svg>
+      </button>
+      <span v-else class="tree-expand-spacer" />
 
+      <button class="tree-node-button" type="button" @click="$emit('select', node)">
         <span class="node-main">
           <span class="node-name">
-            {{ node.moduleName || node.name || node.title || node.moduleKey || '未命名节点' }}
+            {{ nodeTitle }}
           </span>
 
           <span v-if="showNodeTypeBadge" class="node-type-badge" :class="badgeClass">
@@ -24,6 +38,7 @@
       </button>
 
       <div
+        v-if="!isComponentNode"
         class="node-action-menu-wrap"
         @mouseleave="actionMenuOpen = false"
         @keydown.esc="actionMenuOpen = false"
@@ -46,7 +61,7 @@
             role="menuitem"
             @click.stop="handleCreateChild"
           >
-            新增子节点
+            {{ createChildActionLabel }}
           </button>
 
           <button
@@ -55,7 +70,7 @@
             role="menuitem"
             @click.stop="handleRename"
           >
-            重命名
+            重命名 / 编辑
           </button>
 
           <button
@@ -79,7 +94,7 @@
       </div>
     </div>
 
-    <div v-if="node.children?.length" class="tree-node-children">
+    <div v-if="hasChildren && expanded" class="tree-node-children">
       <ModuleTreeNodeItem
         v-for="child in node.children"
         :key="child.id || child.moduleKey || child.key"
@@ -97,9 +112,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+// A9.10.14.4.3.15.2.6.3_MODULE_TREE_FULL_REPLACE
+import { computed, ref, watch } from 'vue'
 import type { ModuleTreeNode } from '../types/codemind'
 import {
+  canCreateRequirementChild,
+  getCreateChildActionLabel,
   getRequirementNodeBadgeClass,
   getRequirementNodeTypeLabel,
   isFeatureNode,
@@ -113,6 +131,7 @@ const props = withDefaults(defineProps<{
   level?: number
 }>(), {
   level: 0,
+  selectedModuleId: '',
 })
 
 const emit = defineEmits<{
@@ -124,24 +143,54 @@ const emit = defineEmits<{
 }>()
 
 const actionMenuOpen = ref(false)
+const expanded = ref(true)
 
 const nodeType = computed(() => resolveRequirementNodeType(props.node))
-const nodeTypeLabel = computed(() => getRequirementNodeTypeLabel(nodeType.value))
-const badgeClass = computed(() => getRequirementNodeBadgeClass(nodeType.value))
 const isPage = computed(() => isPageNode(props.node))
 const isFeature = computed(() => isFeatureNode(props.node))
+const isComponentNode = computed(() => String(nodeType.value || '').toUpperCase() === 'COMPONENT')
+const hasChildren = computed(() => Boolean(props.node.children?.length))
+const isSelected = computed(() => props.node.id === props.selectedModuleId)
 
-const nodeLevelStyle = computed<Record<string, string>>(() => ({
-  '--tree-level': String(props.level),
-}))
+const nodeTitle = computed(() => String(
+  props.node.moduleName ||
+    (props.node as any).name ||
+    (props.node as any).title ||
+    props.node.moduleKey ||
+    (props.node as any).key ||
+    '未命名节点',
+))
 
-const showNodeTypeBadge = computed(() => {
-  return !isPage.value && !isFeature.value
-})
+const nodeTypeLabel = computed(() => isComponentNode.value ? '组件' : getRequirementNodeTypeLabel(nodeType.value))
+const badgeClass = computed(() => isComponentNode.value ? 'component' : getRequirementNodeBadgeClass(nodeType.value))
+const showNodeTypeBadge = computed(() => !isPage.value && !isFeature.value)
 
 const canCreateChild = computed(() => {
-  return !isFeature.value
+  if (isComponentNode.value) return false
+  return canCreateRequirementChild(props.node)
 })
+const createChildActionLabel = computed(() => getCreateChildActionLabel(props.node))
+
+watch(
+  () => props.selectedModuleId,
+  (selectedId) => {
+    if (!selectedId) return
+    if (containsNodeId(props.node, selectedId)) {
+      expanded.value = true
+    }
+  },
+  { immediate: true },
+)
+
+function containsNodeId(node: ModuleTreeNode | null | undefined, id: string): boolean {
+  if (!node || !id) return false
+  if (node.id === id) return true
+  return Boolean((node.children || []).some((child) => containsNodeId(child, id)))
+}
+
+function toggleExpanded() {
+  expanded.value = !expanded.value
+}
 
 function handleCreateChild() {
   actionMenuOpen.value = false
@@ -165,102 +214,124 @@ function handleDelete() {
 </script>
 
 <style scoped>
+/* A9.10.14.4.3.15.2.6.3_MODULE_TREE_FULL_REPLACE
+   Full replacement of the tree node component style. This removes the old
+   accumulated indentation, removes the visible frame around the ellipsis,
+   and removes the broken short connector lines. */
 .tree-node {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
+  min-width: 0;
 }
 
 .tree-node-row {
-  position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) 22px;
   align-items: center;
-  justify-content: space-between;
-  gap: 4px;
+  gap: 2px;
+  min-height: 28px;
   border: 1px solid transparent;
   border-radius: 9px;
-  padding: 2px 4px 2px 6px;
-  background: transparent;
+  padding: 1px 2px 1px 0;
   color: #0f172a;
-  transition: all 0.16s ease;
+  background: transparent;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
 }
 
 .tree-node-row:hover {
-  border-color: #dbeafe;
+  border-color: #e2e8f0;
   background: #f8fafc;
 }
 
 .tree-node-row.active {
-  border-color: #2564eb36;
-  background: linear-gradient(90deg, #eff3ff91 0%, #ffffff 100%);
+  border-color: #bfdbfe;
+  background: linear-gradient(90deg, #eff6ff 0%, #ffffff 100%);
   color: #1d4ed8;
-  box-shadow: inset 0.5px 0 0 #2564eb50;
 }
 
-.tree-node-row.root {
-  margin-top: 2px;
+.tree-expand-toggle,
+.tree-expand-spacer {
+  width: 12px;
+  height: 22px;
+  flex: 0 0 auto;
 }
 
-.tree-node-row.page .node-name {
-  font-weight: 800;
+.tree-expand-toggle {
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
 }
 
-.tree-node-row.feature {
-  color: #334155;
+.tree-expand-toggle svg {
+  width: 10px;
+  height: 10px;
+  fill: currentColor;
+  transform: rotate(90deg);
+  transition: transform 0.14s ease;
+}
+
+.tree-expand-toggle.collapsed svg {
+  transform: rotate(0deg);
+}
+
+.tree-expand-toggle:hover {
+  color: #2563eb;
 }
 
 .tree-node-button {
-  position: relative;
-  display: flex;
-  flex: 1;
-  align-items: center;
   min-width: 0;
-  border: none;
-  padding: 5px 0 5px 2px;
+  width: 100%;
+  border: 0;
+  padding: 2px 0;
   background: transparent;
   color: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-.node-branch-mark {
-  position: absolute;
-  left: -13px;
-  width: 10px;
-  height: 1px;
-  background: #cbd5e1;
-}
-
 .node-main {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
+  max-width: 100%;
 }
 
 .node-name {
+  min-width: 0;
   overflow: hidden;
-  color: inherit;
-  font-size: 14px;
-  font-weight: 650;
-  line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 1.45;
 }
 
 .tree-node-row.feature .node-name {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.tree-node-row.page .node-name {
+  font-size: 12.5px;
+  font-weight: 700;
 }
 
 .node-type-badge {
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  padding: 2px 7px;
-  font-size: 11px;
-  line-height: 1.4;
-  font-weight: 700;
+  padding: 1px 5px;
+  font-size: 10px;
+  line-height: 1.45;
+  font-weight: 780;
   white-space: nowrap;
 }
 
@@ -269,16 +340,13 @@ function handleDelete() {
   color: #92400e;
 }
 
-.node-type-badge.module {
+.node-type-badge.module,
+.node-type-badge.submodule {
   background: #dbeafe;
   color: #1d4ed8;
 }
 
-.node-type-badge.submodule {
-  background: #e0e7ff;
-  color: #3730a3;
-}
-
+.node-type-badge.component,
 .node-type-badge.unknown {
   background: #e2e8f0;
   color: #475569;
@@ -286,44 +354,40 @@ function handleDelete() {
 
 .node-action-menu-wrap {
   position: relative;
-  display: none;
-  flex-shrink: 0;
-}
-
-.tree-node-row:hover .node-action-menu-wrap,
-.tree-node-row.active .node-action-menu-wrap,
-.node-action-menu-wrap:focus-within {
-  display: block;
+  display: inline-flex;
+  justify-content: center;
+  min-width: 0;
 }
 
 .node-more-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: 1px solid #d6e1f0;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #64748b;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #94a3b8;
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
-  transition: all 0.16s ease;
 }
 
 .node-more-button:hover,
 .node-more-button[aria-expanded='true'] {
-  border-color: #93c5fd;
-  background: #eff6ff;
-  color: #1d4ed8;
+  border: 0;
+  background: #f1f5f9;
+  color: #2563eb;
+  box-shadow: none;
 }
 
 .node-action-popover {
   position: absolute;
-  top: 28px;
+  top: 24px;
   right: 0;
-  z-index: 20;
+  z-index: 30;
   display: grid;
   gap: 3px;
   width: 118px;
@@ -344,7 +408,6 @@ function handleDelete() {
   font-weight: 700;
   text-align: left;
   cursor: pointer;
-  transition: all 0.16s ease;
 }
 
 .node-action-item:hover {
@@ -364,9 +427,18 @@ function handleDelete() {
 .tree-node-children {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-left: 10px;
-  padding-left: 8px;
-  border-left: 1px solid #e2e8f0;
+  gap: 1px;
+  margin-left: 8px;
+  padding-left: 6px;
+  border-left: 0;
+}
+
+.node-branch-mark,
+.tree-node::before,
+.tree-node::after,
+.tree-node-children::before,
+.tree-node-children::after {
+  display: none !important;
+  content: none !important;
 }
 </style>

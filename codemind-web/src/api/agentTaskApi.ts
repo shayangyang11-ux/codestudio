@@ -97,6 +97,8 @@ export async function createUiContractTaskAsync(
   payload: {
     requirementText?: string
     themeProfile?: ProjectThemeProfile | null
+    forceRegenerate?: boolean
+    // A9.10.14.1.1_FORCE_UI_CONTRACT_REGENERATE
   },
 ): Promise<AsyncAgentTaskResponse> {
   return authFetch<AsyncAgentTaskResponse>(

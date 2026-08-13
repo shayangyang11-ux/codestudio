@@ -27,6 +27,7 @@ import java.util.UUID;
 public class PageSpecPersistenceService {
 
     private static final String ARTIFACT_TYPE = "PAGE_SPEC";
+    private static final String PAGE_MAP_ARTIFACT_TYPE = "PAGE_MAP";
 
     private final ProjectAccessService projectAccessService;
     private final AgentTaskService agentTaskService;
@@ -139,6 +140,38 @@ public class PageSpecPersistenceService {
         );
     }
 
+    public Map<String, Object> generateAndPersistPageMapForExistingTask(
+            UUID taskId,
+            UUID workspaceId,
+            String projectCode,
+            UUID moduleId,
+            GeneratePageSpecRequest request,
+            String username
+    ) {
+        ProjectEntity project = resolveProject(
+                workspaceId,
+                projectCode
+        );
+
+        ProjectModuleEntity module = projectAccessService.resolveAccessibleModule(
+                project.getId(),
+                moduleId
+        );
+
+        AgentTaskEntity task = agentTaskService.getById(taskId);
+
+        return executePageSpecGeneration(
+                task,
+                project,
+                workspaceId,
+                projectCode,
+                module,
+                request,
+                username
+        );
+    }
+
+
     private Map<String, Object> generateAndPersistPageSpecWithProjectAndModule(
             ProjectEntity project,
             UUID workspaceId,
@@ -184,6 +217,8 @@ public class PageSpecPersistenceService {
             GeneratePageSpecRequest request,
             String username
     ) {
+        String artifactType = resolvePageSpecArtifactType(task);
+
         Map<String, Object> requestPayload = task.getRequestPayload();
 
         if (requestPayload == null || requestPayload.isEmpty()) {
@@ -247,7 +282,7 @@ public class PageSpecPersistenceService {
                         project.getId(),
                         module.getId(),
                         task.getId(),
-                        ARTIFACT_TYPE,
+                        artifactType,
                         module.getModuleName() + " 页面规范",
                         artifactContent,
                         contentMarkdown,
@@ -279,7 +314,7 @@ public class PageSpecPersistenceService {
                         savedArtifact.getId(),
                         null,
                         Map.of(
-                                "artifact_type", ARTIFACT_TYPE,
+                                "artifact_type", artifactType,
                                 "module_id", module.getId().toString(),
                                 "module_key", module.getModuleKey(),
                                 "version_no", savedArtifact.getVersionNo()
@@ -348,6 +383,19 @@ public class PageSpecPersistenceService {
 
             throw e;
         }
+    }
+
+
+
+    private String resolvePageSpecArtifactType(
+            AgentTaskEntity task
+    ) {
+        if (task != null
+                && TaskType.GENERATE_PAGE_MAP.name().equalsIgnoreCase(task.getTaskType())) {
+            return PAGE_MAP_ARTIFACT_TYPE;
+        }
+
+        return ARTIFACT_TYPE;
     }
 
     private ProjectEntity resolveProject(

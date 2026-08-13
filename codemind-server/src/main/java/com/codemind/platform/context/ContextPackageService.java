@@ -25,6 +25,8 @@ import java.util.UUID;
 @Service
 public class ContextPackageService {
 
+    // A9.10.14.4.3.4_PRD_IMPACT_REGENERATE_CHAIN
+
     private static final String ACTIVE = "ACTIVE";
 
     private final ArtifactVersionRepository artifactVersionRepository;
@@ -74,19 +76,28 @@ public class ContextPackageService {
 
         Map<String, Object> artifactsContext = buildArtifactsContext(
                 project.getId(),
-                module == null ? null : module.getId(),
+                module,
                 taskType,
+                activeModules,
                 includedArtifactIds
         );
 
         boolean uiContractTask =
                 TaskType.GENERATE_UI_CONTRACT.equals(taskType);
 
-        List<Map<String, Object>> moduleAncestry = uiContractTask
+        // A9.10.14.4.3.4_PRD_IMPACT_REGENERATE_CHAIN:
+        // PAGE_SPEC is hidden from users, but it is a PAGE-semantic task and
+        // must receive the same parent PRD / ancestry / feature context that
+        // UI_CONTRACT receives. Otherwise regenerating UI after a PRD edit will
+        // keep using a stale PAGE_SPEC or generic page prompt.
+        boolean pageSemanticTask =
+                uiContractTask || TaskType.GENERATE_PAGE_SPEC.equals(taskType);
+
+        List<Map<String, Object>> moduleAncestry = pageSemanticTask
                 ? buildModuleAncestry(module, activeModules)
                 : List.of();
 
-        List<Map<String, Object>> featureNodes = uiContractTask
+        List<Map<String, Object>> featureNodes = pageSemanticTask
                 ? buildFeatureNodes(
                 project.getId(),
                 module,
@@ -101,6 +112,14 @@ public class ContextPackageService {
                 activeModules
         )
                 : List.of();
+
+        Map<String, Object> hiddenPrototypeContext = uiContractTask
+                ? buildHiddenPrototypeContext(
+                module,
+                activeModules,
+                navigationCandidates
+        )
+                : Map.of();
 
         MemoryReaderService.MemoryContextResult memoryContextResult =
                 memoryReaderService.readForContextPackage(
@@ -118,12 +137,30 @@ public class ContextPackageService {
                 projectThemeProfileContext
         );
         contextPackage.put("current_module", moduleContext);
-        if (uiContractTask) {
+        if (pageSemanticTask) {
             contextPackage.put("module_ancestry", moduleAncestry);
             contextPackage.put("feature_nodes", featureNodes);
+        }
+        if (uiContractTask) {
             contextPackage.put(
                     "navigation_candidates",
                     navigationCandidates
+            );
+            contextPackage.put(
+                    "hidden_prototype_context",
+                    hiddenPrototypeContext
+            );
+            contextPackage.put(
+                    "page_prototype_context",
+                    hiddenPrototypeContext.getOrDefault("page_prototype_context", Map.of())
+            );
+            contextPackage.put(
+                    "module_prototype_map",
+                    hiddenPrototypeContext.getOrDefault("module_prototype_map", Map.of())
+            );
+            contextPackage.put(
+                    "traceability_map",
+                    hiddenPrototypeContext.getOrDefault("traceability_map", Map.of())
             );
         }
         contextPackage.put("input", input == null ? Map.of() : input);
@@ -200,8 +237,9 @@ public class ContextPackageService {
 
     private Map<String, Object> buildArtifactsContext(
             UUID projectId,
-            UUID moduleId,
+            ProjectModuleEntity module,
             TaskType taskType,
+            List<ProjectModuleEntity> activeModules,
             List<UUID> includedArtifactIds
     ) {
         Map<String, Object> artifacts = new LinkedHashMap<>();
@@ -219,9 +257,14 @@ public class ContextPackageService {
                     );
                 });
 
-        if (moduleId == null) {
+        if (module == null || module.getId() == null) {
             return artifacts;
         }
+
+        UUID moduleId = module.getId();
+        boolean pageSemanticTask =
+                TaskType.GENERATE_UI_CONTRACT.equals(taskType)
+                        || TaskType.GENERATE_PAGE_SPEC.equals(taskType);
 
         List<ArtifactVersionEntity> currentModuleArtifacts =
                 artifactVersionRepository
@@ -232,7 +275,7 @@ public class ContextPackageService {
 
         for (ArtifactVersionEntity artifact : currentModuleArtifacts) {
             boolean includeArtifact =
-                    TaskType.GENERATE_UI_CONTRACT.equals(taskType)
+                    pageSemanticTask
                             || "MODULE_PRD".equalsIgnoreCase(
                             artifact.getArtifactType()
                     );
@@ -241,14 +284,86 @@ public class ContextPackageService {
                 continue;
             }
 
-            includedArtifactIds.add(artifact.getId());
+            if (!includedArtifactIds.contains(artifact.getId())) {
+                includedArtifactIds.add(artifact.getId());
+            }
             artifacts.put(
                     artifactKey(artifact.getArtifactType()),
                     buildArtifactCard(artifact)
             );
         }
 
+        if (pageSemanticTask) {
+            includeNearestAncestorArtifact(
+                    projectId,
+                    module,
+                    activeModules,
+                    artifacts,
+                    includedArtifactIds,
+                    "MODULE_PRD"
+            );
+            includeNearestAncestorArtifact(
+                    projectId,
+                    module,
+                    activeModules,
+                    artifacts,
+                    includedArtifactIds,
+                    "PAGE_MAP"
+            );
+        }
+
         return artifacts;
+    }
+
+    private void includeNearestAncestorArtifact(
+            UUID projectId,
+            ProjectModuleEntity module,
+            List<ProjectModuleEntity> activeModules,
+            Map<String, Object> artifacts,
+            List<UUID> includedArtifactIds,
+            String artifactType
+    ) {
+        String key = artifactKey(artifactType);
+        if (module == null || artifacts.containsKey(key)) {
+            return;
+        }
+
+        Map<UUID, ProjectModuleEntity> byId = new LinkedHashMap<>();
+        for (ProjectModuleEntity item : activeModules) {
+            byId.put(item.getId(), item);
+        }
+
+        ProjectModuleEntity cursor = module;
+
+        while (cursor != null && cursor.getId() != null) {
+            ProjectModuleEntity currentCursor = cursor;
+            artifactVersionRepository
+                    .findFirstByProjectIdAndModuleIdAndArtifactTypeAndCurrentTrueOrderByVersionNoDesc(
+                            projectId,
+                            currentCursor.getId(),
+                            artifactType
+                    )
+                    .ifPresent(artifact -> {
+                        if (!includedArtifactIds.contains(artifact.getId())) {
+                            includedArtifactIds.add(artifact.getId());
+                        }
+
+                        Map<String, Object> card = buildArtifactCard(artifact);
+                        if (!currentCursor.getId().equals(module.getId())) {
+                            card.put("inherited_from_module_id", currentCursor.getId());
+                            card.put("inherited_from_module_name", currentCursor.getModuleName());
+                            card.put("inherited_for_page_module_id", module.getId());
+                        }
+                        artifacts.put(key, card);
+                    });
+
+            if (artifacts.containsKey(key)) {
+                return;
+            }
+
+            UUID parentId = cursor.getParentId();
+            cursor = parentId == null ? null : byId.get(parentId);
+        }
     }
 
     private List<Map<String, Object>> buildModuleAncestry(
@@ -299,19 +414,36 @@ public class ContextPackageService {
             return List.of();
         }
 
+        Map<UUID, ProjectModuleEntity> byId = new LinkedHashMap<>();
+        for (ProjectModuleEntity item : activeModules) {
+            byId.put(item.getId(), item);
+        }
+
+        List<ProjectModuleEntity> features = new ArrayList<>();
+        ProjectModuleEntity parent = byId.get(page.getParentId());
+
+        if (parent != null
+                && "FEATURE".equals(normalizeNodeType(parent.getModuleType()))) {
+            features.add(parent);
+        }
+
+        for (ProjectModuleEntity candidate : activeModules) {
+            if (!page.getId().equals(candidate.getParentId())) {
+                continue;
+            }
+
+            if (!"FEATURE".equals(normalizeNodeType(candidate.getModuleType()))) {
+                continue;
+            }
+
+            if (!features.contains(candidate)) {
+                features.add(candidate);
+            }
+        }
+
         List<Map<String, Object>> result = new ArrayList<>();
 
-        for (ProjectModuleEntity feature : activeModules) {
-            if (!page.getId().equals(feature.getParentId())) {
-                continue;
-            }
-
-            if (!"FEATURE".equals(
-                    normalizeNodeType(feature.getModuleType())
-            )) {
-                continue;
-            }
-
+        for (ProjectModuleEntity feature : features) {
             Map<String, Object> featureCard =
                     new LinkedHashMap<>(buildModuleContext(feature));
 
@@ -380,6 +512,254 @@ public class ContextPackageService {
         }
 
         return result;
+    }
+
+
+    private Map<String, Object> buildHiddenPrototypeContext(
+            ProjectModuleEntity currentPage,
+            List<ProjectModuleEntity> activeModules,
+            List<Map<String, Object>> navigationCandidates
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        if (currentPage == null
+                || !"PAGE".equals(normalizeNodeType(currentPage.getModuleType()))) {
+            return result;
+        }
+
+        Map<UUID, ProjectModuleEntity> byId = new LinkedHashMap<>();
+        for (ProjectModuleEntity item : activeModules) {
+            byId.put(item.getId(), item);
+        }
+
+        ProjectModuleEntity parentFeature = byId.get(currentPage.getParentId());
+        if (parentFeature != null
+                && !"FEATURE".equals(normalizeNodeType(parentFeature.getModuleType()))) {
+            parentFeature = null;
+        }
+
+        ProjectModuleEntity ownerModule = resolveOwningModule(
+                parentFeature == null ? currentPage : parentFeature,
+                byId
+        );
+
+        Map<String, Object> pageExtra = safeExtra(currentPage);
+        Map<String, Object> featureExtra = safeExtra(parentFeature);
+        Map<String, Object> moduleExtra = safeExtra(ownerModule);
+
+        Map<String, Object> pagePrototypeContext = readMap(
+                pageExtra,
+                "pagePrototypeContext",
+                "page_prototype_context",
+                "prototypeContext",
+                "prototype_context"
+        );
+        if (pagePrototypeContext.isEmpty()) {
+            pagePrototypeContext = deriveLightweightPagePrototypeContext(
+                    currentPage,
+                    parentFeature,
+                    ownerModule
+            );
+        }
+
+        Map<String, Object> functionContext = readMap(
+                featureExtra,
+                "functionContext",
+                "function_context"
+        );
+        Map<String, Object> requirementContext = readMap(
+                moduleExtra,
+                "requirementContext",
+                "requirement_context"
+        );
+        Map<String, Object> modulePrototypeMap = readMap(
+                moduleExtra,
+                "modulePrototypeMap",
+                "module_prototype_map"
+        );
+        Map<String, Object> traceabilityMap = readMap(
+                moduleExtra,
+                "traceabilityMap",
+                "traceability_map"
+        );
+
+        result.put("page_prototype_context", pagePrototypeContext);
+        result.put("pagePrototypeContext", pagePrototypeContext);
+        result.put("selected_function_context", functionContext);
+        result.put("selectedFunctionContext", functionContext);
+        result.put("module_requirement_context", requirementContext);
+        result.put("moduleRequirementContext", requirementContext);
+        result.put("module_prototype_map", modulePrototypeMap);
+        result.put("modulePrototypeMap", modulePrototypeMap);
+        result.put("traceability_map", traceabilityMap);
+        result.put("traceabilityMap", traceabilityMap);
+        result.put(
+                "navigation_targets",
+                buildAllowedNavigationTargetsFromModuleMap(
+                        currentPage,
+                        modulePrototypeMap,
+                        navigationCandidates
+                )
+        );
+        result.put("hidden_from_user", true);
+        result.put("hiddenFromUser", true);
+        result.put("source", "MODULE_TREE_EXTRA_OR_LIGHTWEIGHT_DERIVED");
+
+        return result;
+    }
+
+    private List<Map<String, Object>> buildAllowedNavigationTargetsFromModuleMap(
+            ProjectModuleEntity currentPage,
+            Map<String, Object> modulePrototypeMap,
+            List<Map<String, Object>> navigationCandidates
+    ) {
+        if (modulePrototypeMap.isEmpty()) {
+            return navigationCandidates == null ? List.of() : navigationCandidates;
+        }
+
+        List<?> edges = modulePrototypeMap.get("navigationEdges") instanceof List<?> list
+                ? list
+                : List.of();
+
+        if (edges.isEmpty()) {
+            return navigationCandidates == null ? List.of() : navigationCandidates;
+        }
+
+        Map<String, Map<String, Object>> candidatesByKey = new LinkedHashMap<>();
+        if (navigationCandidates != null) {
+            for (Map<String, Object> candidate : navigationCandidates) {
+                String key = stringValue(firstNonNull(candidate.get("page_key"), candidate.get("pageKey"), candidate.get("targetPageKey")));
+                if (!key.isBlank()) {
+                    candidatesByKey.put(key, candidate);
+                }
+            }
+        }
+
+        String currentPageKey = currentPage.getModuleKey() == null ? "" : currentPage.getModuleKey();
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        for (Object rawEdge : edges) {
+            if (!(rawEdge instanceof Map<?, ?> edge)) {
+                continue;
+            }
+
+            String sourcePageKey = stringValue(firstNonNull(edge.get("sourcePageKey"), edge.get("source_page_key")));
+            if (!currentPageKey.equals(sourcePageKey)) {
+                continue;
+            }
+
+            String targetPageKey = stringValue(firstNonNull(edge.get("targetPageKey"), edge.get("target_page_key")));
+            Map<String, Object> matched = candidatesByKey.get(targetPageKey);
+            if (matched == null) {
+                continue;
+            }
+
+            Map<String, Object> target = new LinkedHashMap<>(matched);
+            target.put("action_id", stringValue(firstNonNull(edge.get("actionId"), edge.get("action_id"))));
+            target.put("label", stringValue(firstNonNull(edge.get("label"), edge.get("actionLabel"))));
+            target.put("source", "modulePrototypeMap");
+            result.add(target);
+        }
+
+        return result.isEmpty()
+                ? (navigationCandidates == null ? List.of() : navigationCandidates)
+                : result;
+    }
+
+    private ProjectModuleEntity resolveOwningModule(
+            ProjectModuleEntity start,
+            Map<UUID, ProjectModuleEntity> byId
+    ) {
+        ProjectModuleEntity current = start;
+
+        while (current != null) {
+            if ("MODULE".equals(normalizeNodeType(current.getModuleType()))) {
+                return current;
+            }
+
+            current = current.getParentId() == null
+                    ? null
+                    : byId.get(current.getParentId());
+        }
+
+        return null;
+    }
+
+    private Map<String, Object> deriveLightweightPagePrototypeContext(
+            ProjectModuleEntity page,
+            ProjectModuleEntity feature,
+            ProjectModuleEntity ownerModule
+    ) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        Map<String, Object> pageExtra = safeExtra(page);
+
+        context.put("source", "LIGHTWEIGHT_DERIVED_ON_UI_CONTRACT_GENERATION");
+        context.put("pageKey", page.getModuleKey());
+        context.put("pageName", page.getModuleName());
+        context.put("pageKind", stringValue(firstNonNull(pageExtra.get("pageKind"), pageExtra.get("page_kind"), "FORM_PAGE")));
+        context.put("routePath", stringValue(firstNonNull(pageExtra.get("routePath"), pageExtra.get("route_path"), "/" + page.getModuleKey())));
+        context.put("layoutType", stringValue(firstNonNull(pageExtra.get("layoutType"), pageExtra.get("layout_type"), "form-detail")));
+        context.put("primaryEntity", stringValue(firstNonNull(pageExtra.get("primaryEntity"), pageExtra.get("primary_entity"), page.getModuleName())));
+        context.put("parentFeatureKey", feature == null ? "" : feature.getModuleKey());
+        context.put("parentFeatureName", feature == null ? "" : feature.getModuleName());
+        context.put("ownerModuleKey", ownerModule == null ? "" : ownerModule.getModuleKey());
+        context.put("ownerModuleName", ownerModule == null ? "" : ownerModule.getModuleName());
+        context.put("goal", "生成当前页面的可交互原型。");
+        context.put("hiddenFromUser", true);
+
+        return context;
+    }
+
+    private Map<String, Object> safeExtra(
+            ProjectModuleEntity module
+    ) {
+        if (module == null || module.getExtra() == null) {
+            return new LinkedHashMap<>();
+        }
+
+        return new LinkedHashMap<>(module.getExtra());
+    }
+
+    private Map<String, Object> readMap(
+            Map<String, Object> source,
+            String... keys
+    ) {
+        if (source == null || source.isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+
+        for (String key : keys) {
+            Object value = source.get(key);
+            if (value instanceof Map<?, ?> raw) {
+                Map<String, Object> result = new LinkedHashMap<>();
+                for (Map.Entry<?, ?> entry : raw.entrySet()) {
+                    if (entry.getKey() != null) {
+                        result.put(String.valueOf(entry.getKey()), entry.getValue());
+                    }
+                }
+                return result;
+            }
+        }
+
+        return new LinkedHashMap<>();
+    }
+
+    private Object firstNonNull(
+            Object... values
+    ) {
+        for (Object value : values) {
+            if (value != null && !String.valueOf(value).isBlank()) {
+                return value;
+            }
+        }
+
+        return "";
+    }
+
+    private String stringValue(
+            Object value
+    ) {
+        return value == null ? "" : String.valueOf(value).trim();
     }
 
     private Map<String, Object> buildArtifactCard(

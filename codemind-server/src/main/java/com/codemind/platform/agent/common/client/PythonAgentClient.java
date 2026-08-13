@@ -1,8 +1,11 @@
 
 package com.codemind.platform.agent.common.client;
 
-import com.codemind.platform.agent.requirement.dto.*;
+
+
+import com.codemind.platform.agent.requirement.dto.GeneratePageSpecRequest;
 import com.codemind.platform.module.ProjectModuleEntity;
+import com.codemind.platform.agent.requirement.dto.*;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.stereotype.Service;
@@ -35,6 +38,7 @@ public class PythonAgentClient {
     ) {
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("requirement_text", request.getRequirementText());
+        input.put("modeling_mode", request.getModelingMode());
 
         Map<String, Object> payload = buildBasePayload(
                 taskId,
@@ -47,6 +51,7 @@ public class PythonAgentClient {
         );
 
         payload.put("requirement_text", request.getRequirementText());
+        payload.put("modeling_mode", request.getModelingMode());
 
         return execute(payload);
     }
@@ -110,7 +115,6 @@ public class PythonAgentClient {
 
         return execute(payload);
     }
-
     public Object generatePageSpec(
             UUID taskId,
             UUID projectId,
@@ -120,10 +124,50 @@ public class PythonAgentClient {
             GeneratePageSpecRequest request,
             Map<String, Object> contextPackage
     ) {
+        return generatePageArtifact(
+                taskId,
+                projectId,
+                projectCode,
+                moduleId,
+                module,
+                request,
+                contextPackage,
+                "GENERATE_PAGE_SPEC",
+                "PAGE_SPEC"
+        );
+    }
+
+    public Object generatePageArtifact(
+            UUID taskId,
+            UUID projectId,
+            String projectCode,
+            UUID moduleId,
+            ProjectModuleEntity module,
+            GeneratePageSpecRequest request,
+            Map<String, Object> contextPackage,
+            String taskType,
+            String artifactType
+    ) {
+        String pythonTaskType = "GENERATE_PAGE_MAP".equals(taskType)
+                ? "GENERATE_PAGE_SPEC"
+                : taskType;
+
+        String requirementText = request.getRequirementText();
+
+        if ("PAGE_MAP".equals(artifactType)) {
+            requirementText = (
+                    "【PAGE_MAP 生成模式】\n" +
+                    "请生成 MODULE 级页面地图 PAGE_MAP，不要生成单页 PAGE_SPEC。\n" +
+                    "输出重点：页面清单、pageKey、routePath、页面职责、入口出口、主流程、异常流程、sourcePageKey、actionId、targetPageKey、targetRoute、navigationType、navigationStatus、fallbackBehavior。\n" +
+                    "跨 MODULE 跳转允许占位，但必须标记 RESOLVED_PAGE_ONLY 或 UNRESOLVED_PAGE。\n\n" +
+                    String.valueOf(requirementText)
+            );
+        }
+
         Map<String, Object> input = buildModuleInput(
                 module,
-                request.getRequirementText(),
-                "PAGE_SPEC"
+                requirementText,
+                artifactType
         );
 
         Map<String, Object> payload = buildBasePayload(
@@ -131,15 +175,20 @@ public class PythonAgentClient {
                 projectId,
                 projectCode,
                 moduleId,
-                "GENERATE_PAGE_SPEC",
+                pythonTaskType,
                 input,
                 contextPackage
         );
 
-        payload.put("requirement_text", request.getRequirementText());
+        payload.put("requirement_text", requirementText);
+        payload.put("artifact_type", artifactType);
+        payload.put("original_task_type", taskType);
+        payload.put("python_task_type", pythonTaskType);
 
         return execute(payload);
     }
+
+
 
     public Object generateDataModel(
             UUID taskId,
@@ -338,6 +387,80 @@ public class PythonAgentClient {
         return fallback;
     }
 
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getModelRoutingStatus() {
+        String url = agentBaseUrl + "/agent/runtime/model-routing/status";
+
+        Object response = restTemplate.getForObject(url, Object.class);
+
+        if (response instanceof Map<?, ?> responseMap) {
+            Map<String, Object> result = new LinkedHashMap<>();
+
+            for (Map.Entry<?, ?> entry : responseMap.entrySet()) {
+                if (entry.getKey() != null) {
+                    result.put(String.valueOf(entry.getKey()), entry.getValue());
+                }
+            }
+
+            return result;
+        }
+
+        Map<String, Object> fallback = new LinkedHashMap<>();
+        fallback.put("raw_response", response);
+        return fallback;
+    }
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> generateDevelopmentNodejsCodeProposal(Map<String, Object> payload) {
+        String url = agentBaseUrl + "/agent/development/codegen/nodejs/proposal";
+
+        Object response = restTemplate.postForObject(url, payload == null ? Map.of() : payload, Object.class);
+
+        if (response instanceof Map<?, ?> responseMap) {
+            Map<String, Object> result = new LinkedHashMap<>();
+
+            for (Map.Entry<?, ?> entry : responseMap.entrySet()) {
+                if (entry.getKey() != null) {
+                    result.put(String.valueOf(entry.getKey()), entry.getValue());
+                }
+            }
+
+            return result;
+        }
+
+        Map<String, Object> fallback = new LinkedHashMap<>();
+        fallback.put("raw_response", response);
+        return fallback;
+    }
+
+
+
+
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> generateDevelopmentNodejsRepairProposal(Map<String, Object> payload) {
+        String url = agentBaseUrl + "/agent/development/codegen/nodejs/repair";
+
+        Object response = restTemplate.postForObject(url, payload == null ? Map.of() : payload, Object.class);
+
+        if (response instanceof Map<?, ?> responseMap) {
+            Map<String, Object> result = new LinkedHashMap<>();
+
+            for (Map.Entry<?, ?> entry : responseMap.entrySet()) {
+                if (entry.getKey() != null) {
+                    result.put(String.valueOf(entry.getKey()), entry.getValue());
+                }
+            }
+
+            return result;
+        }
+
+        Map<String, Object> fallback = new LinkedHashMap<>();
+        fallback.put("raw_response", response);
+        return fallback;
+    }
+
+
     public Object proposeModuleTreePatch(
             UUID taskId,
             String projectCode,
@@ -370,12 +493,12 @@ public class PythonAgentClient {
         input.put("selected_node_id", selectedNodeId == null ? null : selectedNodeId.toString());
         input.put("module_tree", moduleTree);
         input.put("attachment_contexts", attachmentContexts == null ? java.util.List.of() : attachmentContexts);
-        input.put("attachment_summary", attachmentSummary == null ? java.util.Map.of() : attachmentSummary);
+        input.put("attachment_summary", attachmentSummary == null ? Map.of() : attachmentSummary);
 
         Map<String, Object> contextPackage = new LinkedHashMap<>();
         contextPackage.put("module_tree", moduleTree);
         contextPackage.put("attachment_contexts", attachmentContexts == null ? java.util.List.of() : attachmentContexts);
-        contextPackage.put("attachment_summary", attachmentSummary == null ? java.util.Map.of() : attachmentSummary);
+        contextPackage.put("attachment_summary", attachmentSummary == null ? Map.of() : attachmentSummary);
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("task_id", taskId.toString());
@@ -502,3 +625,5 @@ public class PythonAgentClient {
         return execute(payload);
     }
 }
+
+

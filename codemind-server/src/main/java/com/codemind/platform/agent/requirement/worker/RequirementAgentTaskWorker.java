@@ -327,15 +327,41 @@ public class RequirementAgentTaskWorker {
         return true;
     }
 
+    // A9.10.14.4.3.12.1_TOKEN_GUARD_AND_PRD_UI_SYNC_PATCH_WORKER
     private void handleExecutionFailure(
             UUID taskId,
             Exception e
     ) {
         AgentTaskEntity latestTask = agentTaskService.getById(taskId);
 
-        if (TaskStatus.SUCCESS.name().equals(latestTask.getStatus())
-                || TaskStatus.PARTIAL_SUCCESS.name().equals(latestTask.getStatus())
-                || TaskStatus.CANCELLED.name().equals(latestTask.getStatus())) {
+        if (isTerminalStatus(latestTask.getStatus())) {
+            log.info(
+                    "Requirement agent task failure handler skipped because task is already terminal. taskId={}, taskType={}, status={}, workerId={}, error={}",
+                    latestTask.getId(),
+                    latestTask.getTaskType(),
+                    latestTask.getStatus(),
+                    workerIdentity.workerId(),
+                    e == null ? "" : e.getMessage()
+            );
+            return;
+        }
+
+        if (shouldFailFastWithoutAutoRetry(latestTask, e)) {
+            log.error(
+                    "Requirement agent task failed fast without auto retry. taskId={}, taskType={}, attemptCount={}, maxAttempts={}, workerId={}, error={}",
+                    latestTask.getId(),
+                    latestTask.getTaskType(),
+                    latestTask.getAttemptCount(),
+                    latestTask.getMaxAttempts(),
+                    workerIdentity.workerId(),
+                    e == null ? "" : e.getMessage()
+            );
+
+            agentTaskService.markFailed(
+                    taskId,
+                    "AGENT_TASK_FAIL_FAST_NO_AUTO_RETRY",
+                    e == null ? "Unknown requirement agent failure." : e.getMessage()
+            );
             return;
         }
 
@@ -381,6 +407,60 @@ public class RequirementAgentTaskWorker {
                     e.getMessage()
             );
         }
+    }
+
+    private boolean isTerminalStatus(
+            String status
+    ) {
+        return TaskStatus.SUCCESS.name().equals(status)
+                || TaskStatus.PARTIAL_SUCCESS.name().equals(status)
+                || TaskStatus.FAILED.name().equals(status)
+                || TaskStatus.TIMEOUT.name().equals(status)
+                || TaskStatus.CANCELLED.name().equals(status)
+                || TaskStatus.BLOCKED.name().equals(status);
+    }
+
+    private boolean shouldFailFastWithoutAutoRetry(
+            AgentTaskEntity task,
+            Exception e
+    ) {
+        if (task == null) {
+            return true;
+        }
+
+        String taskType = task.getTaskType() == null ? "" : task.getTaskType().trim().toUpperCase();
+
+        if (isLlmBackedRequirementTask(taskType)) {
+            return true;
+        }
+
+        String message = e == null || e.getMessage() == null
+                ? ""
+                : e.getMessage().toLowerCase();
+
+        return message.contains("name '")
+                || message.contains("syntaxerror")
+                || message.contains("importerror")
+                || message.contains("modulenotfounderror")
+                || message.contains("validation")
+                || message.contains("pydantic")
+                || message.contains("json")
+                || message.contains("ui_contract")
+                || message.contains("page_spec");
+    }
+
+    private boolean isLlmBackedRequirementTask(
+            String taskType
+    ) {
+        return "GENERATE_MODULE_PRD".equals(taskType)
+                || "GENERATE_BUSINESS_FLOW".equals(taskType)
+                || "GENERATE_PAGE_MAP".equals(taskType)
+                || "GENERATE_PAGE_SPEC".equals(taskType)
+                || "GENERATE_DATA_MODEL".equals(taskType)
+                || "GENERATE_API_CONTRACT".equals(taskType)
+                || "GENERATE_TEST_SPEC".equals(taskType)
+                || "GENERATE_UI_CONTRACT".equals(taskType)
+                || "GENERATE_DEV_HANDOFF_PACKAGE".equals(taskType);
     }
 
     private void handleEmptyAcquire(

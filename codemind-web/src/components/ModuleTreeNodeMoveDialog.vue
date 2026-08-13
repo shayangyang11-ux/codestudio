@@ -72,9 +72,9 @@
 import { computed, ref, watch } from 'vue'
 import type { ModuleTreeNode } from '../types/codemind'
 import {
+  canMoveRequirementNodeToParent,
   getRequirementNodeTypeLabel,
   resolveRequirementNodeType,
-  type RequirementNodeType,
 } from '../domain/requirementNodePolicy'
 
 interface ParentOption {
@@ -119,7 +119,7 @@ const parentOptions = computed<ParentOption[]>(() => {
   const options: ParentOption[] = []
   const nodeType = resolveRequirementNodeType(node)
 
-  if (canMoveToRoot(nodeType)) {
+  if (canMoveToRoot(node)) {
     options.push({
       value: null,
       label: '根节点',
@@ -143,7 +143,7 @@ const parentOptions = computed<ParentOption[]>(() => {
 
     const candidateType = resolveRequirementNodeType(candidate)
 
-    if (!isAllowedParent(nodeType, candidateType)) {
+    if (!canMoveRequirementNodeToParent(node, candidate)) {
       return
     }
 
@@ -180,31 +180,8 @@ function handleSubmit() {
   })
 }
 
-function canMoveToRoot(nodeType: RequirementNodeType): boolean {
-  return nodeType === 'DOMAIN' || nodeType === 'MODULE'
-}
-
-function isAllowedParent(
-  nodeType: RequirementNodeType,
-  parentType: RequirementNodeType,
-): boolean {
-  if (nodeType === 'MODULE') {
-    return parentType === 'DOMAIN'
-  }
-
-  if (nodeType === 'SUBMODULE') {
-    return parentType === 'MODULE'
-  }
-
-  if (nodeType === 'PAGE') {
-    return parentType === 'MODULE' || parentType === 'SUBMODULE'
-  }
-
-  if (nodeType === 'FEATURE') {
-    return parentType === 'PAGE'
-  }
-
-  return false
+function canMoveToRoot(node: ModuleTreeNode | null | undefined): boolean {
+  return canMoveRequirementNodeToParent(node, null)
 }
 
 function flattenModules(nodes: ModuleTreeNode[]): ModuleTreeNode[] {

@@ -1,3 +1,4 @@
+﻿// A9.10.14.4.3.10_CURRENT_FILE_CLEANUP
 import { computed, onBeforeUnmount, ref } from 'vue'
 import {
   cancelAgentTask,
@@ -113,6 +114,19 @@ export function useAsyncArtifactTasks(
   let taskPollingTimer: number | null = null
   const notifiedTerminalTaskKeys = new Set<string>()
 
+  // A9.10.14.4.2.3_PAGE_SPEC_BEFORE_UI_FRONTEND_CHAIN
+  // PAGE_SPEC is hidden/internal for users, but UI_CONTRACT should still be
+  // generated from a page-level semantic specification when it is missing.
+  // User clicks "生成交互原型" once: first prepare PAGE_SPEC, then continue UI_CONTRACT.
+  const pendingUiContractAfterPageSpecModuleId = ref<string | null>(null)
+// A9.10.14.4.3.8.2_FINAL_FORCE_PAGESPEC_CHAIN: one-shot bypass so PAGE_SPEC -> UI_CONTRACT does not recurse.
+const a9AllowUiContractAfterForcedPageSpec = ref(false)
+
+  // A9.10.14.4.3.7.1_ROBUST_PRD_IMPACT_FRONTEND_FIX
+  // User-facing '重新生成交互原型' always refreshes hidden PAGE_SPEC first.
+  // This guard allows the automatic continuation to UI_CONTRACT without looping.
+  const continuingUiContractAfterPageSpec = ref(false)
+
   const moduleArtifactTaskItems = computed<ModuleArtifactTaskItem[]>(() => {
     const module = options.resolveSelectedModule()
 
@@ -145,6 +159,70 @@ export function useAsyncArtifactTasks(
       }
     })
   })
+
+  // A9.10.14.4.3.4_PRD_IMPACT_REGENERATE_CHAIN
+  // PAGE_SPEC is hidden from users. The visible "重新生成交互原型" action must
+  // refresh PAGE_SPEC not only when it is missing, but also when PRD edits have
+  // marked it as needing regeneration.
+  // A9.10.14.4.3.6_PRD_IMPACT_BANNER_UI_INTEGRITY_FIX
+  // PAGE_SPEC is hidden/internal. The user-visible action is still only
+  // "重新生成交互原型", but when the module PRD is newer, the hidden PAGE_SPEC
+  // must be refreshed even if an older PAGE_SPEC already exists.
+  function hasCurrentPageSpecArtifact(): boolean {
+    const pageSpec = options.getArtifactByType('PAGE_SPEC')
+    return Boolean(pageSpec?.artifactId || pageSpec?.exists)
+  }
+
+  function artifactNeedsRegeneration(artifact: ArtifactResponse | null | undefined): boolean {
+    const status = String((artifact as any)?.status || '').trim().toUpperCase()
+    return [
+      'NEEDS_REVIEW',
+      'STALE',
+      'OUTDATED',
+      'IMPACTED',
+      'DIRTY',
+      'INVALIDATED',
+    ].includes(status)
+  }
+
+  function artifactUpdatedMillis(artifact: ArtifactResponse | null | undefined): number {
+    if (!artifact) return 0
+    const record = artifact as any
+    for (const key of [
+      'updatedAt',
+      'updated_at',
+      'modifiedAt',
+      'modified_at',
+      'createdAt',
+      'created_at',
+      'generatedAt',
+      'generated_at',
+    ]) {
+      const raw = record[key]
+      if (!raw) continue
+      const time = new Date(String(raw)).getTime()
+      if (Number.isFinite(time) && time > 0) return time
+    }
+    return 0
+  }
+
+  function sourceNewerThanTarget(
+    source: ArtifactResponse | null | undefined,
+    target: ArtifactResponse | null | undefined,
+  ): boolean {
+    const sourceTime = artifactUpdatedMillis(source)
+    if (!sourceTime) return false
+    const targetTime = artifactUpdatedMillis(target)
+    return !targetTime || sourceTime > targetTime
+  }
+
+  function shouldPreparePageSpecBeforeUi(): boolean {
+    // A9.10.14.4.3.10_CURRENT_FILE_CLEANUP
+    // PAGE_SPEC is hidden/internal. Every explicit UI_CONTRACT regeneration
+    // should refresh PAGE_SPEC first. The automatic continuation sets
+    // a9AllowUiContractAfterForcedPageSpec to bypass this once.
+    return !a9AllowUiContractAfterForcedPageSpec.value
+  }
 
   function resolveTaskUnavailableReason(
     taskType: AsyncRequirementTaskType,
@@ -263,7 +341,53 @@ export function useAsyncArtifactTasks(
       return
     }
 
+    // A9.10.14.4.3.12.1_TOKEN_GUARD_AND_PRD_UI_SYNC_PATCH_FRONTEND_ACTIVE_DEDUPE
+    // Avoid duplicate token-burning task creation from repeated clicks or stale UI state.
+    if (
+      taskType === 'GENERATE_UI_CONTRACT' &&
+      isTaskActive(moduleAgentTasks.value.GENERATE_UI_CONTRACT)
+    ) {
+      startTaskPolling()
+      return
+    }
+
+    // A9.10.14.4.2.3_PAGE_SPEC_BEFORE_UI_FRONTEND_CHAIN
+    // UI_CONTRACT has a PAGE_SPEC upstream contract, but PAGE_SPEC is intentionally
+    // not exposed as the main user button. Prepare it automatically when missing.
+    if (taskType === 'GENERATE_UI_CONTRACT' && !continuingUiContractAfterPageSpec.value) {
+      pendingUiContractAfterPageSpecModuleId.value = module.id
+      isGeneratingUiContract.value = true
+
+      if (isTaskActive(moduleAgentTasks.value.GENERATE_PAGE_SPEC)) {
+        startTaskPolling()
+        return
+      }
+
+      await startAsyncArtifactTask('GENERATE_PAGE_SPEC')
+      return
+    }
+
+    if (taskType === 'GENERATE_UI_CONTRACT' && continuingUiContractAfterPageSpec.value) {
+      continuingUiContractAfterPageSpec.value = false
+    }
+
     const definition = getRequirementArtifactDefinitionByTaskType(taskType)
+
+    // A9.10.14.4.3.15.4.6.1_BUILD_RED_ERROR_CLEANUP_ASYNC_DEFINITION_GUARD
+
+    if (!definition) {
+
+      const message = `${taskType}任务定义不存在。`
+
+      options.setStepStatus('artifact', 'failed')
+
+      setGeneratingFlag(taskType, false)
+
+      await options.onTaskFailed?.(message, taskType)
+
+      return
+
+    }
     const moduleName = options.resolveModuleDisplayName(module)
 
     setGeneratingFlag(taskType, true)
@@ -331,6 +455,12 @@ export function useAsyncArtifactTasks(
         taskType,
         moduleName,
       ),
+      ...(['GENERATE_UI_CONTRACT', 'GENERATE_PAGE_SPEC'].includes(taskType)
+        ? {
+            forceRegenerate: true,
+            // A9.10.14.4.3.4_PRD_IMPACT_REGENERATE_CHAIN
+          }
+        : {}),
       ...(themeProfile
         ? {
             themeProfile: normalizeThemeProfileForTaskPayload(themeProfile),
@@ -534,9 +664,56 @@ export function useAsyncArtifactTasks(
   async function pollCurrentModuleAgentTasks() {
     await loadCurrentModuleAgentTasks()
     await refreshArtifactsForFinishedTasks()
+    await startPendingUiContractAfterPageSpecIfReady()
 
     if (!hasActiveModuleTasks()) {
       stopTaskPolling()
+    }
+  }
+
+  async function startPendingUiContractAfterPageSpecIfReady() {
+    const pendingModuleId = pendingUiContractAfterPageSpecModuleId.value
+    const module = options.resolveSelectedModule()
+
+    if (!pendingModuleId || !module?.id || module.id !== pendingModuleId) {
+      return
+    }
+
+    if (isTaskActive(moduleAgentTasks.value.GENERATE_PAGE_SPEC)) {
+      isGeneratingUiContract.value = true
+      return
+    }
+
+    if (isTaskActive(moduleAgentTasks.value.GENERATE_UI_CONTRACT)) {
+      return
+    }
+
+    const pageSpecTask = moduleAgentTasks.value.GENERATE_PAGE_SPEC
+
+    if (!pageSpecTask) {
+      return
+    }
+
+    if (!isSuccessTaskStatus(pageSpecTask.status)) {
+      if (['FAILED', 'TIMEOUT', 'CANCELLED'].includes(pageSpecTask.status || '')) {
+        pendingUiContractAfterPageSpecModuleId.value = null
+        continuingUiContractAfterPageSpec.value = false
+        a9AllowUiContractAfterForcedPageSpec.value = false
+        isGeneratingUiContract.value = false
+      }
+      return
+    }
+
+    await options.loadArtifactByType('PAGE_SPEC', module)
+
+    pendingUiContractAfterPageSpecModuleId.value = null
+    continuingUiContractAfterPageSpec.value = true
+    a9AllowUiContractAfterForcedPageSpec.value = true
+
+    try {
+      await startAsyncArtifactTask('GENERATE_UI_CONTRACT')
+    } finally {
+      a9AllowUiContractAfterForcedPageSpec.value = false
     }
   }
 
@@ -635,9 +812,12 @@ export function useAsyncArtifactTasks(
     isGeneratingTestSpec.value = isTaskActive(
       moduleAgentTasks.value.GENERATE_TEST_SPEC,
     )
-    isGeneratingUiContract.value = isTaskActive(
-      moduleAgentTasks.value.GENERATE_UI_CONTRACT,
-    )
+    isGeneratingUiContract.value =
+      isTaskActive(moduleAgentTasks.value.GENERATE_UI_CONTRACT) ||
+      Boolean(
+        pendingUiContractAfterPageSpecModuleId.value &&
+          isTaskActive(moduleAgentTasks.value.GENERATE_PAGE_SPEC),
+      )
     isGeneratingDevHandoffPackage.value = isTaskActive(
       moduleAgentTasks.value.GENERATE_DEV_HANDOFF_PACKAGE,
     )
@@ -882,3 +1062,4 @@ export function useAsyncArtifactTasks(
     isSuccessTaskStatus,
   }
 }
+

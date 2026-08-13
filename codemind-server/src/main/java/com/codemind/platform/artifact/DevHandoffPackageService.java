@@ -24,7 +24,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -117,7 +116,7 @@ public class DevHandoffPackageService {
             }
 
             if (!exists && !requirement.required()) {
-                warnings.add("可选资产未生成：" + requirement.title() + "（" + requirement.artifactType() + "）。");
+                warnings.add("建议资产未生成：" + requirement.title() + "（" + requirement.artifactType() + "）。");
             }
 
             Map<String, Object> sourceManifest = buildSourceArtifactManifest(
@@ -140,6 +139,19 @@ public class DevHandoffPackageService {
             }
         }
 
+        Map<String, Object> devBlueprint = buildDevBlueprint(
+                module,
+                sourceArtifacts,
+                blockers,
+                warnings
+        );
+
+        Map<String, Object> readiness = buildReadiness(
+                requirements,
+                blockers,
+                warnings
+        );
+
         String markdown = buildMarkdown(
                 access,
                 module,
@@ -148,6 +160,8 @@ public class DevHandoffPackageService {
                 moduleTreeBaseline,
                 sourceArtifacts,
                 artifactSections,
+                devBlueprint,
+                readiness,
                 blockers,
                 warnings,
                 request == null ? null : request.note()
@@ -160,6 +174,8 @@ public class DevHandoffPackageService {
                 username,
                 moduleTreeBaseline,
                 sourceArtifacts,
+                devBlueprint,
+                readiness,
                 blockers,
                 warnings,
                 request,
@@ -244,41 +260,44 @@ public class DevHandoffPackageService {
         String nodeType = normalizeNodeType(module == null ? null : module.getModuleType());
 
         return switch (nodeType) {
+            case "DOMAIN" -> List.of(
+                    optional("MODULE_PRD", "业务域概览"),
+                    optional("BUSINESS_FLOW", "跨模块业务流程"),
+                    optional("PAGE_MAP", "页面地图"),
+                    optional("DATA_MODEL", "业务域数据对象摘要"),
+                    optional("TEST_SPEC", "业务域验收摘要")
+            );
             case "PAGE" -> List.of(
                     required("PAGE_SPEC", "页面规范"),
-                    optional("MODULE_PRD", "页面需求"),
-                    optional("BUSINESS_FLOW", "页面流程"),
-                    optional("DATA_MODEL", "页面数据模型"),
-                    required("API_CONTRACT", "页面接口契约"),
-                    optional("TEST_SPEC", "页面测试规格"),
-                    required("UI_CONTRACT", "交互原型")
+                    required("UI_CONTRACT", "UI 契约"),
+                    optional("API_CONTRACT", "页面接口摘要"),
+                    optional("DATA_MODEL", "页面相关数据摘要"),
+                    optional("TEST_SPEC", "页面测试摘要"),
+                    optional("MODULE_PRD", "页面需求摘要"),
+                    optional("BUSINESS_FLOW", "页面流程摘要")
             );
             case "FEATURE" -> List.of(
-                    required("MODULE_PRD", "功能点需求"),
+                    optional("MODULE_PRD", "功能点说明"),
                     optional("BUSINESS_FLOW", "功能点流程"),
-                    optional("PAGE_SPEC", "所属页面规范"),
-                    optional("DATA_MODEL", "功能点数据模型"),
-                    required("API_CONTRACT", "功能点接口契约"),
-                    required("TEST_SPEC", "功能点测试规格"),
-                    optional("UI_CONTRACT", "相关交互契约")
+                    optional("API_CONTRACT", "功能点接口"),
+                    optional("TEST_SPEC", "功能点测试规格")
             );
             case "SUBMODULE" -> List.of(
-                    required("MODULE_PRD", "场景需求说明"),
-                    required("BUSINESS_FLOW", "场景业务流程"),
-                    required("PAGE_SPEC", "场景页面清单"),
-                    optional("DATA_MODEL", "场景数据模型"),
+                    optional("MODULE_PRD", "场景需求说明"),
+                    optional("BUSINESS_FLOW", "场景业务流程"),
+                    optional("PAGE_SPEC", "场景页面清单"),
                     optional("API_CONTRACT", "场景接口清单"),
-                    optional("TEST_SPEC", "场景测试规格"),
-                    optional("UI_CONTRACT", "场景交互原型")
+                    optional("DATA_MODEL", "场景数据模型"),
+                    optional("TEST_SPEC", "场景测试规格")
             );
             default -> List.of(
                     required("MODULE_PRD", "模块 PRD"),
                     required("BUSINESS_FLOW", "业务流程"),
                     required("PAGE_SPEC", "页面地图/页面规范"),
-                    optional("DATA_MODEL", "数据模型"),
+                    required("DATA_MODEL", "数据模型"),
                     required("API_CONTRACT", "接口规划"),
-                    optional("TEST_SPEC", "测试规格"),
-                    optional("UI_CONTRACT", "交互原型")
+                    required("TEST_SPEC", "测试规格"),
+                    optional("UI_CONTRACT", "页面 UI 契约")
             );
         };
     }
@@ -319,19 +338,161 @@ public class DevHandoffPackageService {
         item.put("exists", artifact != null);
         item.put("included", included);
         item.put("approved", approved);
+        item.put("usedFor", usedFor(requirement.artifactType()));
+        item.put("importance", requirement.required() ? "CORE" : "RECOMMENDED");
 
         if (artifact != null) {
+            String markdown = resolveArtifactMarkdown(artifact);
             item.put("artifactId", artifact.getId() == null ? null : artifact.getId().toString());
             item.put("versionNo", artifact.getVersionNo());
             item.put("status", safeText(artifact.getStatus()));
             item.put("checksum", safeText(artifact.getChecksum()));
             item.put("title", firstNonBlank(artifact.getTitle(), requirement.title()));
-            item.put("contentPreview", excerpt(resolveArtifactMarkdown(artifact), 500));
+            item.put("contentPreview", excerpt(markdown, 700));
+            item.put("contentChars", markdown.length());
             item.put("createdAt", artifact.getCreatedAt() == null ? null : artifact.getCreatedAt().toString());
             item.put("updatedAt", artifact.getUpdatedAt() == null ? null : artifact.getUpdatedAt().toString());
         }
 
         return item;
+    }
+
+    private Map<String, Object> buildDevBlueprint(
+            ProjectModuleEntity module,
+            List<Map<String, Object>> sourceArtifacts,
+            List<String> blockers,
+            List<String> warnings
+    ) {
+        String nodeType = normalizeNodeType(module == null ? null : module.getModuleType());
+        String nodeKey = safeNodeKey(module);
+        String nodeName = safeTitle(module == null ? null : module.getModuleName());
+
+        Map<String, Object> blueprint = new LinkedHashMap<>();
+        Map<String, Object> targetNode = new LinkedHashMap<>();
+        Map<String, Object> stackPolicy = new LinkedHashMap<>();
+        List<Map<String, Object>> sourceReferences = new ArrayList<>();
+
+        targetNode.put("nodeId", module == null || module.getId() == null ? null : module.getId().toString());
+        targetNode.put("nodeKey", nodeKey);
+        targetNode.put("nodeName", nodeName);
+        targetNode.put("nodeType", nodeType);
+        targetNode.put("modulePath", safeText(module == null ? null : module.getModulePath()));
+        targetNode.put("parentId", module == null || module.getParentId() == null ? null : module.getParentId().toString());
+
+        stackPolicy.put("languageNeutral", true);
+        stackPolicy.put("targetStack", null);
+        stackPolicy.put("supportedStackModes", List.of(
+                "NODEJS_FULLSTACK",
+                "JAVA_SPRING_BOOT",
+                "PYTHON_FASTAPI"
+        ));
+        stackPolicy.put("decisionOwner", "Dev Agent");
+        stackPolicy.put("note", "需求交接包不绑定具体技术栈；后续 Dev Agent 根据 targetStack 转换为具体项目结构、框架、数据库和测试实现。");
+
+        for (Map<String, Object> item : sourceArtifacts) {
+            Map<String, Object> reference = new LinkedHashMap<>();
+            reference.put("sourceKey", "src_" + safeText(item.get("artifactType")).toLowerCase(Locale.ROOT));
+            reference.put("artifactType", item.get("artifactType"));
+            reference.put("title", item.get("title"));
+            reference.put("versionNo", item.get("versionNo"));
+            reference.put("status", item.get("status"));
+            reference.put("included", item.get("included"));
+            reference.put("required", item.get("required"));
+            reference.put("usedFor", item.get("usedFor"));
+            reference.put("contentPreview", item.get("contentPreview"));
+            sourceReferences.add(reference);
+        }
+
+        blueprint.put("blueprintVersion", "2.0");
+        blueprint.put("blueprintKey", nodeKey + "_dev_blueprint");
+        blueprint.put("blueprintName", nodeName + "语言无关开发蓝图");
+        blueprint.put("scopeType", nodeType);
+        blueprint.put("targetNode", targetNode);
+        blueprint.put("businessGoal", "基于当前需求资产实现 " + nodeName + " 的核心业务能力，并允许后续转换为 Node.js、Java、Python 等不同技术栈实现。");
+        blueprint.put("stackPolicy", stackPolicy);
+        blueprint.put("generationBoundaries", generationBoundaries(nodeType));
+        blueprint.put("sourceReferences", sourceReferences);
+        blueprint.put("capabilityMap", buildCapabilityMap(nodeType, sourceArtifacts));
+        blueprint.put("readiness", Map.of(
+                "readyForDevAgent", blockers.isEmpty(),
+                "blockerCount", blockers.size(),
+                "warningCount", warnings.size()
+        ));
+
+        return blueprint;
+    }
+
+    private Map<String, Object> buildCapabilityMap(
+            String nodeType,
+            List<Map<String, Object>> sourceArtifacts
+    ) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        List<String> artifactTypes = sourceArtifacts.stream()
+                .filter(item -> Boolean.TRUE.equals(item.get("included")))
+                .map(item -> safeText(item.get("artifactType")))
+                .filter(text -> !text.isBlank())
+                .toList();
+
+        map.put("pages", artifactTypes.contains("PAGE_SPEC") || artifactTypes.contains("UI_CONTRACT")
+                ? List.of("根据 PAGE_SPEC / UI_CONTRACT 生成页面结构、状态、交互和视觉一致性约束。")
+                : List.of());
+        map.put("features", List.of("根据当前节点需求说明和业务流程生成核心功能能力。"));
+        map.put("apis", artifactTypes.contains("API_CONTRACT")
+                ? List.of("根据 API_CONTRACT 生成接口能力、请求响应、错误场景和权限约束。")
+                : List.of());
+        map.put("dataEntities", artifactTypes.contains("DATA_MODEL")
+                ? List.of("根据 DATA_MODEL 生成数据实体语义、字段约束、关系和生命周期。")
+                : List.of());
+        map.put("acceptanceCriteria", artifactTypes.contains("TEST_SPEC")
+                ? List.of("根据 TEST_SPEC 生成验收场景、异常场景、权限场景和边界场景。")
+                : List.of("至少保留主流程验收和人工确认项。"));
+        map.put("scopeHint", nodeType);
+
+        return map;
+    }
+
+    private List<String> generationBoundaries(
+            String nodeType
+    ) {
+        List<String> result = new ArrayList<>();
+        result.add("不得将需求资产中的预览场景数据作为最终业务实现。");
+        result.add("不得在需求交接包中写死框架、ORM、数据库方言、测试框架或目录结构。");
+        result.add("代码生成阶段必须遵守 sourceReferences 中列出的资产版本和状态。");
+
+        if ("PAGE".equals(nodeType)) {
+            result.add("页面实现必须以 PAGE_SPEC 和 UI_CONTRACT 为主，不能重新设计页面结构和交互。 ");
+        } else if ("MODULE".equals(nodeType) || "SUBMODULE".equals(nodeType)) {
+            result.add("模块/场景级实现应先生成开发计划，再分解到页面、接口、数据和测试。 ");
+        }
+
+        return result;
+    }
+
+    private Map<String, Object> buildReadiness(
+            List<ArtifactRequirement> requirements,
+            List<String> blockers,
+            List<String> warnings
+    ) {
+        List<String> required = requirements.stream()
+                .filter(ArtifactRequirement::required)
+                .map(ArtifactRequirement::artifactType)
+                .toList();
+
+        List<String> recommended = requirements.stream()
+                .filter(requirement -> !requirement.required())
+                .map(ArtifactRequirement::artifactType)
+                .toList();
+
+        Map<String, Object> readiness = new LinkedHashMap<>();
+        readiness.put("readyForDevAgent", blockers.isEmpty());
+        readiness.put("readinessLevel", blockers.isEmpty() ? (warnings.isEmpty() ? "READY" : "WARNING") : "BLOCKED");
+        readiness.put("blockers", blockers);
+        readiness.put("warnings", warnings);
+        readiness.put("requiredSourceArtifacts", required);
+        readiness.put("recommendedSourceArtifacts", recommended);
+        readiness.put("policy", "READY 表示可以进入 Dev Agent；WARNING 表示可以进入但需人工关注；BLOCKED 表示不建议进入代码生成。 ");
+
+        return readiness;
     }
 
     private Map<String, Object> buildContent(
@@ -341,6 +502,8 @@ public class DevHandoffPackageService {
             String username,
             ModuleTreeBaselineSupport.ModuleTreeBaselineSnapshot moduleTreeBaseline,
             List<Map<String, Object>> sourceArtifacts,
+            Map<String, Object> devBlueprint,
+            Map<String, Object> readiness,
             List<String> blockers,
             List<String> warnings,
             GenerateDevHandoffPackageRequest request,
@@ -348,42 +511,34 @@ public class DevHandoffPackageService {
     ) {
         Map<String, Object> content = new LinkedHashMap<>();
         Map<String, Object> metadata = new LinkedHashMap<>();
-        Map<String, Object> targetNode = new LinkedHashMap<>();
         Map<String, Object> treeBaseline = new LinkedHashMap<>();
-        Map<String, Object> readiness = new LinkedHashMap<>();
 
-        metadata.put("schemaVersion", "1.0");
+        metadata.put("schemaVersion", "2.0");
         metadata.put("artifactType", DEV_HANDOFF_PACKAGE);
+        metadata.put("packageRole", "LANGUAGE_NEUTRAL_DEV_BLUEPRINT");
         metadata.put("generatedAt", generatedAt.toString());
         metadata.put("generatedBy", username);
         metadata.put("projectId", access.projectId().toString());
         metadata.put("projectCode", access.projectCode());
         metadata.put("workspaceId", access.workspaceId().toString());
-        metadata.put("generationMode", "DETERMINISTIC_REQUIREMENT_ASSET_SNAPSHOT");
+        metadata.put("generationMode", "DETERMINISTIC_DEV_BLUEPRINT_SNAPSHOT");
         metadata.put("includeUnapproved", request == null || request.includeUnapproved() == null
                 || Boolean.TRUE.equals(request.includeUnapproved()));
         metadata.put("note", safeText(request == null ? null : request.note()));
-
-        targetNode.put("nodeId", module.getId() == null ? null : module.getId().toString());
-        targetNode.put("nodeName", safeText(module.getModuleName()));
-        targetNode.put("nodeKey", safeText(module.getModuleKey()));
-        targetNode.put("nodeType", safeText(module.getModuleType()));
-        targetNode.put("modulePath", safeText(module.getModulePath()));
-        targetNode.put("parentId", module.getParentId() == null ? null : module.getParentId().toString());
 
         treeBaseline.put("hash", moduleTreeBaseline.hash());
         treeBaseline.put("nodeCount", moduleTreeBaseline.nodeCount());
         treeBaseline.put("summary", moduleTreeBaseline.summary());
 
-        readiness.put("ready", blockers.isEmpty());
-        readiness.put("blockers", blockers);
-        readiness.put("warnings", warnings);
-
         content.put("metadata", metadata);
-        content.put("targetNode", targetNode);
+        content.put("targetNode", devBlueprint.get("targetNode"));
         content.put("moduleTreeBaseline", treeBaseline);
+        content.put("devBlueprint", devBlueprint);
+        content.put("sourceReferenceMatrix", devBlueprint.get("sourceReferences"));
         content.put("sourceArtifacts", sourceArtifacts);
         content.put("readiness", readiness);
+        content.put("blockers", blockers);
+        content.put("warnings", warnings);
         content.put("contentMarkdown", markdown);
 
         return content;
@@ -397,27 +552,31 @@ public class DevHandoffPackageService {
             ModuleTreeBaselineSupport.ModuleTreeBaselineSnapshot moduleTreeBaseline,
             List<Map<String, Object>> sourceArtifacts,
             List<ArtifactSection> artifactSections,
+            Map<String, Object> devBlueprint,
+            Map<String, Object> readiness,
             List<String> blockers,
             List<String> warnings,
             String note
     ) {
         StringBuilder markdown = new StringBuilder();
         String generatedAtText = generatedAt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+        String nodeType = normalizeNodeType(module == null ? null : module.getModuleType());
 
         markdown.append("# 开发交接包：")
                 .append(safeTitle(module.getModuleName()))
                 .append("\n\n");
 
-        markdown.append("> 本交接包由 CodeMind Requirement Agent 汇总当前节点需求资产生成，用于后续人类开发或代码生成 Agent。\n\n");
+        markdown.append("> 本交接包是语言无关 Dev Blueprint，用于后续 Dev Agent 按目标技术栈生成真实系统。它不是具体技术栈代码方案，也不是把预览数据作为最终业务实现。\n\n");
 
         markdown.append("## 1. 交付范围\n\n")
                 .append("- 项目：`").append(access.projectCode()).append("`\n")
                 .append("- 节点：").append(safeTitle(module.getModuleName())).append("\n")
-                .append("- 节点类型：`").append(safeText(module.getModuleType())).append("`\n")
+                .append("- 节点类型：`").append(nodeType).append("`\n")
                 .append("- 节点路径：").append(firstNonBlank(module.getModulePath(), "未记录")).append("\n")
                 .append("- 生成时间：").append(generatedAtText).append("\n")
                 .append("- 生成者：").append(firstNonBlank(username, "未知")).append("\n")
-                .append("- 模块树基线：").append(moduleTreeBaseline.summary()).append("\n\n");
+                .append("- 模块树基线：").append(moduleTreeBaseline.summary()).append("\n")
+                .append("- 技术栈策略：语言无关，具体 Node.js / Java / Python 等由 Dev Agent targetStack 决定。\n\n");
 
         if (note != null && !note.isBlank()) {
             markdown.append("### 生成备注\n\n")
@@ -425,7 +584,11 @@ public class DevHandoffPackageService {
                     .append("\n\n");
         }
 
-        markdown.append("## 2. 交付完整性检查\n\n");
+        markdown.append("## 2. Dev Agent 就绪度\n\n")
+                .append("- 就绪状态：").append(Boolean.TRUE.equals(readiness.get("readyForDevAgent")) ? "可进入 Dev Agent" : "不建议进入 Dev Agent").append("\n")
+                .append("- 就绪等级：`").append(safeText(readiness.get("readinessLevel"))).append("`\n")
+                .append("- 必需来源资产：").append(joinList((List<?>) readiness.get("requiredSourceArtifacts"))).append("\n")
+                .append("- 建议来源资产：").append(joinList((List<?>) readiness.get("recommendedSourceArtifacts"))).append("\n\n");
 
         if (blockers.isEmpty()) {
             markdown.append("- 当前没有必需资产缺失阻断项。\n");
@@ -439,9 +602,33 @@ public class DevHandoffPackageService {
             markdown.append("- [提醒] ").append(warning).append("\n");
         }
 
-        markdown.append("\n## 3. 来源资产清单\n\n")
-                .append("| 资产 | 必需 | 存在 | 纳入交接包 | 审批状态 | 版本 | 说明 |\n")
-                .append("|---|---:|---:|---:|---|---:|---|\n");
+        markdown.append("\n## 3. 语言无关开发蓝图\n\n")
+                .append("- 蓝图名称：").append(safeText(devBlueprint.get("blueprintName"))).append("\n")
+                .append("- 开发范围：`").append(safeText(devBlueprint.get("scopeType"))).append("`\n")
+                .append("- 业务目标：").append(safeText(devBlueprint.get("businessGoal"))).append("\n\n");
+
+        Object stackPolicy = devBlueprint.get("stackPolicy");
+        if (stackPolicy instanceof Map<?, ?> stackPolicyMap) {
+            markdown.append("### 技术栈策略\n\n")
+                    .append("- 是否语言无关：").append(Boolean.TRUE.equals(stackPolicyMap.get("languageNeutral")) ? "是" : "否").append("\n")
+                    .append("- 支持目标栈：").append(joinList((List<?>) stackPolicyMap.get("supportedStackModes"))).append("\n")
+                    .append("- 决策方：").append(safeText(stackPolicyMap.get("decisionOwner"))).append("\n")
+                    .append("- 说明：").append(safeText(stackPolicyMap.get("note"))).append("\n\n");
+        }
+
+        markdown.append("### 生成边界\n\n");
+        Object boundaries = devBlueprint.get("generationBoundaries");
+        if (boundaries instanceof List<?> boundaryList && !boundaryList.isEmpty()) {
+            for (Object item : boundaryList) {
+                markdown.append("- ").append(safeText(item)).append("\n");
+            }
+        } else {
+            markdown.append("- 不得越过当前节点范围生成无关功能。\n");
+        }
+
+        markdown.append("\n## 4. 来源资产引用矩阵\n\n")
+                .append("| 资产 | 必需 | 纳入 | 审批状态 | 版本 | 用途 |\n")
+                .append("|---|---:|---:|---|---:|---|\n");
 
         for (Map<String, Object> item : sourceArtifacts) {
             markdown.append("| ")
@@ -451,42 +638,39 @@ public class DevHandoffPackageService {
                     .append("`) | ")
                     .append(Boolean.TRUE.equals(item.get("required")) ? "是" : "否")
                     .append(" | ")
-                    .append(Boolean.TRUE.equals(item.get("exists")) ? "是" : "否")
-                    .append(" | ")
                     .append(Boolean.TRUE.equals(item.get("included")) ? "是" : "否")
                     .append(" | ")
                     .append(firstNonBlank(safeText(item.get("status")), "-") )
                     .append(" | ")
                     .append(item.get("versionNo") == null ? "-" : item.get("versionNo"))
                     .append(" | ")
-                    .append(Boolean.TRUE.equals(item.get("approved")) ? "已批准" : "待复核")
+                    .append(joinList((List<?>) item.get("usedFor")))
                     .append(" |\n");
         }
 
-        markdown.append("\n## 4. 开发执行输入\n\n")
-                .append("开发前请优先阅读以下资产。若某资产状态不是 APPROVED，应先由产品/业务负责人确认后再进入编码。\n\n");
+        markdown.append("\n## 5. 来源资产摘要\n\n")
+                .append("以下只展示摘要，避免把上游资产全文拼接到交接包中。代码生成阶段应读取结构化 sourceReferenceMatrix 和被锁定的资产版本。\n\n");
 
         artifactSections.stream()
                 .sorted(Comparator.comparing(section -> orderOf(section.requirement().artifactType())))
-                .forEach(section -> appendArtifactSection(markdown, section));
+                .forEach(section -> appendArtifactSummary(markdown, section));
 
-        markdown.append("## 5. 开发交接清单\n\n")
+        markdown.append("## 6. 进入 Dev Agent 前检查\n\n")
                 .append("- [ ] 确认本交接包对应的模块树基线未变化。\n")
+                .append("- [ ] 确认来源资产版本和状态满足开发要求。\n")
                 .append("- [ ] 确认 PAGE_SPEC / UI_CONTRACT 与页面实现范围一致。\n")
-                .append("- [ ] 确认 API_CONTRACT 与后端接口路由、请求、响应、错误码一致。\n")
-                .append("- [ ] 确认 DATA_MODEL 与数据库/实体字段一致。\n")
-                .append("- [ ] 确认 TEST_SPEC 已覆盖主流程、异常流程和权限边界。\n")
-                .append("- [ ] 编码前锁定本交接包版本，避免基于过期需求资产生成代码。\n\n");
+                .append("- [ ] 确认 API_CONTRACT、DATA_MODEL、TEST_SPEC 已覆盖当前节点最小开发闭环。\n")
+                .append("- [ ] 选择 targetStack 后，由 Dev Agent 将语言无关蓝图转换为具体技术栈项目。\n\n");
 
-        markdown.append("## 6. 后续建议\n\n")
-                .append("1. 本交接包进入评审后，建议审批为 APPROVED 再交给开发 Agent。\n")
+        markdown.append("## 7. 后续建议\n\n")
+                .append("1. 本交接包建议审批为 APPROVED 后再交给 Dev Agent。\n")
                 .append("2. 若任一上游资产重新生成或保存新版本，应重新生成 DEV_HANDOFF_PACKAGE。\n")
-                .append("3. 代码生成阶段应读取本交接包的 sourceArtifacts 和 moduleTreeBaseline 作为输入边界。\n");
+                .append("3. Node.js 分支应读取 devBlueprint，而不是重新解析冗长需求文档全文。\n");
 
         return markdown.toString();
     }
 
-    private void appendArtifactSection(
+    private void appendArtifactSummary(
             StringBuilder markdown,
             ArtifactSection section
     ) {
@@ -508,7 +692,7 @@ public class DevHandoffPackageService {
             markdown.append("> 注意：该资产尚未 APPROVED，进入开发前需要人工复核。\n\n");
         }
 
-        markdown.append(content.isBlank() ? "暂无可读内容。" : content.trim())
+        markdown.append(excerpt(content, 1000).isBlank() ? "暂无可读摘要。" : excerpt(content, 1000))
                 .append("\n\n");
     }
 
@@ -542,7 +726,7 @@ public class DevHandoffPackageService {
         if (!blockers.isEmpty()) {
             return "已生成开发交接包 V" + artifact.getVersionNo()
                     + "，但存在 " + blockers.size()
-                    + " 个交付阻断项，请修复后重新生成或在评审中确认。";
+                    + " 个 Dev Agent 阻断项，请修复后重新生成或在评审中确认。";
         }
 
         if (!warnings.isEmpty()) {
@@ -552,13 +736,17 @@ public class DevHandoffPackageService {
         }
 
         return "已生成开发交接包 V" + artifact.getVersionNo()
-                + "，可进入评审或后续开发 Agent 输入阶段。";
+                + "，可进入评审或后续 Dev Agent 输入阶段。";
     }
 
     private String normalizeNodeType(
             String value
     ) {
         String normalized = safeText(value).toUpperCase(Locale.ROOT);
+
+        if (List.of("DOMAIN", "BUSINESS_DOMAIN").contains(normalized)) {
+            return "DOMAIN";
+        }
 
         if (List.of("PAGE", "PAGE_MODULE", "SCREEN", "VIEW").contains(normalized)) {
             return "PAGE";
@@ -582,11 +770,26 @@ public class DevHandoffPackageService {
             case "MODULE_PRD" -> 10;
             case "BUSINESS_FLOW" -> 20;
             case "PAGE_SPEC" -> 30;
-            case "DATA_MODEL" -> 40;
+            case "UI_CONTRACT" -> 40;
             case "API_CONTRACT" -> 50;
-            case "TEST_SPEC" -> 60;
-            case "UI_CONTRACT" -> 70;
+            case "DATA_MODEL" -> 60;
+            case "TEST_SPEC" -> 70;
             default -> 100;
+        };
+    }
+
+    private List<String> usedFor(
+            String artifactType
+    ) {
+        return switch (safeText(artifactType)) {
+            case "MODULE_PRD" -> List.of("业务目标", "功能范围", "业务规则");
+            case "BUSINESS_FLOW" -> List.of("流程顺序", "分支异常", "状态变化");
+            case "PAGE_SPEC" -> List.of("页面能力", "字段操作", "页面状态");
+            case "UI_CONTRACT" -> List.of("页面布局", "控件层级", "交互反馈");
+            case "API_CONTRACT" -> List.of("接口能力", "请求响应", "错误场景");
+            case "DATA_MODEL" -> List.of("实体语义", "字段约束", "数据关系");
+            case "TEST_SPEC" -> List.of("验收场景", "边界条件", "测试数据");
+            default -> List.of("开发输入");
         };
     }
 
@@ -594,13 +797,43 @@ public class DevHandoffPackageService {
             String value,
             int maxLength
     ) {
-        String text = safeText(value).replace('\n', ' ').replace('\r', ' ').trim();
+        String text = safeText(value).replace('\r', ' ').trim();
 
         if (text.length() <= maxLength) {
             return text;
         }
 
         return text.substring(0, maxLength) + "...";
+    }
+
+    private String joinList(
+            List<?> values
+    ) {
+        if (values == null || values.isEmpty()) {
+            return "无";
+        }
+
+        return values.stream()
+                .map(this::safeText)
+                .filter(text -> !text.isBlank())
+                .reduce((left, right) -> left + "；" + right)
+                .orElse("无");
+    }
+
+    private String safeNodeKey(
+            ProjectModuleEntity module
+    ) {
+        String key = safeText(module == null ? null : module.getModuleKey());
+        if (!key.isBlank()) {
+            return key;
+        }
+
+        String name = safeText(module == null ? null : module.getModuleName());
+        if (!name.isBlank()) {
+            return name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9\\u4e00-\\u9fa5]+", "_");
+        }
+
+        return "current_node";
     }
 
     private String safeText(
@@ -668,3 +901,5 @@ public class DevHandoffPackageService {
     ) {
     }
 }
+
+

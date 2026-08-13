@@ -2,17 +2,17 @@
   <aside class="module-tree-panel">
     <div class="panel-title">
       <div class="panel-title-text">
-        <h2>模块树</h2>
-        <p>按业务域、模块、页面和功能点组织需求结构</p>
+        <h2>需求骨架</h2>
+        <p>按模块、功能点和页面组织需求结构</p>
       </div>
 
-      <button class="add-root-button" title="新增根节点" @click="$emit('create-root')">
+      <button class="add-root-button" title="新增根模块" @click="$emit('create-root')">
         +
       </button>
     </div>
 
     <div v-if="modules.length === 0" class="empty-tree">
-      暂无模块树。请先输入需求并生成模块树，或点击右上角新增根节点。
+      暂无需求骨架。请先输入需求生成模块与功能点，或点击右上角新增根模块。
     </div>
 
     <div v-else class="tree-list">
@@ -121,4 +121,38 @@ defineEmits<{
   gap: 3px;
   padding: 10px 8px 18px;
 }
+
+/* A9_7_6_TREE_INDEPENDENT_SCROLL_FIX */
+.module-tree-panel {
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.panel-title {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(10px);
+}
+
+
+
+/* A9.10.14.4.3.15.2.6_PRD_UNIFIED_UI_TREE_COLLAPSE
+   Make the tree panel friendlier for recursive collapse rows.
+*/
+.tree-list {
+  gap: 1px !important;
+  padding: 10px 8px 18px !important;
+}
+
+.module-tree-panel {
+  scrollbar-gutter: stable !important;
+}
+
 </style>

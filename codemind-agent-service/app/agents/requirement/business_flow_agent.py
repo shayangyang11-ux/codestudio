@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 import json
@@ -12,12 +13,16 @@ from app.schemas.business_flow import (
 )
 from app.services.llm_service import LlmService
 from app.graphs.requirement.prompt_template_renderer import PromptTemplateRenderer
+from app.graphs.requirement.context.requirement_asset_contract_policy import (
+    RequirementAssetContractPolicy,
+)
 
 
 class BusinessFlowAgent:
     def __init__(self) -> None:
         self.llm_service = LlmService()
         self.prompt_template_renderer = PromptTemplateRenderer()
+        self.asset_contract_policy = RequirementAssetContractPolicy()
 
     async def run(self, request: AgentTaskRequest) -> BusinessFlowArtifact:
         system_prompt = self.prompt_template_renderer.resolve_system_prompt(
@@ -79,6 +84,10 @@ class BusinessFlowAgent:
                 "",
                 "【当前模块】",
                 json.dumps(current_module, ensure_ascii=False, default=str),
+                "",
+                *self.asset_contract_policy.build_prompt_sections(
+                    request=request,
+                ),
                 "",
                 "【用户补充需求】",
                 requirement_text or "无额外补充需求。",
@@ -341,3 +350,4 @@ class BusinessFlowAgent:
         )
 
         return prompt_path.read_text(encoding="utf-8")
+

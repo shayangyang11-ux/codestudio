@@ -1,0 +1,50 @@
+package com.codemind.platform.development;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.UUID;
+
+public record DevelopmentRuntimeStatusResponse(
+        UUID projectId,
+        UUID moduleId,
+        String moduleKey,
+        String moduleName,
+        String targetStack,
+        DevelopmentCodebaseRegistryResponse codebaseRegistry,
+        String runtimeStatus,
+        String installStatus,
+        boolean codebaseExists,
+        boolean packageJsonExists,
+        boolean dependencyInstalled,
+        String codebaseRoot,
+        String absoluteCodebaseRoot,
+        String frontendUrl,
+        String backendUrl,
+        String healthUrl,
+        String previewUrl,
+        String healthStatus,
+        boolean frontendReachable,
+        boolean backendReachable,
+        Integer frontendStatusCode,
+        Integer backendHealthStatusCode,
+        String frontendHealthMessage,
+        String backendHealthMessage,
+        LocalDateTime lastHealthCheckedAt,
+        String diagnosticLevel,
+        String diagnosticTitle,
+        String diagnosticSummary,
+        List<String> detectedProblems,
+        List<String> diagnosticSuggestions,
+        List<String> nextActions,
+        List<String> recentErrorLines,
+        Integer processId,
+        Integer installProcessId,
+        Integer lastExitCode,
+        Integer lastInstallExitCode,
+        LocalDateTime startedAt,
+        LocalDateTime stoppedAt,
+        LocalDateTime lastActionAt,
+        List<String> allowedActions,
+        String summary
+) {
+}

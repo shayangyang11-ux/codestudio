@@ -1,5 +1,7 @@
 package com.codemind.platform.theme;
 
+// A9.10.14.4.3.15.4.4_STYLE_OVERRIDE_LOCK
+
 import com.codemind.platform.identity.CurrentUserProvider;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -25,8 +27,14 @@ public class ProjectThemeProfileService {
             "FINANCE",
             "GOV",
             "EDUCATION",
-            "HEALTHCARE"
-    );
+            "HEALTHCARE",
+                "FOREIGN_TRADE",
+                "WORK_ORDER",
+                "WAREHOUSE",
+                "MANUFACTURING",
+                "CRM",
+                "SAAS",
+                "MEDICAL");
 
     private static final Set<String> THEME_KEYS = Set.of(
             "enterprise_default",
@@ -482,6 +490,9 @@ public class ProjectThemeProfileService {
     ) {
         return switch (industry) {
             case "COMMERCE" -> "commerce_light";
+            case "FOREIGN_TRADE", "CRM" -> "enterprise_default";
+            case "WORK_ORDER", "SAAS" -> "tech_modern";
+            case "WAREHOUSE", "MANUFACTURING" -> "industrial_pro";
             case "TECH" -> "tech_modern";
             case "INDUSTRIAL" -> "industrial_pro";
             case "FINANCE" -> "finance_stable";

@@ -16,6 +16,7 @@ public record DevelopmentHandoffContextResponse(
         DevelopmentHandoffReadinessResponse readiness,
         List<DevelopmentHandoffArtifactPayload> artifacts,
         Map<String, Object> confirmedUiContract,
+        Map<String, Object> developmentBuildContext,
         Map<String, Object> themeProfileSnapshot
 ) {
 }

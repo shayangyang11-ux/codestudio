@@ -100,7 +100,7 @@ public class DevelopmentHandoffPackageService {
                 workspaceId,
                 projectCode,
                 moduleId,
-                confirmedPlan.confirmedUiContractSnapshotId()
+                confirmedPlan
         );
 
         List<String> includedSections = buildIncludedSections(
@@ -197,20 +197,53 @@ public class DevelopmentHandoffPackageService {
             UUID workspaceId,
             String projectCode,
             UUID moduleId,
-            UUID expectedSnapshotId
+            ConfirmedDevelopmentPlanSnapshotResponse confirmedPlan
     ) {
-        return confirmedUiContractSnapshotService
-                .getCurrent(
-                        workspaceId,
-                        projectCode,
-                        moduleId
-                )
-                .filter(snapshot ->
-                        expectedSnapshotId == null ||
-                                expectedSnapshotId.equals(snapshot.id())
-                )
-                .map(this::toMap)
-                .orElseGet(LinkedHashMap::new);
+        UUID expectedSnapshotId = confirmedPlan == null
+                ? null
+                : confirmedPlan.confirmedUiContractSnapshotId();
+
+        Map<String, Object> directSnapshot =
+                confirmedUiContractSnapshotService
+                        .getCurrent(
+                                workspaceId,
+                                projectCode,
+                                moduleId
+                        )
+                        .filter(snapshot ->
+                                expectedSnapshotId == null
+                                        || expectedSnapshotId.equals(snapshot.id())
+                        )
+                        .map(this::toMap)
+                        .orElseGet(LinkedHashMap::new);
+
+        if (!directSnapshot.isEmpty()) {
+            return directSnapshot;
+        }
+
+        if (confirmedPlan == null) {
+            return new LinkedHashMap<>();
+        }
+
+        Object aggregate =
+                nullToEmptyMap(
+                        confirmedPlan.handoffContextSnapshot()
+                ).get("confirmedUiContract");
+
+        if (!(aggregate instanceof Map<?, ?> source)) {
+            return new LinkedHashMap<>();
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        for (Map.Entry<?, ?> entry : source.entrySet()) {
+            result.put(
+                    String.valueOf(entry.getKey()),
+                    entry.getValue()
+            );
+        }
+
+        return result;
     }
 
     private List<String> buildIncludedSections(

@@ -92,10 +92,23 @@
             <section v-if="contract && activeTab === 'runtime'" ref="stageRef" class="preview-stage">
               <div class="stage-grid-bg" />
 
+              <div
+                v-if="prototypeNavigationLoading"
+                class="prototype-navigation-loading"
+              >
+                正在加载目标页面原型...
+              </div>
+
               <div class="artboard-frame" :style="artboardFrameStyle">
                 <div class="artboard-scale" :style="artboardScaleStyle">
-                  <UiContractPreviewRuntime :contract="contract" :project-theme-profile="projectThemeProfile"
-                    display-mode="artboard" />
+                  <UiContractPreviewRuntime
+                    :key="runtimeContractKey"
+                    :contract="contract"
+                    :project-theme-profile="projectThemeProfile"
+                    :navigate-request="handlePrototypeNavigate"
+                    display-mode="artboard"
+                    @prototype-action="handlePrototypeAction"
+                  />
                 </div>
               </div>
             </section>
@@ -269,10 +282,12 @@ import {
   ref,
   watch,
 } from 'vue'
-import type { ArtifactResponse } from '../types/codemind'
+import type { ArtifactResponse, ModuleTreeNode } from '../types/codemind'
 import type { UiContractContent } from '../types/uiContract'
 import type { ProjectThemeProfile } from '../types/themeProfile'
 import type { ConfirmedUiContractSnapshot } from '../types/uiContractSnapshot'
+import { fetchCurrentModuleArtifact } from '../api/artifactApi'
+import { resolveRequirementNodeType } from '../domain/requirementNodePolicy'
 import UiContractPreviewRuntime from './UiContractPreviewRuntime.vue'
 import UiContractView from './UiContractView.vue'
 
@@ -299,6 +314,9 @@ type PreviewContract = UiContractContent & PreviewRecord
 const props = defineProps<{
   visible: boolean
   artifact: ArtifactResponse | null
+  workspaceId?: string
+  projectCode?: string
+  moduleTree?: ModuleTreeNode[]
   projectThemeProfile?: ProjectThemeProfile | null
   confirmedSnapshot?: ConfirmedUiContractSnapshot | null
   snapshotLoading?: boolean
@@ -377,7 +395,7 @@ watch(
   },
 )
 
-const contract = computed<PreviewContract | null>(() => {
+const baseContract = computed<PreviewContract | null>(() => {
   const content = props.artifact?.content
 
   if (!content || typeof content !== 'object') {
@@ -399,52 +417,7 @@ const contract = computed<PreviewContract | null>(() => {
     return null
   }
 
-  return {
-    schemaVersion: candidate.schemaVersion || '1.0',
-    artifactType: 'UI_CONTRACT',
-
-    // 新版 UI_CONTRACT 必填字段
-    identity: candidate.identity || {},
-    page: candidate.page || {},
-    interactions: Array.isArray(candidate.interactions)
-      ? candidate.interactions
-      : [],
-    validationRules: Array.isArray(candidate.validationRules)
-      ? candidate.validationRules
-      : [],
-    navigationTargets: Array.isArray(candidate.navigationTargets)
-      ? candidate.navigationTargets
-      : [],
-
-    // 兼容旧 Runtime 的适配字段
-    module: candidate.module || {},
-    routes: Array.isArray(candidate.routes)
-      ? candidate.routes
-      : [],
-    pages: normalizedPages,
-    mockData: candidate.mockData || {},
-    apiBindings: Array.isArray(candidate.apiBindings)
-      ? candidate.apiBindings
-      : [],
-    developmentRules: candidate.developmentRules || {},
-    analysisSummary: candidate.analysisSummary || '',
-    mockScenarios: Array.isArray(candidate.mockScenarios)
-      ? candidate.mockScenarios
-      : [],
-    pageStates: Array.isArray(candidate.pageStates)
-      ? candidate.pageStates
-      : [],
-    featureCoverage: Array.isArray(candidate.featureCoverage)
-      ? candidate.featureCoverage
-      : [],
-    qualitySummary:
-      typeof candidate.qualitySummary === 'object' && candidate.qualitySummary
-        ? candidate.qualitySummary
-        : undefined,
-    assumptions: Array.isArray(candidate.assumptions)
-      ? candidate.assumptions
-      : [],
-  } as unknown as PreviewContract
+  return normalizePreviewContractCandidate(candidate)
 })
 
 const title = computed(() => {
@@ -462,6 +435,39 @@ const title = computed(() => {
 const firstPage = computed<PreviewRecord | null>(() => {
   return (contract.value?.pages?.[0] || null) as PreviewRecord | null
 })
+
+
+const activePrototypeContract = ref<PreviewContract | null>(null)
+const prototypeContractCache = ref<Record<string, PreviewContract>>({})
+const prototypeNavigationLoading = ref(false)
+const prototypeNavigationError = ref('')
+const activePrototypeNodeId = ref<string | null>(null)
+
+const contract = computed<PreviewContract | null>(() =>
+  activePrototypeContract.value || baseContract.value,
+)
+
+watch(
+  baseContract,
+  (value) => {
+    activePrototypeContract.value = null
+    activePrototypeNodeId.value =
+      props.artifact?.moduleId || null
+    prototypeNavigationError.value = ''
+
+    if (value) {
+      cachePrototypeContract(value)
+
+      if (props.artifact?.moduleId) {
+        cachePrototypeContractForNodeId(
+          props.artifact.moduleId,
+          value,
+        )
+      }
+    }
+  },
+  { immediate: true },
+)
 
 const currentArtifactId = computed(() => {
   return String(props.artifact?.artifactId || '')
@@ -573,6 +579,23 @@ const artboardFrameStyle = computed(() => ({
   height: `${selectedDevice.value.height * effectiveScale.value}px`,
 }))
 
+
+const runtimeContractKey = computed(() => {
+  const value = contract.value
+
+  return [
+    value?.identity?.pageId,
+    value?.identity?.pageKey,
+    value?.page?.pageId,
+    value?.page?.pageKey,
+    value?.page?.pageName,
+    value?.page?.route,
+  ]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+    .join('::') || 'ui-contract-runtime'
+})
+
 const artboardScaleStyle = computed(() => ({
   width: `${selectedDevice.value.width}px`,
   height: `${selectedDevice.value.height}px`,
@@ -655,6 +678,1033 @@ const themeClass = computed(() => {
 
   return 'theme-enterprise'
 })
+
+
+type PrototypeNavigatePayload = {
+  actionId: string
+  actionType: string
+  label: string
+  targetPageId?: string | null
+  targetPageKey?: string | null
+  targetPageName?: string | null
+  route?: string | null
+}
+
+type PrototypeActionPayload = {
+  actionId: string
+  actionType: string
+  label: string
+  targetPageId?: string | null
+  targetId?: string | null
+}
+
+type PrototypeNavigationResult = {
+  ok: boolean
+  code:
+    | 'SUCCESS'
+    | 'TARGET_NOT_FOUND'
+    | 'ARTIFACT_NOT_FOUND'
+    | 'INVALID_CONTRACT'
+    | 'LOAD_FAILED'
+    | 'BUSY'
+    | 'ROUTER_UNAVAILABLE'
+  message: string
+  targetPageId?: string | null
+  targetPageKey?: string | null
+  targetPageName?: string | null
+  route?: string | null
+}
+
+type PrototypePageDescriptor = {
+  node: ModuleTreeNode
+  nodeId: string
+  pageId: string
+  pageKey: string
+  pageName: string
+  route: string
+}
+
+async function handlePrototypeNavigate(
+  payload: PrototypeNavigatePayload,
+): Promise<PrototypeNavigationResult> {
+  if (prototypeNavigationLoading.value) {
+    return {
+      ok: false,
+      code: 'BUSY',
+      message: '正在加载另一个目标页面，请稍候。',
+    }
+  }
+
+  prototypeNavigationError.value = ''
+
+  return navigateToPrototypeTarget(payload)
+}
+
+async function handlePrototypeAction(
+  payload: PrototypeActionPayload,
+) {
+  const current = contract.value
+
+  if (!current) {
+    return
+  }
+
+  const actionText = normalizePrototypeText(
+    [
+      payload.actionId,
+      payload.actionType,
+      payload.label,
+    ].join(' '),
+  )
+
+  const pageText = normalizePrototypeText(
+    [
+      current.page.pageId,
+      current.page.pageKey,
+      current.page.pageName,
+      current.page.title,
+      current.page.pageKind,
+    ].join(' '),
+  )
+
+  if (
+    actionHasNavigationChain(
+      current,
+      payload.actionId,
+    )
+  ) {
+    return
+  }
+
+  if (
+    isLoginPrototypePage(pageText) &&
+    isPrimarySubmitLike(payload, actionText)
+  ) {
+    await navigateToPrototypePurpose('HOME')
+    return
+  }
+
+  if (
+    isRegisterPrototypePage(pageText) &&
+    isPrimarySubmitLike(payload, actionText)
+  ) {
+    await navigateToPrototypePurpose('LOGIN')
+  }
+}
+
+async function navigateToPrototypeTarget(
+  payload: PrototypeNavigatePayload,
+): Promise<PrototypeNavigationResult> {
+  if (
+    !props.workspaceId ||
+    !props.projectCode
+  ) {
+    return {
+      ok: false,
+      code: 'ROUTER_UNAVAILABLE',
+      message:
+        '原型路由器缺少 workspaceId 或 projectCode，无法读取目标页面资产。',
+    }
+  }
+
+  const descriptor =
+    resolvePrototypePageDescriptor(payload)
+
+  if (!descriptor) {
+    const targetLabel =
+      payload.targetPageName ||
+      payload.targetPageKey ||
+      payload.targetPageId ||
+      payload.route ||
+      '未知目标'
+
+    return {
+      ok: false,
+      code: 'TARGET_NOT_FOUND',
+      message:
+        `未在当前项目模块树中找到目标 PAGE：${targetLabel}。` +
+        '请检查 navigationTargets 的 targetPageId/pageKey/pageName 是否对应真实 PAGE。',
+      targetPageId: payload.targetPageId || null,
+      targetPageKey: payload.targetPageKey || null,
+      targetPageName: payload.targetPageName || null,
+      route: payload.route || null,
+    }
+  }
+
+  return activatePrototypePage(descriptor)
+}
+
+async function navigateToPrototypePurpose(
+  purpose: 'LOGIN' | 'REGISTER' | 'HOME',
+): Promise<PrototypeNavigationResult> {
+  const descriptor =
+    resolvePrototypePageByPurpose(purpose)
+
+  if (!descriptor) {
+    return {
+      ok: false,
+      code: 'TARGET_NOT_FOUND',
+      message:
+        `当前项目模块树中没有找到${purposeLabel(purpose)} PAGE。`,
+    }
+  }
+
+  return activatePrototypePage(descriptor)
+}
+
+async function activatePrototypePage(
+  descriptor: PrototypePageDescriptor,
+): Promise<PrototypeNavigationResult> {
+  if (
+    descriptor.nodeId &&
+    descriptor.nodeId === activePrototypeNodeId.value
+  ) {
+    return {
+      ok: true,
+      code: 'SUCCESS',
+      message: `当前已经是：${descriptor.pageName}`,
+      targetPageId: descriptor.pageId || descriptor.nodeId,
+      targetPageKey: descriptor.pageKey,
+      targetPageName: descriptor.pageName,
+      route: descriptor.route,
+    }
+  }
+
+  const cached =
+    getCachedPrototypeContractForNodeId(
+      descriptor.nodeId,
+    )
+
+  if (cached) {
+    activePrototypeContract.value = cached
+    activePrototypeNodeId.value = descriptor.nodeId
+    activeTab.value = 'runtime'
+
+    await nextTick()
+    refreshStageSize()
+
+    return {
+      ok: true,
+      code: 'SUCCESS',
+      message: `已切换到：${descriptor.pageName}`,
+      targetPageId:
+        cached.page?.pageId ||
+        descriptor.pageId ||
+        descriptor.nodeId,
+      targetPageKey:
+        cached.page?.pageKey ||
+        descriptor.pageKey,
+      targetPageName:
+        cached.page?.pageName ||
+        descriptor.pageName,
+      route:
+        cached.page?.route ||
+        descriptor.route,
+    }
+  }
+
+  prototypeNavigationLoading.value = true
+  prototypeNavigationError.value = ''
+
+  try {
+    const artifact = await fetchCurrentModuleArtifact(
+      props.workspaceId!,
+      props.projectCode!,
+      descriptor.nodeId,
+      'UI_CONTRACT',
+    )
+
+    if (
+      artifact?.exists === false ||
+      !artifact?.content
+    ) {
+      const message =
+        `目标页面「${descriptor.pageName}」尚未生成 UI_CONTRACT。`
+
+      prototypeNavigationError.value = message
+
+      return {
+        ok: false,
+        code: 'ARTIFACT_NOT_FOUND',
+        message,
+        targetPageId: descriptor.pageId || descriptor.nodeId,
+        targetPageKey: descriptor.pageKey,
+        targetPageName: descriptor.pageName,
+        route: descriptor.route,
+      }
+    }
+
+    const nextContract =
+      normalizePrototypeContractFromArtifact(artifact)
+
+    if (!nextContract) {
+      const message =
+        `目标页面「${descriptor.pageName}」的 UI_CONTRACT 结构无效，无法进入 Mock Runtime。`
+
+      prototypeNavigationError.value = message
+
+      return {
+        ok: false,
+        code: 'INVALID_CONTRACT',
+        message,
+        targetPageId: descriptor.pageId || descriptor.nodeId,
+        targetPageKey: descriptor.pageKey,
+        targetPageName: descriptor.pageName,
+        route: descriptor.route,
+      }
+    }
+
+    cachePrototypeContract(nextContract)
+    cachePrototypeContractForNodeId(
+      descriptor.nodeId,
+      nextContract,
+    )
+
+    activePrototypeContract.value = nextContract
+    activePrototypeNodeId.value = descriptor.nodeId
+    activeTab.value = 'runtime'
+
+    await nextTick()
+    refreshStageSize()
+
+    return {
+      ok: true,
+      code: 'SUCCESS',
+      message:
+        `已切换到：${nextContract.page.pageName || descriptor.pageName}`,
+      targetPageId:
+        nextContract.page.pageId ||
+        descriptor.pageId ||
+        descriptor.nodeId,
+      targetPageKey:
+        nextContract.page.pageKey ||
+        descriptor.pageKey,
+      targetPageName:
+        nextContract.page.pageName ||
+        descriptor.pageName,
+      route:
+        nextContract.page.route ||
+        descriptor.route,
+    }
+  } catch (error) {
+    const message =
+      `读取目标页面「${descriptor.pageName}」交互原型失败：` +
+      resolvePrototypeErrorMessage(error)
+
+    prototypeNavigationError.value = message
+
+    return {
+      ok: false,
+      code: 'LOAD_FAILED',
+      message,
+      targetPageId: descriptor.pageId || descriptor.nodeId,
+      targetPageKey: descriptor.pageKey,
+      targetPageName: descriptor.pageName,
+      route: descriptor.route,
+    }
+  } finally {
+    prototypeNavigationLoading.value = false
+  }
+}
+
+function resolvePrototypePageDescriptor(
+  payload: PrototypeNavigatePayload,
+): PrototypePageDescriptor | null {
+  const descriptors =
+    buildPrototypePageRegistry()
+
+  const targetPageId =
+    normalizePrototypeText(payload.targetPageId || '')
+  const targetPageKey =
+    normalizePrototypeText(payload.targetPageKey || '')
+  const targetPageName =
+    normalizePrototypeText(payload.targetPageName || '')
+  const targetRoute =
+    normalizePrototypeRoute(payload.route || '')
+
+  const scored = descriptors
+    .map((descriptor) => {
+      let score = 0
+
+      const descriptorNodeId =
+        normalizePrototypeText(descriptor.nodeId)
+      const descriptorPageId =
+        normalizePrototypeText(descriptor.pageId)
+      const descriptorPageKey =
+        normalizePrototypeText(descriptor.pageKey)
+      const descriptorPageName =
+        normalizePrototypeText(descriptor.pageName)
+      const descriptorRoute =
+        normalizePrototypeRoute(descriptor.route)
+
+      if (
+        targetPageId &&
+        (
+          targetPageId === descriptorNodeId ||
+          targetPageId === descriptorPageId
+        )
+      ) {
+        score += 1000
+      }
+
+      if (
+        targetPageKey &&
+        targetPageKey === descriptorPageKey
+      ) {
+        score += 800
+      }
+
+      if (
+        targetPageName &&
+        targetPageName === descriptorPageName
+      ) {
+        score += 600
+      }
+
+      if (
+        targetRoute &&
+        targetRoute === descriptorRoute
+      ) {
+        score += 500
+      }
+
+      if (
+        score === 0 &&
+        targetPageName &&
+        (
+          descriptorPageName.includes(targetPageName) ||
+          targetPageName.includes(descriptorPageName)
+        )
+      ) {
+        score += 100
+      }
+
+      return {
+        descriptor,
+        score,
+      }
+    })
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score)
+
+  if (scored.length > 0) {
+    return scored[0].descriptor
+  }
+
+  return resolvePurposeFromNavigationPayload(payload)
+}
+
+function resolvePurposeFromNavigationPayload(
+  payload: PrototypeNavigatePayload,
+): PrototypePageDescriptor | null {
+  const text = normalizePrototypeText(
+    [
+      payload.actionId,
+      payload.label,
+      payload.targetPageId,
+      payload.targetPageKey,
+      payload.targetPageName,
+      payload.route,
+    ].join(' '),
+  )
+
+  if (
+    containsAnyPrototypeText(
+      text,
+      ['register', 'signup', '注册'],
+    )
+  ) {
+    return resolvePrototypePageByPurpose('REGISTER')
+  }
+
+  if (
+    containsAnyPrototypeText(
+      text,
+      ['login', 'signin', '登录'],
+    )
+  ) {
+    return resolvePrototypePageByPurpose('LOGIN')
+  }
+
+  if (
+    containsAnyPrototypeText(
+      text,
+      [
+        'home',
+        'dashboard',
+        'workbench',
+        '用户首页',
+        '首页',
+        '工作台',
+      ],
+    )
+  ) {
+    return resolvePrototypePageByPurpose('HOME')
+  }
+
+  return null
+}
+
+function resolvePrototypePageByPurpose(
+  purpose: 'LOGIN' | 'REGISTER' | 'HOME',
+): PrototypePageDescriptor | null {
+  return (
+    buildPrototypePageRegistry().find(
+      (descriptor) => {
+        const text = normalizePrototypeText(
+          [
+            descriptor.pageId,
+            descriptor.pageKey,
+            descriptor.pageName,
+            descriptor.route,
+          ].join(' '),
+        )
+
+        if (purpose === 'LOGIN') {
+          return containsAnyPrototypeText(
+            text,
+            [
+              'loginpage',
+              'login',
+              '登录页',
+              '登录页面',
+            ],
+          )
+        }
+
+        if (purpose === 'REGISTER') {
+          return containsAnyPrototypeText(
+            text,
+            [
+              'registerpage',
+              'register',
+              'signup',
+              '注册页',
+              '注册页面',
+            ],
+          )
+        }
+
+        return containsAnyPrototypeText(
+          text,
+          [
+            'userhome',
+            'homepage',
+            'dashboard',
+            'workbench',
+            '用户首页',
+            '首页',
+            '工作台',
+          ],
+        )
+      },
+    ) || null
+  )
+}
+
+function buildPrototypePageRegistry():
+  PrototypePageDescriptor[] {
+  return flattenPrototypeNodes(
+    props.moduleTree || [],
+  )
+    .filter(
+      (node) =>
+        resolveRequirementNodeType(node) === 'PAGE',
+    )
+    .map(buildPrototypePageDescriptor)
+    .filter(
+      (
+        item,
+      ): item is PrototypePageDescriptor =>
+        Boolean(item),
+    )
+}
+
+function buildPrototypePageDescriptor(
+  node: ModuleTreeNode,
+): PrototypePageDescriptor | null {
+  const nodeId = String(node.id || '').trim()
+
+  if (!nodeId) {
+    return null
+  }
+
+  const extra =
+    node.extra &&
+    typeof node.extra === 'object'
+      ? node.extra as PreviewRecord
+      : {}
+
+  const pageId = String(
+    extra.pageId ||
+    extra.page_id ||
+    node.id ||
+    '',
+  ).trim()
+
+  const pageKey = String(
+    extra.pageKey ||
+    extra.page_key ||
+    node.moduleKey ||
+    node.key ||
+    '',
+  ).trim()
+
+  const pageName = String(
+    extra.pageName ||
+    extra.page_name ||
+    node.moduleName ||
+    node.name ||
+    node.title ||
+    pageKey ||
+    pageId,
+  ).trim()
+
+  const route = String(
+    extra.route ||
+    extra.routePath ||
+    extra.route_path ||
+    node.routePath ||
+    '',
+  ).trim()
+
+  return {
+    node,
+    nodeId,
+    pageId,
+    pageKey,
+    pageName,
+    route,
+  }
+}
+
+function flattenPrototypeNodes(
+  nodes: ModuleTreeNode[],
+): ModuleTreeNode[] {
+  const result: ModuleTreeNode[] = []
+
+  const visit = (
+    items: ModuleTreeNode[],
+  ) => {
+    for (const item of items || []) {
+      result.push(item)
+      visit(item.children || [])
+    }
+  }
+
+  visit(nodes)
+  return result
+}
+
+function normalizePrototypeContractFromArtifact(
+  artifact: ArtifactResponse | null,
+): PreviewContract | null {
+  if (
+    !artifact ||
+    artifact.exists === false ||
+    !artifact.content ||
+    typeof artifact.content !== 'object'
+  ) {
+    return null
+  }
+
+  const content =
+    artifact.content as PreviewRecord
+
+  const candidate =
+    content.schemaVersion === '1.0'
+      ? content
+      : (
+        content.contract ||
+        content.uiContract ||
+        content.content ||
+        content.payload
+      ) as PreviewRecord | undefined
+
+  if (
+    !candidate ||
+    typeof candidate !== 'object'
+  ) {
+    return null
+  }
+
+  if (
+    candidate.schemaVersion !== '1.0' ||
+    candidate.artifactType !== 'UI_CONTRACT' ||
+    !candidate.page ||
+    !Array.isArray(candidate.interactions)
+  ) {
+    return null
+  }
+
+  const normalized =
+    normalizePreviewContractCandidate(
+      candidate as PreviewContract,
+    )
+
+  return normalized.pages?.length
+    ? normalized
+    : null
+}
+
+function normalizePreviewContractCandidate(
+  candidate: PreviewContract,
+): PreviewContract {
+  const normalizedPages =
+    normalizePages(candidate)
+
+  return {
+    schemaVersion:
+      candidate.schemaVersion || '1.0',
+    artifactType: 'UI_CONTRACT',
+    identity: candidate.identity || {},
+    page: candidate.page || {},
+    interactions:
+      Array.isArray(candidate.interactions)
+        ? candidate.interactions
+        : [],
+    validationRules:
+      Array.isArray(candidate.validationRules)
+        ? candidate.validationRules
+        : [],
+    navigationTargets:
+      Array.isArray(candidate.navigationTargets)
+        ? candidate.navigationTargets
+        : [],
+    module: candidate.module || {},
+    routes:
+      Array.isArray(candidate.routes)
+        ? candidate.routes
+        : [],
+    pages: normalizedPages,
+    mockData: candidate.mockData || {},
+    apiBindings:
+      Array.isArray(candidate.apiBindings)
+        ? candidate.apiBindings
+        : [],
+    developmentRules:
+      candidate.developmentRules || {},
+    analysisSummary:
+      candidate.analysisSummary || '',
+    mockScenarios:
+      Array.isArray(candidate.mockScenarios)
+        ? candidate.mockScenarios
+        : [],
+    pageStates:
+      Array.isArray(candidate.pageStates)
+        ? candidate.pageStates
+        : [],
+    featureCoverage:
+      Array.isArray(candidate.featureCoverage)
+        ? candidate.featureCoverage
+        : [],
+    qualitySummary:
+      typeof candidate.qualitySummary === 'object' &&
+      candidate.qualitySummary
+        ? candidate.qualitySummary
+        : undefined,
+    assumptions:
+      Array.isArray(candidate.assumptions)
+        ? candidate.assumptions
+        : [],
+  } as unknown as PreviewContract
+}
+
+function cachePrototypeContract(
+  value: PreviewContract,
+) {
+  for (
+    const key of buildPrototypeContractKeys(value)
+  ) {
+    prototypeContractCache.value[key] = value
+  }
+}
+
+function cachePrototypeContractForNodeId(
+  nodeId: string,
+  value: PreviewContract,
+) {
+  const normalized =
+    normalizePrototypeText(nodeId)
+
+  if (!normalized) {
+    return
+  }
+
+  prototypeContractCache.value[
+    `node:${normalized}`
+  ] = value
+
+  cachePrototypeContract(value)
+}
+
+function getCachedPrototypeContractForNodeId(
+  nodeId: string,
+): PreviewContract | null {
+  const normalized =
+    normalizePrototypeText(nodeId)
+
+  if (!normalized) {
+    return null
+  }
+
+  return (
+    prototypeContractCache.value[
+      `node:${normalized}`
+    ] || null
+  )
+}
+
+function buildPrototypeContractKeys(
+  value: PreviewContract,
+): string[] {
+  const values = [
+    value.page?.pageId,
+    value.page?.pageKey,
+    value.page?.pageName,
+    value.page?.title,
+    value.page?.route,
+    value.identity?.pageId,
+    value.identity?.pageKey,
+    value.identity?.pageName,
+  ]
+
+  const keys = new Set<string>()
+
+  for (const valueItem of values) {
+    const normalized =
+      normalizePrototypeText(
+        String(valueItem || ''),
+      )
+
+    if (normalized) {
+      keys.add(`contract:${normalized}`)
+    }
+  }
+
+  return Array.from(keys)
+}
+
+function actionHasNavigationChain(
+  current: PreviewContract,
+  actionId: string,
+): boolean {
+  const interactions =
+    Array.isArray(current.interactions)
+      ? current.interactions
+      : []
+
+  const byId = new Map(
+    interactions.map(
+      (item: PreviewRecord) => [
+        String(item.actionId || ''),
+        item,
+      ],
+    ),
+  )
+
+  const visited = new Set<string>()
+
+  const visit = (
+    id: string,
+  ): boolean => {
+    if (!id || visited.has(id)) {
+      return false
+    }
+
+    visited.add(id)
+
+    const action = byId.get(id)
+
+    if (!action) {
+      return false
+    }
+
+    if (
+      String(action.type || '').toUpperCase() ===
+      'NAVIGATE'
+    ) {
+      return true
+    }
+
+    return [
+      ...asPrototypeStringList(
+        action.successActionIds,
+      ),
+      ...asPrototypeStringList(
+        action.failureActionIds,
+      ),
+    ].some(visit)
+  }
+
+  return visit(actionId)
+}
+
+function asPrototypeStringList(
+  value: unknown,
+): string[] {
+  return Array.isArray(value)
+    ? value
+        .map(
+          (item) =>
+            String(item || '').trim(),
+        )
+        .filter(Boolean)
+    : []
+}
+
+function isPrimarySubmitLike(
+  payload: PrototypeActionPayload,
+  actionText: string,
+): boolean {
+  const type =
+    String(
+      payload.actionType || '',
+    ).toUpperCase()
+
+  return (
+    type === 'SUBMIT_FORM' ||
+    type === 'CONFIRM_ACTION' ||
+    containsAnyPrototypeText(
+      actionText,
+      [
+        'submit',
+        'login',
+        'register',
+        '登录',
+        '注册',
+        '确认',
+        '进入系统',
+      ],
+    )
+  )
+}
+
+function isLoginPrototypePage(
+  pageText: string,
+): boolean {
+  return (
+    containsAnyPrototypeText(
+      pageText,
+      [
+        'loginpage',
+        'login',
+        '登录页',
+        '登录页面',
+      ],
+    ) &&
+    !containsAnyPrototypeText(
+      pageText,
+      [
+        '退出登录',
+        '登录状态',
+        '状态守卫',
+      ],
+    )
+  )
+}
+
+function isRegisterPrototypePage(
+  pageText: string,
+): boolean {
+  return (
+    containsAnyPrototypeText(
+      pageText,
+      [
+        'registerpage',
+        'register',
+        'signup',
+        '注册页',
+        '注册页面',
+      ],
+    ) &&
+    !containsAnyPrototypeText(
+      pageText,
+      ['注册成功跳转'],
+    )
+  )
+}
+
+function containsAnyPrototypeText(
+  text: string,
+  keywords: string[],
+): boolean {
+  const normalized =
+    normalizePrototypeText(text)
+
+  return keywords.some(
+    (keyword) => {
+      const normalizedKeyword =
+        normalizePrototypeText(keyword)
+
+      return Boolean(
+        normalizedKeyword &&
+        normalized.includes(
+          normalizedKeyword,
+        ),
+      )
+    },
+  )
+}
+
+function normalizePrototypeText(
+  value: string,
+): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s\-_\/]+/g, '')
+}
+
+function normalizePrototypeRoute(
+  value: string,
+): string {
+  const normalized =
+    String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[?#].*$/, '')
+      .replace(/\/+/g, '/')
+
+  if (
+    normalized.length > 1 &&
+    normalized.endsWith('/')
+  ) {
+    return normalized.slice(0, -1)
+  }
+
+  return normalized
+}
+
+function purposeLabel(
+  purpose: 'LOGIN' | 'REGISTER' | 'HOME',
+): string {
+  if (purpose === 'LOGIN') {
+    return '登录页'
+  }
+
+  if (purpose === 'REGISTER') {
+    return '注册页'
+  }
+
+  return '用户首页'
+}
+
+function resolvePrototypeErrorMessage(
+  error: unknown,
+): string {
+  if (
+    error instanceof Error &&
+    error.message
+  ) {
+    return error.message
+  }
+
+  return String(
+    error || '未知错误',
+  )
+}
+
 
 const currentPageTitle = computed(() => {
   return String(
@@ -1612,5 +2662,102 @@ onBeforeUnmount(() => {
   .device-meta {
     display: none;
   }
+}
+
+.prototype-navigation-loading {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  z-index: 30;
+  transform: translateX(-50%);
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  border-radius: 999px;
+  padding: 9px 14px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.12);
+}
+
+/* A9.9.2 Preview Canvas Scaling: drawer shows a scaled real 1440px web page, not a squeezed responsive layout. */
+.preview-stage {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.artboard-page {
+  width: 1440px;
+  min-width: 1440px;
+  max-width: none;
+  min-height: 900px;
+  transform-origin: top center;
+}
+
+.artboard-scale {
+  transform-origin: top center !important;
+}
+
+.artboard-page :deep(.a9-runtime-design-canvas),
+.artboard-page :deep(.ui-runtime-shell) {
+  width: 1440px !important;
+  min-width: 1440px !important;
+  max-width: none !important;
+  min-height: 900px !important;
+  background: #f3f6fb !important;
+}
+
+.artboard-page :deep(.runtime-screen) {
+  width: 1440px !important;
+  min-width: 1440px !important;
+  max-width: none !important;
+  min-height: 900px !important;
+  margin: 0 auto !important;
+  overflow: visible !important;
+}
+
+.artboard-page :deep(.page-canvas) {
+  width: 1440px !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  min-height: 900px !important;
+  padding: 32px 40px 88px !important;
+  box-sizing: border-box !important;
+  transform: none !important;
+}
+
+.artboard-page :deep(.business-page),
+.artboard-page :deep(.business-body),
+.artboard-page :deep(.runtime-component),
+.artboard-page :deep(.runtime-node),
+.artboard-page :deep(.component-card),
+.artboard-page :deep(.node-card),
+.artboard-page :deep(.component-form),
+.artboard-page :deep(.node-form),
+.artboard-page :deep(.component-table),
+.artboard-page :deep(.node-table) {
+  max-width: none !important;
+  box-sizing: border-box !important;
+}
+
+.artboard-page :deep(.business-page),
+.artboard-page :deep(.business-body) {
+  width: 100% !important;
+}
+
+.artboard-page :deep(.component-form),
+.artboard-page :deep(.node-form) {
+  width: 100% !important;
+}
+
+.artboard-page :deep(.form-grid) {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 18px 24px !important;
+}
+
+.artboard-page :deep(.component-table),
+.artboard-page :deep(.node-table),
+.artboard-page :deep(table) {
+  width: 100% !important;
 }
 </style>

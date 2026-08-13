@@ -4,9 +4,15 @@ import json
 from typing import Any, Callable
 
 from app.schemas.agent_protocol import AgentTaskRequest
+from app.graphs.requirement.context.requirement_asset_contract_policy import (
+    RequirementAssetContractPolicy,
+)
 
 
 class PromptTemplateRenderer:
+    def __init__(self) -> None:
+        self.asset_contract_policy = RequirementAssetContractPolicy()
+
     def resolve_system_prompt(
         self,
         request: AgentTaskRequest,
@@ -27,7 +33,11 @@ class PromptTemplateRenderer:
         snapshot = self._extract_snapshot(request)
 
         if not snapshot or not snapshot.get("user_prompt_template"):
-            return fallback_user_prompt_builder()
+            prompt = fallback_user_prompt_builder()
+            return self.asset_contract_policy.append_to_prompt(
+                request=request,
+                prompt=prompt,
+            )
 
         template = str(snapshot["user_prompt_template"])
 
@@ -36,7 +46,10 @@ class PromptTemplateRenderer:
         for key, value in variables.items():
             template = template.replace("{{" + key + "}}", value)
 
-        return template
+        return self.asset_contract_policy.append_to_prompt(
+            request=request,
+            prompt=template,
+        )
 
     def _extract_snapshot(
         self,
@@ -90,3 +103,4 @@ class PromptTemplateRenderer:
             "context_package_json": json.dumps(context_package, ensure_ascii=False, default=str),
             "input_json": json.dumps(input_payload, ensure_ascii=False, default=str),
         }
+

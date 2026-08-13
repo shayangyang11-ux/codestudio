@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.runtime.llm_runtime_manager import get_llm_runtime_manager
+from app.services.llm_model_router import LlmModelRouter
 
 router = APIRouter(
     prefix="/agent/runtime",
@@ -14,3 +15,8 @@ router = APIRouter(
 async def get_llm_runtime_status() -> dict:
     runtime_manager = get_llm_runtime_manager()
     return runtime_manager.status()
+
+
+@router.get("/model-routing/status")
+async def get_model_routing_status() -> dict:
+    return LlmModelRouter().status()

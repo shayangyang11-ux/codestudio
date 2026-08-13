@@ -1,4 +1,5 @@
 <template>
+  <!-- A9.10.14.4.3.15.4.4_STYLE_OVERRIDE_LOCK -->
   <section ref="panelRootRef" class="theme-profile-panel">
     <div class="outer-resize-handle" title="拖动调整右侧面板宽度" @mousedown.prevent="startResize" />
 
@@ -39,6 +40,10 @@
       <label><span>登录页布局</span><select v-model="form.loginLayout" :disabled="isLoading || isSaving"><option value="BRAND_SPLIT">品牌分栏</option><option value="CENTER_CARD">居中卡片</option><option value="MINIMAL">极简</option></select></label>
       <label><span>导航风格</span><select v-model="form.navigationStyle" :disabled="isLoading || isSaving"><option value="SIDE_NAV">侧边导航</option><option value="TOP_NAV">顶部导航</option><option value="MIXED">混合导航</option></select></label>
       <label class="check-row"><input v-model="form.darkModeEnabled" :disabled="isLoading || isSaving" type="checkbox" /><span>启用暗色模式偏好</span></label>
+      <label class="check-row lock-row">
+        <input v-model="form.locked" :disabled="isLoading || isSaving" type="checkbox" />
+        <span>锁定当前风格，不再被自动识别覆盖</span>
+      </label>
     </div>
 
     <label class="notes-field">
@@ -49,6 +54,7 @@
     <footer>
       <div class="profile-meta">
         <span v-if="profile">来源：{{ profile.source }}</span>
+        <span v-if="profile?.locked">已锁定用户风格</span>
         <span v-if="profile?.updatedAt">更新：{{ formatDate(profile.updatedAt) }}</span>
       </div>
       <button type="button" class="primary" :disabled="isLoading || isSaving" @click="saveProfile">{{ isSaving ? '保存中...' : '保存风格配置' }}</button>
@@ -160,11 +166,13 @@ function handleRollbackApplied(nextProfile: ProjectThemeProfile) {
 }
 
 function handleIndustryChanged() {
+  form.locked = true
   form.themeKey = defaultThemeKeyForIndustry(form.industry)
   handleThemeChanged()
 }
 
 function handleThemeChanged() {
+  form.locked = true
   form.visualTone = visualToneForTheme(form.themeKey)
   form.primaryColor = defaultPrimaryColorForTheme(form.themeKey)
 }

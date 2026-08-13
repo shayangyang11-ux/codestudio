@@ -48,6 +48,18 @@
             {{ message.text }}
           </p>
 
+          <div v-if="message.quickReplies?.length" class="quick-reply-actions">
+            <button
+              v-for="reply in message.quickReplies"
+              :key="reply.text"
+              type="button"
+              :disabled="isBusy"
+              @click="sendQuickReply(reply.text, reply.label)"
+            >
+              {{ reply.label }}
+            </button>
+          </div>
+
           <div v-if="message.type === 'TREE_PATCH_PROPOSAL' && message.proposal" class="proposal-card">
             <div class="proposal-title-row">
               <div>
@@ -115,9 +127,9 @@
               </button>
 
               <button class="primary-button"
-                :disabled="isApplyingTreePatch || !message.proposal?.proposal?.operations?.length"
+                :disabled="isApplyingTreePatch || !canApplyProposalFromTreePatchCard(message.proposal)"
                 @click="handleApplyProposal(message.proposal)">
-                {{ isApplyingTreePatch ? '应用中...' : '应用提案' }}
+                {{ isApplyingTreePatch ? '应用中...' : formatTreePatchApplyButtonLabel(message.proposal) }}
               </button>
             </footer>
           </div>
@@ -718,12 +730,18 @@ interface AssistantAttachmentDraft extends AssistantAttachmentRef {
   errorMessage?: string
 }
 
+interface AssistantQuickReply {
+  label: string
+  text: string
+}
+
 interface AssistantMessage {
   id: string
   role: AssistantMessageRole
   type: AssistantMessageType
   text: string
   createdAt: string
+  quickReplies?: AssistantQuickReply[]
   attachments?: AssistantAttachmentDraft[]
   proposal?: ModuleTreePatchProposalResponse | null
   requirementChangeProposal?: RequirementChangeProposal | null
@@ -778,6 +796,25 @@ const attachmentDiffSelections = ref<Record<string, string[]>>({})
 
 const messages = ref<AssistantMessage[]>(createDefaultMessages())
 
+watch(
+  messages,
+  (items) => {
+    for (const message of items) {
+      if (message.role !== 'assistant' || typeof message.text !== 'string') {
+        continue
+      }
+
+      const nextText = sanitizeAssistantVisibleText(message.text)
+
+      if (nextText !== message.text) {
+        message.text = nextText
+      }
+    }
+  },
+  { deep: true },
+)
+
+
 const visibleMessages = computed(() => messages.value)
 
 const isBusy = computed(() => {
@@ -785,6 +822,27 @@ const isBusy = computed(() => {
     props.isSendingMessage ||
     props.isApplyingTreePatch
 })
+
+
+function sanitizeAssistantVisibleText(value: string): string {
+  const text = String(value || '').trim()
+
+  if (!text) {
+    return text
+  }
+
+  const upper = text.toUpperCase()
+
+  if (upper === 'UNAUTHORIZED' || upper === 'HTTP 401' || upper === '401') {
+    return '登录状态已过期，请重新登录后再继续。'
+  }
+
+  return text
+    .replaceAll('MODULE → FUNCTION → PAGE', '模块 → 功能点 → 页面')
+    .replaceAll('PAGE_SPEC / UI_CONTRACT', '交互原型')
+    .replaceAll('PAGE_SPEC', '页面准备信息')
+    .replaceAll('UI_CONTRACT', '交互原型')
+}
 
 const inputPlaceholder = computed(() => {
   if (!props.moduleTreeExists) {
@@ -796,7 +854,7 @@ const inputPlaceholder = computed(() => {
 
 const buttonText = computed(() => {
   if (!props.moduleTreeExists) {
-    return props.isGeneratingTree ? '生成中...' : '生成模块树'
+    return props.isGeneratingTree ? '生成中...' : '生成需求骨架'
   }
 
   if (props.isSendingMessage) {
@@ -846,7 +904,7 @@ const submitDisabled = computed(() => {
 
 const pendingText = computed(() => {
   if (props.isGeneratingTree) {
-    return '正在根据业务需求生成模块树，请稍候。'
+    return '正在根据业务需求生成需求骨架，请稍候。'
   }
 
   if (props.isSendingMessage) {
@@ -863,7 +921,11 @@ const pendingText = computed(() => {
 watch(
   () => props.historyMessages,
   (historyMessages) => {
-    messages.value = buildMessagesFromHistory(historyMessages || [])
+    const historyBasedMessages = buildMessagesFromHistory(historyMessages || [])
+    messages.value = mergeHistoryMessagesWithLocalOperationMessages(
+      historyBasedMessages,
+      messages.value,
+    )
     scrollToBottom()
   },
   {
@@ -879,53 +941,249 @@ watch(
       return
     }
 
-    if (
-      response.messageId &&
-      messages.value.some((message) => message.id === response.messageId)
-    ) {
-      return
-    }
-
     if (response.intent === 'CONFIRM_ASSET_EDIT') {
       markAssetEditProposalsAsSaved()
     }
 
-    const requirementChangeProposal =
-      extractRequirementChangeProposalFromResponse(response)
-    const assetEditProposal =
-      extractAssetEditProposalFromResponse(response)
-    const attachmentDrivenChangeProposal =
-      extractAttachmentDrivenChangeProposalFromResponse(response)
-    const attachmentArtifactDiffProposal =
-      extractAttachmentArtifactDiffProposalFromResponse(response)
-
-    messages.value.push({
-      ...createMessage(
-        'assistant',
-        response.proposal
-          ? 'TREE_PATCH_PROPOSAL'
-          : assetEditProposal
-            ? 'ASSET_EDIT_PROPOSAL'
-            : attachmentArtifactDiffProposal
-              ? 'ATTACHMENT_ARTIFACT_DIFF_PROPOSAL'
-              : attachmentDrivenChangeProposal
-                ? 'ATTACHMENT_CHANGE_PROPOSAL'
-                : requirementChangeProposal
-                  ? 'REQUIREMENT_CHANGE_PROPOSAL'
-                  : 'TEXT',
-        response.reply || '已完成处理。',
-        response.messageId || undefined,
-      ),
-      proposal: response.proposal || null,
-      requirementChangeProposal,
-      assetEditProposal,
-      attachmentDrivenChangeProposal,
-      attachmentArtifactDiffProposal,
-    })
+    upsertAssistantMessage(
+      buildMessageFromAssistantResponse(response),
+    )
 
     scrollToBottom()
   },
 )
+
+watch(
+  () => props.moduleTreeExists,
+  () => {
+    messages.value = messages.value.map((message) =>
+      message.id === 'assistant_system_welcome'
+        ? {
+            ...message,
+            text: buildAssistantWelcomeText(),
+          }
+        : message,
+    )
+  },
+)
+
+
+function extractQuickRepliesFromResponse(
+  response: AssistantMessageResponse,
+): AssistantQuickReply[] {
+  const responseRecord = response as unknown as Record<string, unknown>
+  const directQuickReplies = responseRecord['quickReplies']
+
+  if (Array.isArray(directQuickReplies)) {
+    return directQuickReplies
+      .map((item) => {
+        if (!isRecord(item)) return null
+        const label = String(item.label || item.text || '').trim()
+        const text = String(item.text || item.label || '').trim()
+
+        return label && text
+          ? { label, text }
+          : null
+      })
+      .filter((item): item is AssistantQuickReply => Boolean(item))
+  }
+
+  return (response.actions || [])
+    .filter((action) =>
+      action.type === 'QUICK_REPLY' ||
+      action.type === 'A9_MODULE_TREE_MODE_CHOICE',
+    )
+    .map((action) => {
+      const payload = action.payload || {}
+      const text = String(payload.text || payload.value || action.label || '').trim()
+      const label = String(action.label || text).trim()
+
+      return label && text
+        ? { label, text }
+        : null
+    })
+    .filter((item): item is AssistantQuickReply => Boolean(item))
+}
+
+function normalizeQuickReplyDisplayText(
+  text: string,
+  displayText?: string,
+): string {
+  const label = String(displayText || '').trim()
+  const value = text.trim()
+
+  if (label && label !== value) {
+    return label.replace(/^\s*[12一二ABab][.、\s-]*/, '').trim() || label
+  }
+
+  if (/^(2|二|b)$/i.test(value)) {
+    return '我选择：生成完整企业蓝图'
+  }
+
+  if (/^(1|一|a)$/i.test(value)) {
+    return '我选择：生成模块骨架'
+  }
+
+  return value
+}
+
+function sendQuickReply(text: string, displayText?: string) {
+  const trimmedText = text.trim()
+  const visibleText = normalizeQuickReplyDisplayText(trimmedText, displayText)
+
+  if (!trimmedText || isBusy.value) {
+    return
+  }
+
+  messages.value.push({
+    ...createMessage('user', 'TEXT', visibleText),
+  })
+
+  emit('send', {
+    text: trimmedText,
+    attachments: [],
+  })
+
+  scrollToBottom()
+}
+
+function buildMessageFromAssistantResponse(
+  response: AssistantMessageResponse,
+): AssistantMessage {
+  const requirementChangeProposal =
+    extractRequirementChangeProposalFromResponse(response)
+  const assetEditProposal =
+    extractAssetEditProposalFromResponse(response)
+  const attachmentDrivenChangeProposal =
+    extractAttachmentDrivenChangeProposalFromResponse(response)
+  const attachmentArtifactDiffProposal =
+    extractAttachmentArtifactDiffProposalFromResponse(response)
+
+  return {
+    ...createMessage(
+      'assistant',
+      response.proposal
+        ? 'TREE_PATCH_PROPOSAL'
+        : assetEditProposal
+          ? 'ASSET_EDIT_PROPOSAL'
+          : attachmentArtifactDiffProposal
+            ? 'ATTACHMENT_ARTIFACT_DIFF_PROPOSAL'
+            : attachmentDrivenChangeProposal
+              ? 'ATTACHMENT_CHANGE_PROPOSAL'
+              : requirementChangeProposal
+                ? 'REQUIREMENT_CHANGE_PROPOSAL'
+                : 'TEXT',
+      response.reply || '已完成处理。',
+      response.messageId || undefined,
+    ),
+    proposal: response.proposal || null,
+    quickReplies: extractQuickRepliesFromResponse(response),
+    requirementChangeProposal,
+    assetEditProposal,
+    attachmentDrivenChangeProposal,
+    attachmentArtifactDiffProposal,
+  }
+}
+
+function upsertAssistantMessage(
+  nextMessage: AssistantMessage,
+) {
+  const sourceMessages = pruneSupersededTransientMessages(
+    nextMessage,
+    messages.value,
+  )
+
+  const index = sourceMessages.findIndex(
+    (message) => message.id === nextMessage.id,
+  )
+
+  if (index >= 0) {
+    messages.value = sourceMessages.map((message, messageIndex) =>
+      messageIndex === index
+        ? {
+            ...message,
+            ...nextMessage,
+          }
+        : message,
+    )
+    return
+  }
+
+  messages.value = [
+    ...sourceMessages,
+    nextMessage,
+  ]
+}
+
+function pruneSupersededTransientMessages(
+  nextMessage: AssistantMessage,
+  sourceMessages: AssistantMessage[],
+): AssistantMessage[] {
+  const nextId = String(nextMessage.id || '')
+  const nextType = String(nextMessage.type || '')
+
+  const withoutDuplicateGenerating = nextId.startsWith('module_tree_generation_started_')
+    ? sourceMessages.filter(
+        (message) =>
+          !String(message.id || '').startsWith('module_tree_generation_started_'),
+      )
+    : sourceMessages
+
+  const shouldClearModuleTreeGenerating =
+    nextId.startsWith('module_tree_generated_') ||
+    nextType === 'TREE_PATCH_PROPOSAL' ||
+    nextType === 'ATTACHMENT_CHANGE_PROPOSAL' ||
+    nextType === 'ATTACHMENT_ARTIFACT_DIFF_PROPOSAL' ||
+    nextType === 'REQUIREMENT_CHANGE_PROPOSAL' ||
+    nextType === 'ASSET_EDIT_PROPOSAL'
+
+  if (!shouldClearModuleTreeGenerating) {
+    return withoutDuplicateGenerating
+  }
+
+  return withoutDuplicateGenerating.filter(
+    (message) =>
+      !String(message.id || '').startsWith('module_tree_generation_started_'),
+  )
+}
+
+
+function mergeHistoryMessagesWithLocalOperationMessages(
+  historyBasedMessages: AssistantMessage[],
+  currentMessages: AssistantMessage[],
+): AssistantMessage[] {
+  const historyIds = new Set(historyBasedMessages.map((message) => message.id))
+  const localOperationMessages = currentMessages.filter((message) =>
+    !historyIds.has(message.id) &&
+    isLocalOperationMessage(message)
+  )
+
+  return [
+    ...historyBasedMessages,
+    ...localOperationMessages,
+  ]
+}
+
+function isLocalOperationMessage(
+  message: AssistantMessage,
+): boolean {
+  if (message.role !== 'assistant') {
+    return false
+  }
+
+  const id = String(message.id || '')
+
+  return (
+    id.startsWith('module_tree_generated_') ||
+    id.startsWith('assistant_error_') ||
+    id.startsWith('module_tree_patch_applied_') ||
+    id.startsWith('dev_handoff_package_') ||
+    id.startsWith('asset_edit_saved_') ||
+    id.startsWith('attachment_change_ack_') ||
+    id.startsWith('attachment_diff_ack_')
+  )
+}
+
 
 function submit() {
   if (submitDisabled.value) {
@@ -2032,6 +2290,102 @@ function trimProposalPreview(
   return `${text.slice(0, 420)}...`
 }
 
+
+
+// A9.10.14.4.3.15.2.4.1_LEGACY_PRD_MIGRATION_ACTION_HOTFIX
+// A legacy PRD migration proposal intentionally has no module-tree operations.
+// It still has an executable action: start MODULE_PRD LLM upgrade for the
+// currently selected MODULE.
+function canApplyProposalFromTreePatchCard(
+  proposal: ModuleTreePatchProposalResponse | null | undefined,
+): boolean {
+  if (!proposal) {
+    return false
+  }
+
+  const operations = ((proposal as any)?.proposal?.operations || []) as unknown[]
+
+  if (Array.isArray(operations) && operations.length > 0) {
+    return true
+  }
+
+  return isLegacyPrdMigrationProposalFromTreePatchCard(proposal)
+}
+
+function formatTreePatchApplyButtonLabel(
+  proposal: ModuleTreePatchProposalResponse | null | undefined,
+): string {
+  return isLegacyPrdMigrationProposalFromTreePatchCard(proposal)
+    ? '开始升级'
+    : '应用提案'
+}
+
+function isLegacyPrdMigrationProposalFromTreePatchCard(
+  proposal: ModuleTreePatchProposalResponse | null | undefined,
+): boolean {
+  if (!proposal) {
+    return false
+  }
+
+  const record = proposal as unknown as Record<string, any>
+  const nested = isRecord(record.proposal)
+    ? record.proposal as Record<string, any>
+    : {}
+  const impact = isRecord(nested.impact)
+    ? nested.impact as Record<string, any>
+    : isRecord(record.impact)
+      ? record.impact as Record<string, any>
+      : {}
+  const operations = Array.isArray(nested.operations)
+    ? nested.operations
+    : []
+  const affectedArtifacts = Array.isArray(impact.affectedArtifacts)
+    ? impact.affectedArtifacts.map(String)
+    : Array.isArray(record.affectedArtifacts)
+      ? record.affectedArtifacts.map(String)
+      : []
+  const riskNotes = Array.isArray(impact.riskNotes)
+    ? impact.riskNotes.map(String)
+    : []
+  const text = [
+    record.source,
+    nested.source,
+    record.description,
+    nested.description,
+    record.summary,
+    nested.summary,
+    impact.summary,
+    ...riskNotes,
+  ]
+    .filter(Boolean)
+    .map(String)
+    .join('\n')
+    .toUpperCase()
+
+  const affectsModulePrd = affectedArtifacts
+    .map((item) => item.toUpperCase())
+    .includes('MODULE_PRD')
+
+  if (operations.length > 0 || !affectsModulePrd) {
+    return false
+  }
+
+  return (
+    text.includes('LEGACY_PRD') ||
+    text.includes('LEGACY PRD') ||
+    text.includes('旧 PRD') ||
+    text.includes('旧PRD') ||
+    text.includes('老 PRD') ||
+    text.includes('老PRD') ||
+    text.includes('重新生成 MODULE_PRD') ||
+    (
+      text.includes('MODULE_PRD') &&
+      text.includes('PAGE_REQUIREMENTS') &&
+      (text.includes('升级') || text.includes('迁移') || text.includes('补齐'))
+    )
+  )
+}
+
 function handleApplyProposal(
   proposal: ModuleTreePatchProposalResponse | null | undefined,
 ) {
@@ -2047,11 +2401,28 @@ function createDefaultMessages(): AssistantMessage[] {
     createMessage(
       'system',
       'TEXT',
-      '你好，我是 CodeMind Studio 的 AI Assistant。你可以在这里输入业务需求、修改模块树、生成变更提案，也可以上传需求文档、截图和原型图。',
+      buildAssistantWelcomeText(),
       'assistant_system_welcome',
     ),
   ]
 }
+
+function buildAssistantWelcomeText(): string {
+  if (!props.moduleTreeExists) {
+    return [
+      '你好，我是 CodeMind Studio 的 AI Assistant。',
+      '当前项目还没有需求骨架。你可以直接描述要建设的系统，或上传需求材料。',
+      '如果描述比较粗，我会先让你选择“先生成模块骨架”还是“生成完整项目蓝图”。',
+      '示例：我要做一个智能仓储管理系统，包含入库、出库、库存预警、供应商和仓库管理。',
+    ].join('\n')
+  }
+
+  return [
+    '你好，我是 CodeMind Studio 的 AI Assistant。',
+    '当前项目已经有需求骨架。你可以让我继续拆分模块、调整结构、补充功能点、生成页面原型，或解释当前节点下一步应该做什么。',
+  ].join('\n')
+}
+
 
 function buildMessagesFromHistory(
   historyMessages: AssistantConversationMessageResponse[],
@@ -3044,4 +3415,62 @@ onBeforeUnmount(() => {
 .hidden-file-input {
   display: none;
 }
+
+/* A9_7_6_AI_PANEL_INDEPENDENT_SCROLL_FIX */
+.ai-assistant-panel {
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.assistant-header,
+.assistant-input-area {
+  flex: 0 0 auto;
+}
+
+.assistant-message-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.assistant-input {
+  min-height: 78px;
+  max-height: 150px;
+  resize: vertical;
+}
+
+
+.quick-reply-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.quick-reply-actions button {
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 7px 11px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.quick-reply-actions button:hover:not(:disabled) {
+  border-color: #2563eb;
+  background: #dbeafe;
+}
+
+.quick-reply-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 </style>

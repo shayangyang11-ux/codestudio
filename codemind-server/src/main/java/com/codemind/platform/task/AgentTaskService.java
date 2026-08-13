@@ -17,6 +17,8 @@ import java.util.LinkedHashMap;
 @Service
 public class AgentTaskService {
 
+    // A9.10.14.4.3.12.1_TOKEN_GUARD_AND_PRD_UI_SYNC_PATCH_TASK_SERVICE
+
     public static final String DEFAULT_REQUIREMENT_QUEUE = "requirement-agent";
 
     private static final List<String> ACTIVE_STATUSES = List.of(
@@ -56,7 +58,7 @@ public class AgentTaskService {
                 createdBy,
                 DEFAULT_REQUIREMENT_QUEUE,
                 0,
-                3
+                1
         );
     }
 
@@ -128,7 +130,7 @@ public class AgentTaskService {
         task.setQueueName(DEFAULT_REQUIREMENT_QUEUE);
         task.setPriority(0);
         task.setAttemptCount(1);
-        task.setMaxAttempts(3);
+        task.setMaxAttempts(1);
         task.setNextRunAt(LocalDateTime.now());
 
         return agentTaskRepository.save(task);
@@ -519,7 +521,7 @@ public class AgentTaskService {
         }
 
         int resolvedMaxAttempts = maxAttempts == null
-                ? Math.max(1, task.getMaxAttempts() == null ? 3 : task.getMaxAttempts())
+                ? Math.max(1, task.getMaxAttempts() == null ? 1 : task.getMaxAttempts())
                 : Math.max(1, maxAttempts);
 
         String message = reason == null || reason.isBlank()

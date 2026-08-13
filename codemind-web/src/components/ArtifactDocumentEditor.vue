@@ -23,7 +23,7 @@
           v-if="editable && !editing"
           type="button"
           class="secondary-button compact-action-button"
-          :disabled="!artifact?.artifactId || !markdown"
+          :disabled="(!allowMissingArtifactId && !artifact?.artifactId) || !markdown"
           @click="startEditing"
         >
           编辑文档
@@ -119,6 +119,7 @@ const props = defineProps<{
   editable?: boolean
   saving?: boolean
   compact?: boolean
+  allowMissingArtifactId?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -197,8 +198,8 @@ function cancelEditing() {
 function submitManualEdit() {
   syncDraftFromVisualEditor()
 
-  if (!props.artifact?.artifactId) {
-    window.alert('当前资产缺少 artifactId，无法保存新版本。')
+  if (!props.artifact?.artifactId && !props.allowMissingArtifactId) {
+    window.alert('当前文档缺少可保存的资产标识，无法保存新版本。')
     return
   }
 
@@ -222,7 +223,7 @@ function submitManualEdit() {
   }
 
   emit('save', {
-    artifactId: props.artifact.artifactId,
+    artifactId: props.artifact?.artifactId || null,
     artifactType: props.artifactType,
     contentMarkdown: draftMarkdown.value,
     reason: reason.trim(),

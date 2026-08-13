@@ -1,8 +1,10 @@
+
 from __future__ import annotations
 
 from typing import Any
 
 from app.agents.requirement.ui_contract_generation_plan import UiContractGenerationPlan
+from app.agents.requirement.ui_contract_semantic_skeleton import UiContractSemanticSkeletonBuilder
 
 
 class UiContractOutputNormalizer:
@@ -67,6 +69,13 @@ class UiContractOutputNormalizer:
         # 处理 mockScenarios、stateTransitions、scenario steps 等其他容器中
         # 仍然可能残留的 stateKey=componentId 问题。
         self._normalize_page_state_action_references_deep(source, warnings)
+
+        UiContractSemanticSkeletonBuilder().apply(
+            source,
+            plan,
+            warnings,
+        )
+        self._append_quality_warnings(source, warnings)
 
         return source
 

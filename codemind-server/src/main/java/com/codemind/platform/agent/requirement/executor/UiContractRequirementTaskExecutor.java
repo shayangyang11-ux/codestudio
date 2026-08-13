@@ -35,6 +35,25 @@ public class UiContractRequirementTaskExecutor extends AbstractRequirementTaskEx
 
         GenerateUiContractRequest request = new GenerateUiContractRequest();
         request.setRequirementText(optionalString(payload, "requirement_text"));
+        // A9.10.14.1.1_FORCE_UI_CONTRACT_REGENERATE: carry explicit regenerate/theme metadata from the queued task payload.
+        request.setForceRegenerate(
+                Boolean.TRUE.equals(payload.get("force_regenerate"))
+                        || Boolean.TRUE.equals(payload.get("forceRegenerate"))
+        );
+
+        Object rawThemeProfile = payload.get("themeProfile");
+        if (!(rawThemeProfile instanceof Map<?, ?>)) {
+            rawThemeProfile = payload.get("theme_profile");
+        }
+        if (rawThemeProfile instanceof Map<?, ?> rawMap) {
+            Map<String, Object> normalizedThemeProfile = new java.util.LinkedHashMap<>();
+            rawMap.forEach((key, value) -> {
+                if (key != null) {
+                    normalizedThemeProfile.put(String.valueOf(key), value);
+                }
+            });
+            request.setThemeProfile(normalizedThemeProfile);
+        }
 
         uiContractPersistenceService.generateAndPersistUiContractForExistingTask(
                 task.getId(),

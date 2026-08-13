@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -44,11 +44,13 @@ class PageComponentSpec(BaseModel):
 
 
 class PageActionSpec(BaseModel):
-    action_key: str
-    action_name: str
-    trigger_position: str
-    actor: str
-    description: str
+    action_key: str = Field(description="操作唯一标识，尽量与页面 FEATURE 的 module_key / feature_key 对齐")
+    action_name: str = Field(description="操作名称")
+    trigger_position: str = Field(description="触发方式/触发位置，例如点击注册按钮、字段失焦、接口返回失败")
+    actor: str = Field(description="执行角色")
+    description: str = Field(description="操作说明")
+    interaction_type: str = Field(description="交互类型，例如 FORM_SUBMIT、FIELD_VALIDATION、ERROR_FEEDBACK、SUCCESS_NAVIGATION、QUERY_REFRESH、OPEN_MODAL")
+    expected_result: str = Field(description="预期结果：操作后页面、数据、状态、提示或导航应该发生什么变化")
     preconditions: list[str] = Field(default_factory=list)
     business_rules: list[str] = Field(default_factory=list)
     success_feedback: str
@@ -150,6 +152,8 @@ class PageSpecLlmOutput(BaseModel):
     form_fields: list[PageFormFieldSpec] = Field(default_factory=list)
     table_columns: list[PageTableColumnSpec] = Field(default_factory=list)
     api_bindings: list[PageApiBinding] = Field(default_factory=list)
+    # A9.10.14.4.3.13.1_PAGE_SEMANTIC_CONTRACT_FIELD
+    page_semantic_contract: dict[str, Any] = Field(default_factory=dict)
     page_states: list[PageStateSpec] = Field(default_factory=list)
     permission_specs: list[PagePermissionSpec] = Field(default_factory=list)
     exception_specs: list[PageExceptionSpec] = Field(default_factory=list)

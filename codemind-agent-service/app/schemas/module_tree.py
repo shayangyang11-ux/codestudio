@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -19,7 +19,7 @@ class FlatModuleNode(BaseModel):
     parent_key: str = Field(description="Parent key. Empty string means root node.")
     name: str = Field(description="Chinese display name.")
     type: ModuleNodeType = Field(
-        description="DOMAIN / MODULE / SUBMODULE / PAGE / FEATURE."
+        description="A9 visible tree: MODULE / FEATURE(function point) / PAGE. DOMAIN and SUBMODULE are legacy aliases normalized to MODULE."
     )
     description: str = Field(description="Node responsibility summary.")
     sort_order: int = Field(description="Sort order among siblings.")
@@ -46,8 +46,14 @@ class FlatModuleNode(BaseModel):
     )
     feature_role: str | None = Field(
         default=None,
-        description="Only for FEATURE. query / create / update / delete / submit / approve / reject / export / import / navigate / validate.",
+        description="Only for FEATURE(function point). It describes a business capability, not a button, field, validation item, or UI component.",
     )
+
+    requirement_context: dict[str, Any] | None = Field(default=None, description="Hidden MODULE requirement context.")
+    function_context: dict[str, Any] | None = Field(default=None, description="Hidden FEATURE function context.")
+    page_prototype_context: dict[str, Any] | None = Field(default=None, description="Hidden PAGE prototype context for UI_CONTRACT.")
+    module_prototype_map: dict[str, Any] | None = Field(default=None, description="Hidden MODULE page/navigation map.")
+    traceability_map: dict[str, Any] | None = Field(default=None, description="Hidden lineage and coverage metadata.")
 
 
 class ModuleNode(BaseModel):
@@ -62,6 +68,12 @@ class ModuleNode(BaseModel):
     primaryEntity: str | None = None
     canGenerateUiContract: bool = False
     featureRole: str | None = None
+
+    requirementContext: dict[str, Any] | None = None
+    functionContext: dict[str, Any] | None = None
+    pagePrototypeContext: dict[str, Any] | None = None
+    modulePrototypeMap: dict[str, Any] | None = None
+    traceabilityMap: dict[str, Any] | None = None
 
     children: list["ModuleNode"] = Field(default_factory=list)
 
@@ -78,6 +90,10 @@ class ModuleTreeArtifact(BaseModel):
     flat_modules: list[FlatModuleNode]
     markdown: str
     analysis_summary: str
+    generation_plan: dict[str, Any] | None = Field(
+        default=None,
+        description="Internal generation recommendation plan: skeleton / full blueprint / organize-first.",
+    )
 
 
 MODULE_TREE_LLM_JSON_SCHEMA = {
@@ -160,6 +176,11 @@ MODULE_TREE_LLM_JSON_SCHEMA = {
                     "feature_role": {
                         "type": ["string", "null"],
                     },
+                    "requirement_context": {"type": ["object", "null"], "additionalProperties": True},
+                    "function_context": {"type": ["object", "null"], "additionalProperties": True},
+                    "page_prototype_context": {"type": ["object", "null"], "additionalProperties": True},
+                    "module_prototype_map": {"type": ["object", "null"], "additionalProperties": True},
+                    "traceability_map": {"type": ["object", "null"], "additionalProperties": True},
                 },
             },
         },

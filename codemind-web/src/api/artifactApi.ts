@@ -239,6 +239,7 @@ export async function saveManualArtifactEdit(
         artifactType: payload.artifactType,
         contentMarkdown: payload.contentMarkdown,
         reason: payload.reason || '',
+        content: payload.content || null,
       }),
     },
   )

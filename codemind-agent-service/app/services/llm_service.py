@@ -12,6 +12,7 @@ from app.runtime.llm_runtime_exceptions import (
     LlmProviderHttpError,
 )
 from app.runtime.llm_runtime_manager import get_llm_runtime_manager
+from app.services.llm_model_router import LlmModelProfile, LlmModelRouter
 
 
 @dataclass
@@ -29,32 +30,52 @@ class LlmService:
     retry, timeout, circuit breaker and runtime metrics are applied globally.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        agent_scope: str = "requirement",
+        llm_task: str = "default",
+    ) -> None:
         self.settings = get_settings()
         self.runtime_manager = get_llm_runtime_manager()
+        self.model_router = LlmModelRouter()
+        self.agent_scope = agent_scope
+        self.llm_task = llm_task
 
     async def generate_structured_json(
-            self,
-            *,
-            system_prompt: str,
-            user_prompt: str,
-            output_schema_name: str,
-            output_json_schema: dict[str, Any],
-            validate_json: bool = True,
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        output_schema_name: str,
+        output_json_schema: dict[str, Any],
+        validate_json: bool = True,
+        agent_scope: str | None = None,
+        llm_task: str | None = None,
     ) -> LlmResult:
-        if self.settings.llm_provider == "mock":
+        profile = self.model_router.resolve(
+            agent_scope=agent_scope or self.agent_scope,
+            llm_task=llm_task or self.llm_task,
+        )
+
+        # A9.10.14.1.1_FORCE_UI_CONTRACT_REGENERATE
+        print(
+            f"[A9.10.14.1.1] LLM profile provider={profile.provider} model={profile.model} scope={profile.agent_scope} task={profile.llm_task}",
+            flush=True,
+        )
+
+        if profile.provider == "mock":
             return self._mock_generate_json(
                 output_schema_name=output_schema_name,
+                profile=profile,
             )
 
-        self._validate_api_key()
-
-        provider = self.settings.llm_provider
-        model = self.settings.llm_model
+        self._validate_api_key(profile)
 
         async def operation() -> LlmResult:
-            if provider == "deepseek":
-                return await self._call_deepseek_chat_completions_api(
+            if profile.provider in {"deepseek", "qwen"}:
+                return await self._call_chat_completions_api(
+                    profile=profile,
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     output_schema_name=output_schema_name,
@@ -62,8 +83,9 @@ class LlmService:
                     validate_json=validate_json,
                 )
 
-            if provider in {"openai", "openai_compatible"}:
+            if profile.provider in {"openai", "openai_compatible"}:
                 return await self._call_openai_responses_api(
+                    profile=profile,
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     output_schema_name=output_schema_name,
@@ -71,26 +93,28 @@ class LlmService:
                     validate_json=validate_json,
                 )
 
-            raise ValueError(f"Unsupported LLM provider: {provider}")
+            raise ValueError(f"Unsupported LLM provider: {profile.provider}")
 
         result, runtime_metadata = await self.runtime_manager.execute(
-            provider=provider,
-            model=model,
-            operation_name="generate_structured_json",
+            provider=profile.provider,
+            model=profile.model,
+            operation_name=f"{profile.agent_scope}.{profile.llm_task}.generate_structured_json",
             operation=operation,
         )
 
         result.usage = self._merge_usage_metadata(
             result.usage,
             runtime_metadata,
+            profile,
         )
 
         return result
 
     def _mock_generate_json(
-            self,
-            *,
-            output_schema_name: str,
+        self,
+        *,
+        output_schema_name: str,
+        profile: LlmModelProfile,
     ) -> LlmResult:
         mock_output = {
             "modules": [
@@ -107,36 +131,41 @@ class LlmService:
             "analysis_summary": "mock 模式用于本地连通性验证，不消耗真实 token。",
         }
 
+        usage = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "runtime": {
+                "provider": "mock",
+                "model": profile.model,
+                "success": True,
+                "attempts_used": 0,
+            },
+        }
+
+        usage.update(self._model_profile_usage(profile))
+
         return LlmResult(
             text=json.dumps(mock_output, ensure_ascii=False),
             raw={
                 "provider": "mock",
-                "model": self.settings.llm_model,
+                "model": profile.model,
                 "output_schema_name": output_schema_name,
             },
-            usage={
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "total_tokens": 0,
-                "runtime": {
-                    "provider": "mock",
-                    "model": self.settings.llm_model,
-                    "success": True,
-                    "attempts_used": 0,
-                },
-            },
+            usage=usage,
         )
 
-    async def _call_deepseek_chat_completions_api(
-            self,
-            *,
-            system_prompt: str,
-            user_prompt: str,
-            output_schema_name: str,
-            output_json_schema: dict[str, Any],
-            validate_json: bool = True,
+    async def _call_chat_completions_api(
+        self,
+        *,
+        profile: LlmModelProfile,
+        system_prompt: str,
+        user_prompt: str,
+        output_schema_name: str,
+        output_json_schema: dict[str, Any],
+        validate_json: bool = True,
     ) -> LlmResult:
-        url = self.settings.llm_base_url.rstrip("/") + "/chat/completions"
+        url = profile.base_url.rstrip("/") + "/chat/completions"
 
         schema_instruction = self._build_schema_instruction(
             output_schema_name=output_schema_name,
@@ -155,7 +184,7 @@ class LlmService:
         ]
 
         payload: dict[str, Any] = {
-            "model": self.settings.llm_model,
+            "model": profile.model,
             "messages": messages,
             "response_format": {
                 "type": "json_object",
@@ -165,7 +194,7 @@ class LlmService:
         }
 
         headers = {
-            "Authorization": f"Bearer {self.settings.llm_api_key}",
+            "Authorization": f"Bearer {profile.api_key}",
             "Content-Type": "application/json",
         }
 
@@ -180,7 +209,7 @@ class LlmService:
 
         if response.status_code >= 400:
             raise LlmProviderHttpError(
-                provider="deepseek",
+                provider=profile.provider,
                 status_code=response.status_code,
                 response_text=response.text,
             )
@@ -189,31 +218,37 @@ class LlmService:
         text = self._extract_chat_completion_text(raw)
 
         if not text or not text.strip():
-            raise RuntimeError(f"DeepSeek API returned empty text. Raw response: {raw}")
+            raise RuntimeError(
+                f"{profile.provider} Chat Completions API returned empty text. Raw response: {raw}"
+            )
 
         normalized_text = self._normalize_json_text(text)
         if validate_json:
             self._assert_valid_json(normalized_text)
 
+        usage = self._extract_usage(raw)
+        usage.update(self._model_profile_usage(profile))
+
         return LlmResult(
             text=normalized_text,
             raw=raw,
-            usage=self._extract_usage(raw),
+            usage=usage,
         )
 
     async def _call_openai_responses_api(
-            self,
-            *,
-            system_prompt: str,
-            user_prompt: str,
-            output_schema_name: str,
-            output_json_schema: dict[str, Any],
-            validate_json: bool = True,
+        self,
+        *,
+        profile: LlmModelProfile,
+        system_prompt: str,
+        user_prompt: str,
+        output_schema_name: str,
+        output_json_schema: dict[str, Any],
+        validate_json: bool = True,
     ) -> LlmResult:
-        url = self.settings.llm_base_url.rstrip("/") + "/responses"
+        url = profile.base_url.rstrip("/") + "/responses"
 
         payload: dict[str, Any] = {
-            "model": self.settings.llm_model,
+            "model": profile.model,
             "input": [
                 {
                     "role": "system",
@@ -236,7 +271,7 @@ class LlmService:
         }
 
         headers = {
-            "Authorization": f"Bearer {self.settings.llm_api_key}",
+            "Authorization": f"Bearer {profile.api_key}",
             "Content-Type": "application/json",
         }
 
@@ -251,7 +286,7 @@ class LlmService:
 
         if response.status_code >= 400:
             raise LlmProviderHttpError(
-                provider="openai_responses",
+                provider=profile.provider,
                 status_code=response.status_code,
                 response_text=response.text,
             )
@@ -266,17 +301,20 @@ class LlmService:
         if validate_json:
             self._assert_valid_json(normalized_text)
 
+        usage = self._extract_usage(raw)
+        usage.update(self._model_profile_usage(profile))
+
         return LlmResult(
             text=normalized_text,
             raw=raw,
-            usage=self._extract_usage(raw),
+            usage=usage,
         )
 
     def _build_schema_instruction(
-            self,
-            *,
-            output_schema_name: str,
-            output_json_schema: dict[str, Any],
+        self,
+        *,
+        output_schema_name: str,
+        output_json_schema: dict[str, Any],
     ) -> str:
         return "\n".join(
             [
@@ -370,27 +408,40 @@ class LlmService:
         except Exception as exc:
             raise RuntimeError(f"LLM output is not valid JSON: {text}") from exc
 
-    def _validate_api_key(self) -> None:
-        api_key = self.settings.llm_api_key
+    def _validate_api_key(self, profile: LlmModelProfile) -> None:
+        api_key = profile.api_key or ""
 
         if not api_key or api_key.strip() in {"", "mock"}:
             raise LlmApiKeyConfigurationError(
-                "CODEMIND_LLM_API_KEY is empty. Please configure a real API key or use CODEMIND_LLM_PROVIDER=mock."
+                f"LLM API key is empty for provider={profile.provider}, "
+                f"agent_scope={profile.agent_scope}, llm_task={profile.llm_task}. "
+                "Configure the matching CODEMIND_* API key or use CODEMIND_LLM_PROVIDER=mock."
             )
 
         try:
             api_key.encode("ascii")
         except UnicodeEncodeError as exc:
             raise LlmApiKeyConfigurationError(
-                "CODEMIND_LLM_API_KEY contains non-ASCII characters. "
+                f"LLM API key contains non-ASCII characters for provider={profile.provider}. "
                 "Please replace placeholder text with a real API key."
             ) from exc
 
+    def _model_profile_usage(self, profile: LlmModelProfile) -> dict[str, Any]:
+        return {
+            "model_profile": profile.public_dict(),
+            "model_provider": profile.provider,
+            "model_name": profile.model,
+            "agent_scope": profile.agent_scope,
+            "llm_task": profile.llm_task,
+        }
+
     def _merge_usage_metadata(
-            self,
-            usage: dict[str, Any],
-            runtime_metadata: dict[str, Any],
+        self,
+        usage: dict[str, Any],
+        runtime_metadata: dict[str, Any],
+        profile: LlmModelProfile,
     ) -> dict[str, Any]:
         merged = dict(usage or {})
         merged.update(runtime_metadata)
+        merged.update(self._model_profile_usage(profile))
         return merged

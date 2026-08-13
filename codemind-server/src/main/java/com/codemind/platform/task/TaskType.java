@@ -10,6 +10,8 @@ public enum TaskType {
 
     GENERATE_PAGE_SPEC,
 
+    GENERATE_PAGE_MAP,
+
     GENERATE_DATA_MODEL,
 
     GENERATE_API_CONTRACT,

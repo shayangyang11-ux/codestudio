@@ -897,12 +897,68 @@ public class ModuleTreePatchProposalService {
                         selectedNodeId,
                         moduleTree
                 );
+
+                if (isDuplicateAddNodeOperation(operation, moduleTree)) {
+                    continue;
+                }
             }
 
             result.add(operation);
         }
 
         return result;
+    }
+
+    private boolean isDuplicateAddNodeOperation(
+            Map<String, Object> operation,
+            List<ProjectModuleService.ModuleTreeNode> moduleTree
+    ) {
+        String moduleName = textValue(operation.get("moduleName"));
+        String moduleType = textValue(operation.get("moduleType"));
+
+        if (moduleName.isBlank()) {
+            return false;
+        }
+
+        String expectedName = normalizeForMatch(moduleName);
+        String expectedType = normalizeForMatch(moduleType);
+        String expectedParentId = textValue(operation.get("parentId"));
+
+        List<ProjectModuleService.ModuleTreeNode> flatNodes = new ArrayList<>();
+        flatten(moduleTree, flatNodes);
+
+        for (ProjectModuleService.ModuleTreeNode node : flatNodes) {
+            String nodeName = normalizeForMatch(node.getModuleName());
+            String nodeType = normalizeForMatch(node.getModuleType());
+            String nodeParentId = node.getParentId() == null
+                    ? ""
+                    : node.getParentId().toString();
+
+            if (nodeName.isBlank()) {
+                continue;
+            }
+
+            boolean sameName =
+                    Objects.equals(expectedName, nodeName) ||
+                            nodeName.contains(expectedName) ||
+                            expectedName.contains(nodeName);
+
+            boolean compatibleType =
+                    expectedType.isBlank() ||
+                            nodeType.isBlank() ||
+                            Objects.equals(expectedType, nodeType);
+
+            boolean compatibleParent =
+                    expectedParentId.isBlank() ||
+                            nodeParentId.isBlank() ||
+                            Objects.equals(expectedParentId, nodeParentId);
+
+            if (sameName && compatibleType && compatibleParent) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void normalizeAddNodeParent(
@@ -1232,10 +1288,10 @@ public class ModuleTreePatchProposalService {
         );
 
         return switch (parentType) {
-            case "DOMAIN" -> "MODULE".equals(childType);
-            case "MODULE" -> List.of("SUBMODULE", "PAGE").contains(childType);
-            case "SUBMODULE" -> "PAGE".equals(childType);
-            case "PAGE" -> "FEATURE".equals(childType);
+            case "DOMAIN" -> List.of("MODULE", "FEATURE").contains(childType);
+            case "MODULE" -> List.of("MODULE", "FEATURE").contains(childType);
+            case "SUBMODULE" -> List.of("MODULE", "FEATURE").contains(childType);
+            case "FEATURE" -> "PAGE".equals(childType);
             default -> false;
         };
     }
@@ -1248,7 +1304,7 @@ public class ModuleTreePatchProposalService {
                 ""
         );
 
-        return List.of("DOMAIN", "MODULE").contains(childType);
+        return "MODULE".equals(childType);
     }
 
     private String normalizeModuleTypeAlias(

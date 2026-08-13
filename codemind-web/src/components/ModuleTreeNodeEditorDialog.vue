@@ -140,6 +140,8 @@
 import { computed, reactive, watch } from 'vue'
 import type { ModuleTreeNode } from '../types/codemind'
 import {
+  getAllowedRequirementChildTypes,
+  getCreateChildActionLabel,
   getRequirementNodeTypeLabel,
   resolveRequirementNodeType,
   type RequirementNodeType,
@@ -188,29 +190,31 @@ const form = reactive<NodeEditorForm>({
 })
 
 const title = computed(() => {
-  if (props.mode === 'create-root') return '新增根节点'
-  if (props.mode === 'create-child') return '新增子节点'
+  if (props.mode === 'create-root') return '新增根模块'
+  if (props.mode === 'create-child') return getCreateChildActionLabel(props.parentNode)
   return '编辑节点'
 })
 
 const description = computed(() => {
   if (props.mode === 'create-root') {
-    return '创建业务域或模块根节点。'
+    return '创建根模块。'
   }
 
   if (props.mode === 'create-child' && props.parentNode) {
-    return `在「${props.parentNode.moduleName || props.parentNode.name || '当前节点'}」下创建子节点。`
+    const action = getCreateChildActionLabel(props.parentNode)
+    return `在「${props.parentNode.moduleName || props.parentNode.name || '当前节点'}」下${action}。`
   }
 
   return '修改当前模块树节点信息。'
 })
 
-const typeOptions = computed(() => {
+const typeOptions = computed<Array<{ label: string; value: RequirementNodeType }>>(() => {
   if (props.mode === 'edit' && props.editingNode) {
     const nodeType = resolveRequirementNodeType(props.editingNode)
+
     return [
       {
-        label: getRequirementNodeTypeLabel(nodeType),
+        label: labelForNodeType(nodeType),
         value: nodeType,
       },
     ]
@@ -219,59 +223,16 @@ const typeOptions = computed(() => {
   if (props.mode === 'create-root') {
     return [
       {
-        label: '业务域',
-        value: 'DOMAIN',
-      },
-      {
         label: '模块',
         value: 'MODULE',
       },
     ]
   }
 
-  const parentType = resolveRequirementNodeType(props.parentNode)
-
-  if (parentType === 'DOMAIN') {
-    return [
-      {
-        label: '模块',
-        value: 'MODULE',
-      },
-    ]
-  }
-
-  if (parentType === 'MODULE') {
-    return [
-      {
-        label: '子模块',
-        value: 'SUBMODULE',
-      },
-      {
-        label: '页面',
-        value: 'PAGE',
-      },
-    ]
-  }
-
-  if (parentType === 'SUBMODULE') {
-    return [
-      {
-        label: '页面',
-        value: 'PAGE',
-      },
-    ]
-  }
-
-  if (parentType === 'PAGE') {
-    return [
-      {
-        label: '功能点',
-        value: 'FEATURE',
-      },
-    ]
-  }
-
-  return []
+  return getAllowedRequirementChildTypes(props.parentNode).map((nodeType) => ({
+    label: labelForNodeType(nodeType),
+    value: nodeType,
+  }))
 })
 
 watch(
@@ -348,6 +309,13 @@ function resolveDefaultCreateType(): RequirementNodeType {
   return 'MODULE'
 }
 
+function labelForNodeType(nodeType: RequirementNodeType): string {
+  if (nodeType === 'FEATURE') return '业务能力'
+  if (nodeType === 'PAGE') return '页面'
+  if (nodeType === 'MODULE' || nodeType === 'DOMAIN' || nodeType === 'SUBMODULE') return '模块'
+  return getRequirementNodeTypeLabel(nodeType)
+}
+
 function handleSubmit() {
   if (!form.moduleName.trim()) {
     window.alert('节点名称不能为空。')
@@ -365,6 +333,10 @@ function handleSubmit() {
     canGenerateUiContract: form.moduleType === 'PAGE',
   }
 
+  if (form.moduleType === 'MODULE') {
+    extra.requirementMode = 'DRAFT_MODULE'
+  }
+
   if (form.moduleType === 'PAGE') {
     extra.pageKind = form.pageKind
     extra.routePath = form.routePath.trim()
@@ -374,6 +346,7 @@ function handleSubmit() {
 
   if (form.moduleType === 'FEATURE') {
     extra.featureRole = form.featureRole
+    extra.requirementMode = 'FUNCTION_POINT'
   }
 
   emit('submit', {
@@ -385,11 +358,11 @@ function handleSubmit() {
 }
 
 function defaultNameForType(moduleType: RequirementNodeType): string {
-  if (moduleType === 'DOMAIN') return '新业务域'
+  if (moduleType === 'DOMAIN') return '新模块'
   if (moduleType === 'MODULE') return '新模块'
-  if (moduleType === 'SUBMODULE') return '新子模块'
+  if (moduleType === 'SUBMODULE') return '新模块'
   if (moduleType === 'PAGE') return '新页面'
-  if (moduleType === 'FEATURE') return '新功能点'
+  if (moduleType === 'FEATURE') return '新业务能力'
 
   return '新节点'
 }
@@ -532,3 +505,4 @@ function defaultLayoutType(pageKind: string): string {
   color: #2563eb;
 }
 </style>
+
