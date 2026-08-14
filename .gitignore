@@ -44,3 +44,5 @@ Thumbs.db
 codemind_project_manifest.txt
 # Local runtime data
 /codemind-server/data/
+
+codemind-agent-service/
