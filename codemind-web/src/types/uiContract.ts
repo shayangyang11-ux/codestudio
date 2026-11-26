@@ -2,20 +2,70 @@ export type UiContractComponentType =
   | 'PAGE_HEADER'
   | 'SECTION'
   | 'CARD'
+  | 'CONTAINER'
+  | 'GROUP'
+  | 'PANEL'
   | 'FORM'
   | 'FIELD_GROUP'
+  | 'FILTER_FORM'
+  | 'SEARCH_FORM'
+  | 'QUERY_FORM'
+  | 'ADVANCED_FILTER'
+  | 'CREATE_FORM'
+  | 'EDIT_FORM'
+  | 'DETAIL_FORM'
   | 'TABLE'
+  | 'DATA_TABLE'
+  | 'LIST_TABLE'
+  | 'RESULT_TABLE'
+  | 'GRID_TABLE'
+  | 'ANT_TABLE'
   | 'TOOLBAR'
+  | 'ACTION_BAR'
+  | 'BUTTON_GROUP'
+  | 'ACTIONS'
   | 'BUTTON'
+  | 'PRIMARY_ACTION'
   | 'LINK'
-  | 'TABS'
-  | 'MODAL'
-  | 'ALERT'
-  | 'DESCRIPTION_LIST'
+  | 'STATS'
+  | 'STAT_GRID'
+  | 'STATISTIC'
+  | 'KPI'
+  | 'KPI_CARD'
+  | 'METRIC_GRID'
+  | 'METRICS'
+  | 'TIMELINE'
   | 'STEPS'
-  | 'DIVIDER'
-  | 'TEXT'
+  | 'WIZARD'
+  | 'TABS'
+  | 'DETAIL_TABS'
+  | 'MODAL'
+  | 'DIALOG'
+  | 'CONFIRM_DIALOG'
+  | 'CONFIRM_MODAL'
+  | 'DRAWER'
+  | 'SIDE_PANEL'
+  | 'DETAIL_DRAWER'
+  | 'ALERT'
+  | 'NOTICE'
+  | 'PROGRESS'
+  | 'DESCRIPTION_LIST'
+  | 'DESCRIPTIONS'
   | 'EMPTY_STATE'
+  | 'DIVIDER'
+  | 'TAG'
+  | 'BADGE'
+  | 'RESULT'
+  | 'COLLAPSE'
+  | 'LIST'
+  | 'CARD_LIST'
+  | 'TREE'
+  | 'TEXT'
+  | 'AVATAR'
+  | 'SEGMENTED'
+  | 'BREADCRUMB'
+  | 'SPIN'
+  | 'PAGINATION'
 
 export type UiContractFieldType =
   | 'INPUT'
@@ -169,9 +219,13 @@ export interface UiContractInteraction {
   sourceComponentId?: string | null
   targetId?: string | null
   targetPageId?: string | null
+  targetPageKey?: string | null
+  targetPageName?: string | null
   targetTabKey?: string | null
   dataBindingKey?: string | null
   scenarioKey?: string | null
+  interactionKind?: string | null
+  dataEffect?: string | null
   payload?: Record<string, unknown>
   successActionIds?: string[]
   failureActionIds?: string[]
@@ -222,6 +276,41 @@ export interface UiContractNavigationTarget {
   targetPageKey: string
   targetPageName: string
   route: string
+  actionLabel?: string | null
+  interactionKind?: string | null
+  dataEffect?: string | null
+  targetDataBindingKey?: string | null
+  sourceDataBindingKey?: string | null
+  rowContext?: boolean
+  source?: string | null
+  status?: 'RESOLVED' | 'PLANNED'
+}
+
+export interface UiContractNavigationEdge {
+  edgeId: string
+  sourcePageId?: string | null
+  sourcePageKey?: string | null
+  sourcePageName?: string | null
+  actionId?: string | null
+  actionLabel?: string | null
+  interactionKind?: string | null
+  dataEffect?: string | null
+  sourceDataBindingKey?: string | null
+  targetDataBindingKey?: string | null
+  targetPageId?: string | null
+  targetPageKey?: string | null
+  targetPageName?: string | null
+  route?: string | null
+  rowContext?: boolean
+  afterSubmit?: {
+    type: 'NAVIGATE'
+    targetPageId?: string | null
+    targetPageKey?: string | null
+    targetPageName?: string | null
+    route?: string | null
+    refreshTargetData?: boolean
+  } | null
+  source?: string | null
   status?: 'RESOLVED' | 'PLANNED'
 }
 
@@ -267,6 +356,7 @@ export interface UiContractContent {
   mockScenarios: UiContractMockScenario[]
   apiBindings: UiContractApiBinding[]
   navigationTargets: UiContractNavigationTarget[]
+  navigationEdges?: UiContractNavigationEdge[]
   featureCoverage: UiContractFeatureCoverage[]
   assumptions: string[]
   qualitySummary: UiContractQualitySummary

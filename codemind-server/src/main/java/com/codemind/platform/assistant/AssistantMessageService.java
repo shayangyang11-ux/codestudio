@@ -542,8 +542,8 @@ public class AssistantMessageService {
                 : "ASSISTANT_GENERATE_MODULE_TREE");
 
         String reply = externalPrdImport
-                ? "已识别为外部/旧 PRD 导入。系统会把上传材料中的业务域、模块、功能点和页面入口迁移为 CodeMind 模块树；本次默认使用完整企业蓝图模式，后续 MODULE_PRD 会继续由 Requirement Agent 补齐结构化页面契约。"
-                : "已识别为模块树生成请求。系统会根据需求成熟度和附件资料推荐模块骨架、完整模块树或先整理资料；生成完成后会刷新左侧模块树并给出下一步建议。";
+                ? "已解析外部需求材料，建议先确认导入与模块树生成方案。系统会先提取业务域、模块、功能点和页面入口，并说明哪些内容直接进入模块树、哪些进入需求说明或后台开发上下文；用户确认后再生成模块树。"
+                : "已解析需求材料，建议先确认模块树生成方案。\n\n识别结果：\n- 已识别为模块树生成请求。\n- 系统会结合文字和附件材料抽取业务域、模块、功能点和页面入口。\n- 信息较完整时可直接生成；信息中等时建议 AI 先补齐页面、字段、状态、权限和模块边界。\n\n建议生成策略：\n- 先生成项目模块树，不直接进入视觉风格或原型样式修改。\n- 一级模块控制在 8 到 10 个左右，最终模块落到用户能理解的业务对象。\n- 页面、字段、状态、权限和关键操作进入后续原型与模块链路。\n- 背景、目标、角色、验收、备注和补充说明进入需求说明。\n- API、数据实体、日志、非功能、安全和集成约束进入后台开发上下文。\n\n请先确认：\n1. 直接生成模块树\n2. AI补齐后生成\n3. 我再补充";
 
         return simpleResponse(
                 AssistantIntentRouterService.INTENT_GENERATE_MODULE_TREE,
@@ -4239,3 +4239,4 @@ public class AssistantMessageService {
         return value == null ? "" : value;
     }
 }
+

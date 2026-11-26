@@ -76,6 +76,7 @@ const EDIT_KEYWORDS = [
   '整行', '独占一行', '两列', '三列', '四列', '右上角', '左上角', '表格右上角',
   '放到上方', '移到上方', '放到下方', '移到下方', '顶部', '底部', '置顶', '置底',
   '右对齐', '左对齐', '主按钮', '次按钮', '危险按钮', '警告按钮', '链接按钮',
+  '调高', '调矮', '行高', '行距', '行间距',
 ]
 
 export function isPrototypeLocalEditInstruction(text: string): boolean {
@@ -139,14 +140,25 @@ export function applyPrototypeLocalEdit(
   const disabledChange = applyDisabledChange(target, selection, instruction)
   if (disabledChange) changes.push(disabledChange)
 
-  const textTransformChange = applyTextTransformChange(target, interactions, instruction, selection)
-  if (textTransformChange) {
-    changes.push(textTransformChange)
-  } else {
-    const nextText = extractTargetText(instruction)
-    if (nextText) {
-      const textChange = applyTextChange(target, interactions, nextText, selection)
-      if (textChange) changes.push(textChange)
+  // A9.10.14.4.3.15.6.24I_PROTOTYPE_EDIT_INTENT_GUARD
+  // Do not treat visual-only commands as copy/text replacement.
+  // Examples:
+  // - “改成绿色” => color only
+  // - “放大一点” => size only
+  // - “改成绿色以及放大一点” => color + size only
+  // Explicit copy commands such as “按钮文案改成绿色” are still allowed.
+  const shouldApplyTextChange = !isVisualOnlyPrototypeEditInstruction(instruction)
+
+  if (shouldApplyTextChange) {
+    const textTransformChange = applyTextTransformChange(target, interactions, instruction, selection)
+    if (textTransformChange) {
+      changes.push(textTransformChange)
+    } else {
+      const nextText = extractTargetText(instruction)
+      if (nextText) {
+        const textChange = applyTextChange(target, interactions, nextText, selection)
+        if (textChange) changes.push(textChange)
+      }
     }
   }
 
@@ -348,7 +360,13 @@ function displayKind(kind: string): string {
   if (normalized.includes('FIELD_LABEL')) return '字段名'
   if (normalized.includes('FIELD')) return '字段'
   if (normalized.includes('ACTION') || normalized.includes('BUTTON')) return '按钮'
-  if (normalized.includes('COLUMN') || normalized.includes('CELL')) return '表格列'
+  // A9.10.14.4.3.15.6.24J7A_TABLE_SCOPE_STABILIZE
+  // TABLE_COLUMN = 单列模板；TABLE_CELL = 单元格/行展示模板；TABLE_ACTION = 行内动作模板。
+  if (normalized.includes('TABLE_ACTION') || normalized.includes('ROW_ACTION')) return '行操作'
+  if (normalized.includes('TABLE_ROW')) return '表格行'
+  if (normalized.includes('COLUMN_LABEL')) return '列名'
+  if (normalized.includes('CELL')) return '单元格'
+  if (normalized.includes('COLUMN')) return '表格列'
   if (normalized.includes('TAB')) return '标签页'
   if (normalized.includes('TEXT') || normalized.includes('TITLE') || normalized.includes('DESCRIPTION')) return '文案'
   return '元素'
@@ -721,6 +739,83 @@ function cleanTransformToken(value: string): string {
     .trim()
 }
 
+
+// A9.10.14.4.3.15.6.24I_PROTOTYPE_EDIT_INTENT_GUARD
+function isVisualOnlyPrototypeEditInstruction(instruction: string): boolean {
+  const text = String(instruction || '').trim()
+  if (!text) return false
+
+  const hasExplicitTextIntent =
+    containsAny(text, [
+      '文案',
+      '文字',
+      '标题',
+      '按钮文案',
+      '字段名',
+      '列名',
+      '标签名',
+      '显示文字',
+      'placeholder',
+      '占位',
+      '提示语',
+      '输入提示',
+      '叫做',
+      '命名为',
+      '显示为',
+    ]) ||
+    /[“"'][^”"']+[”"']/.test(text)
+
+  if (hasExplicitTextIntent) {
+    return false
+  }
+
+  const hasVisualIntent =
+    Boolean(resolveColor(text)) ||
+    containsAny(text, [
+      '颜色',
+      '主按钮',
+      '次按钮',
+      '辅助按钮',
+      '危险按钮',
+      '警告按钮',
+      '链接按钮',
+      '普通按钮',
+      '大一点',
+      '更大',
+      '放大',
+      '小一点',
+      '更小',
+      '缩小',
+      '宽一点',
+      '窄一点',
+      '高一点',
+      '矮一点',
+      '靠左',
+      '靠右',
+      '居中',
+      '左对齐',
+      '右对齐',
+      '圆角',
+      '圆润',
+    ])
+
+  if (!hasVisualIntent) {
+    return false
+  }
+
+  const withoutTargets = text
+    .replace(/这个|该|当前|按钮|元素|组件|字段|输入框|表格列|列|标签页|文案|把|将|给|的/g, '')
+    .replace(/改成|改为|换成|调整为|设为|变成|以及|并且|同时|和|再|一点|一些|稍微|更/g, '')
+    .replace(/蓝色|蓝|绿色|绿|红色|红|橙色|橙|紫色|紫|灰色|灰|白色|白|黑色|黑/g, '')
+    .replace(/主按钮|次按钮|辅助按钮|危险按钮|警告按钮|链接按钮|普通按钮/g, '')
+    .replace(/放大|缩小|大|小|宽|窄|高|矮|颜色|圆角|圆润|靠左|靠右|居中|左对齐|右对齐/g, '')
+    .replace(/[\s,，。；;！!、:+：-]/g, '')
+    .trim()
+
+  // If no meaningful text remains after removing visual words, this is visual-only.
+  return withoutTargets.length === 0
+}
+
 function extractTargetText(instruction: string): string {
   const quoted = instruction.match(/[“"]([^”"]{1,80})[”"]|[']([^']{1,80})[']/)
   const quotedText = (quoted?.[1] || quoted?.[2] || '').trim()
@@ -787,6 +882,13 @@ function applyTextChange(
     if (column) {
       column.label = nextText
       return `表格列名改为“${nextText}”`
+    }
+
+    if (selection.columnKey === '__row_actions') {
+      const props = ensureProps(target)
+      props.actionColumnLabel = nextText
+      props.rowActionColumnLabel = nextText
+      return `操作列名改为“${nextText}”`
     }
   }
 
@@ -963,6 +1065,68 @@ function applyMoveChange(
   const kind = normalizeKind(selection?.elementKind)
   const isActionTarget = Boolean(selection?.actionId) || kind.includes('ACTION') || kind.includes('BUTTON') || isButtonLike(target)
 
+  // A9.10.14.4.3.15.6.24J7E_TABLE_ROW_HEIGHT_EXECUTOR
+  // TABLE_ROW is a row template. Changing one selected row changes all rows.
+  if (kind.includes('TABLE_ROW') || kind.includes('ROW_TEMPLATE')) {
+    if (containsAny(instruction, ['调高', '行高加大', '行高增加', '高一点', '变高', '加高', '更高'])) {
+      const nextHeight = nextPx(style.height || style.minHeight, 48, 14, 32, 168)
+      style.height = nextHeight
+      style.minHeight = nextHeight
+      style.cellPaddingBlock = nextPx(style.cellPaddingBlock, 8, 5, 4, 34)
+      summaries.push('表格行高增加')
+    }
+
+    if (containsAny(instruction, ['调矮', '行高降低', '行高减少', '矮一点', '变矮', '降低高度'])) {
+      const nextHeight = nextPx(style.height || style.minHeight, 48, -10, 30, 168)
+      style.height = nextHeight
+      style.minHeight = nextHeight
+      style.cellPaddingBlock = nextPx(style.cellPaddingBlock, 8, -3, 3, 34)
+      summaries.push('表格行高降低')
+    }
+
+    if (containsAny(instruction, ['行距大一点', '行间距大一点', '间距大一点'])) {
+      style.cellPaddingBlock = nextPx(style.cellPaddingBlock, 8, 5, 4, 34)
+      summaries.push('表格行间距加大')
+    }
+
+    if (containsAny(instruction, ['行距小一点', '行间距小一点', '间距小一点'])) {
+      style.cellPaddingBlock = nextPx(style.cellPaddingBlock, 8, -3, 3, 34)
+      summaries.push('表格行间距减小')
+    }
+  }
+
+  // A9.10.14.4.3.15.6.24J5_COLUMN_SELECT_LABEL_AND_ACTION_ORDER
+  // “最左边 / 最右边” is order inside the current action group,
+  // not merely text-align left/right.
+  if (isActionTarget && selection?.actionId && containsAny(instruction, ['最左边', '最前面', '第一个', '排第一个', '放到开头', '移到开头', '最前'])) {
+    style.order = '-100'
+    style.marginLeft = '0'
+    style.marginRight = '0'
+    summaries.push('按钮移动到当前按钮组最左侧')
+  }
+
+  if (isActionTarget && selection?.actionId && containsAny(instruction, ['最右边', '最后面', '最后一个', '排最后', '放到末尾', '移到末尾', '末尾'])) {
+    style.order = '100'
+    style.marginLeft = '0'
+    style.marginRight = '0'
+    summaries.push('按钮移动到当前按钮组最右侧')
+  }
+
+  // A9.10.14.4.3.15.6.24J4_COLUMN_SELECT_AND_ACTION_ORDER
+  // For toolbar/header actions, “最左边/第一个/最前面” means order mutation,
+  // not just CSS alignment.
+  if (isActionTarget && selection?.actionId && containsAny(instruction, ['最左边', '最前面', '第一个', '排第一个', '放到开头', '移到开头', '最前'])) {
+    const moved = moveActionOrder(target, selection.actionId, 'first')
+    style.order = '-100'
+    summaries.push(moved ? '按钮移动到最左侧' : '按钮位置标记为最左侧')
+  }
+
+  if (isActionTarget && selection?.actionId && containsAny(instruction, ['最右边', '最后面', '最后一个', '排最后', '放到末尾', '移到末尾', '末尾'])) {
+    const moved = moveActionOrder(target, selection.actionId, 'last')
+    style.order = '100'
+    summaries.push(moved ? '按钮移动到最右侧' : '按钮位置标记为最右侧')
+  }
+
   if (containsAny(instruction, ['表格右上角', '列表右上角', '右上角'])) {
     style.marginLeft = 'auto'
     style.justifySelf = 'end'
@@ -1042,6 +1206,63 @@ function applyMoveChange(
   return uniqueSummaries(summaries).join('、')
 }
 
+
+// A9.10.14.4.3.15.6.24J4_COLUMN_SELECT_AND_ACTION_ORDER
+function moveActionOrder(
+  target: UiContractComponent,
+  actionId: string,
+  placement: 'first' | 'last',
+): boolean {
+  const id = String(actionId || '').trim()
+  if (!id) return false
+
+  const record = target as unknown as LooseRecord
+  const props = ensureProps(target)
+  let changed = false
+
+  for (const key of [
+    'actionIds',
+    'actions',
+    'headerActionIds',
+    'toolbarActionIds',
+    'primaryActionIds',
+    'rowActionIds',
+  ]) {
+    changed = reorderActionCollection(record, key, id, placement) || changed
+    changed = reorderActionCollection(props, key, id, placement) || changed
+  }
+
+  return changed
+}
+
+function reorderActionCollection(
+  owner: LooseRecord,
+  key: string,
+  actionId: string,
+  placement: 'first' | 'last',
+): boolean {
+  const value = owner[key]
+  if (!Array.isArray(value)) return false
+
+  const index = value.findIndex((item) => {
+    if (typeof item === 'string') return item === actionId
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return false
+    const record = item as LooseRecord
+    return String(record.actionId || record.id || record.key || record.value || record.label || '') === actionId
+  })
+
+  if (index < 0) return false
+
+  const [item] = value.splice(index, 1)
+  if (placement === 'first') {
+    value.unshift(item)
+  } else {
+    value.push(item)
+  }
+
+  return true
+}
+
 function applySizeChange(
   target: UiContractComponent,
   selection: PrototypeElementSelection | null,
@@ -1049,6 +1270,10 @@ function applySizeChange(
 ): string {
   const style = ensureTargetStyle(target, selection)
   const props = ensureProps(target)
+  // A9.10.14.4.3.15.6.24J3_SCOPED_ACTION_SIZE
+  // When a selected child element is an action/field/column/tab/text,
+  // size must stay on props.elementStyles[key], not on the whole owner component.
+  const scopedSizeTarget = isPrototypeElementScopedSizeTarget(selection)
   const summaries: string[] = []
   const kind = normalizeKind(selection?.elementKind)
   const isActionTarget = Boolean(selection?.actionId) || kind.includes('ACTION') || kind.includes('BUTTON') || isButtonLike(target)
@@ -1141,14 +1366,22 @@ function applySizeChange(
   if (containsAny(instruction, ['大一点', '更大', '放大'])) {
     style.minWidth = nextPx(style.minWidth, isActionTarget ? 128 : 160, 48, 96, 520)
     style.padding = style.padding || '14px 22px'
-    props.size = 'large'
+    if (scopedSizeTarget) {
+      style.size = 'large'
+    } else {
+      props.size = 'large'
+    }
     summaries.push('尺寸放大')
   }
 
   if (containsAny(instruction, ['小一点', '更小', '缩小'])) {
     style.minWidth = nextPx(style.minWidth, 128, -32, 72, 520)
     style.padding = '8px 12px'
-    props.size = 'small'
+    if (scopedSizeTarget) {
+      style.size = 'small'
+    } else {
+      props.size = 'small'
+    }
     summaries.push('尺寸缩小')
   }
 
@@ -1159,6 +1392,11 @@ function applySizeChange(
         const current = Number(column.width || 140)
         column.width = Math.max(80, current + 48)
         summaries.push('表格列加宽')
+      } else if (selection.columnKey === '__row_actions') {
+        const current = Number(style.width || style.minWidth || 190)
+        style.width = `${Math.max(120, current + 48)}px`
+        style.minWidth = style.width
+        summaries.push('操作列加宽')
       }
     } else {
       style.minWidth = nextPx(style.minWidth, isActionTarget ? 128 : 180, 64, 96, 640)
@@ -1176,6 +1414,11 @@ function applySizeChange(
         const current = Number(column.width || 140)
         column.width = Math.max(80, current - 36)
         summaries.push('表格列收窄')
+      } else if (selection.columnKey === '__row_actions') {
+        const current = Number(style.width || style.minWidth || 190)
+        style.width = `${Math.max(120, current - 36)}px`
+        style.minWidth = style.width
+        summaries.push('操作列收窄')
       }
     } else {
       style.maxWidth = nextPx(style.maxWidth, 220, -48, 96, 640)
@@ -1184,6 +1427,33 @@ function applySizeChange(
   }
 
   return uniqueSummaries(summaries).join('、')
+}
+
+
+// A9.10.14.4.3.15.6.24J3_SCOPED_ACTION_SIZE
+function isPrototypeElementScopedSizeTarget(selection: PrototypeElementSelection | null): boolean {
+  const kind = normalizeKind(selection?.elementKind)
+
+  return Boolean(
+    selection?.actionId ||
+      selection?.fieldKey ||
+      selection?.columnKey ||
+      selection?.tabKey ||
+      selection?.textKey ||
+      selection?.textRole ||
+      kind.includes('ACTION') ||
+      kind.includes('BUTTON') ||
+      kind.includes('FIELD') ||
+      kind.includes('INPUT') ||
+      kind.includes('CONTROL') ||
+      kind.includes('COLUMN') ||
+      kind.includes('CELL') ||
+      kind.includes('ROW') ||
+      kind.includes('TAB') ||
+      kind.includes('TEXT') ||
+      kind.includes('TITLE') ||
+      kind.includes('DESCRIPTION')
+  )
 }
 
 function applyVariantChange(
@@ -1363,10 +1633,19 @@ function ensureTargetStyle(
   return styles[key] as unknown as LooseRecord
 }
 
+// A9.10.14.4.3.15.6.24J7A_TABLE_SCOPE_STABILIZE
+// Table edit scope contract:
+// - selection.columnKey => column:${columnKey}. Width/name/visibility are one-column changes.
+// - selection.actionId => action:${actionId}. Row action buttons with the same actionId share the same template style.
+// - TABLE_CELL commands are display/template edits, not edits to one mock data row.
 function elementStyleKey(selection: PrototypeElementSelection | null): string {
   if (!selection) return ''
 
   const kind = normalizeKind(selection.elementKind)
+
+  if (kind.includes('TABLE_ROW') || kind.includes('ROW_TEMPLATE')) {
+    return 'rowTemplate'
+  }
 
   if (selection.fieldKey) {
     if (kind.includes('INPUT') || kind.includes('CONTROL')) return `fieldControl:${selection.fieldKey}`
@@ -1375,7 +1654,23 @@ function elementStyleKey(selection: PrototypeElementSelection | null): string {
   }
 
   if (selection.actionId) return `action:${selection.actionId}`
-  if (selection.columnKey) return `column:${selection.columnKey}`
+
+  if (selection.columnKey) {
+    if (
+      kind.includes('COLUMN_LABEL') ||
+      selection.textKey === 'columnLabel' ||
+      selection.textRole === 'label'
+    ) {
+      return `columnLabel:${selection.columnKey}`
+    }
+
+    if (kind.includes('TABLE_CELL') || kind.includes('CELL')) {
+      return `cell:${selection.columnKey}`
+    }
+
+    return `column:${selection.columnKey}`
+  }
+
   if (selection.tabKey) return `tab:${selection.tabKey}`
 
   if (selection.textKey || selection.textRole) {

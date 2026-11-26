@@ -258,14 +258,14 @@ export function getAllowedRequirementChildTypes(
 
   if (nodeType === 'DOMAIN' || nodeType === 'SUBMODULE' || nodeType === 'MODULE') {
     if (isFinalRequirementModule(node)) {
-      return ['FEATURE']
+      return ['PAGE']
     }
 
     if (hasDirectChildModule(node)) {
       return ['MODULE']
     }
 
-    return ['MODULE', 'FEATURE']
+    return ['MODULE', 'PAGE']
   }
 
   if (nodeType === 'FEATURE') {
@@ -274,6 +274,10 @@ export function getAllowedRequirementChildTypes(
 
   return []
 }
+
+
+
+
 
 export function canCreateRequirementChild(
   node?: ModuleTreeNode | null,
@@ -286,10 +290,6 @@ export function getCreateChildActionLabel(
 ): string {
   const allowed = getAllowedRequirementChildTypes(node)
 
-  if (allowed.length === 1 && allowed[0] === 'FEATURE') {
-    return '新增业务能力'
-  }
-
   if (allowed.length === 1 && allowed[0] === 'PAGE') {
     return '新增页面'
   }
@@ -298,12 +298,16 @@ export function getCreateChildActionLabel(
     return '新增子模块'
   }
 
-  if (allowed.includes('FEATURE')) {
-    return '新增下级节点'
+  if (allowed.includes('PAGE') && !allowed.includes('MODULE')) {
+    return '新增页面'
   }
 
   return '新增下级节点'
 }
+
+
+
+
 
 export function canMoveRequirementNodeToParent(
   movingNode?: ModuleTreeNode | null,
@@ -338,7 +342,7 @@ export function resolveRequirementNodeGenerationRole(
     case 'PAGE':
       return 'PAGE_CONTRACT'
     case 'FEATURE':
-      return 'INLINE_DETAIL'
+      return 'INLINE_DETAIL' // A9.10.14.4.3.15.6.24L0A_FEATURE_LAYER_RETIRE_TO_CAPABILITY: legacy capability binding, hidden from tree UX
     default:
       return 'UNKNOWN'
   }
@@ -361,7 +365,7 @@ export function getRequirementNodeTypeLabel(
     case 'MODULE':
       return '模块'
     case 'FEATURE':
-      return '功能点'
+      return '能力绑定'
     case 'PAGE':
       return '页面'
     default:
@@ -523,7 +527,7 @@ export function getRequirementTaskUnavailableReason(
   }
 
   if (nodeType === 'FEATURE') {
-    return '功能点默认作为父页面的内联细节，不建议单独生成完整资产。请选择所属页面生成页面契约。'
+    return '能力绑定默认作为父页面的内联细节，不建议单独生成完整资产。请选择所属页面生成页面契约。'
   }
 
   if (taskType === 'GENERATE_UI_CONTRACT') {
@@ -543,7 +547,7 @@ export function getRequirementArtifactTitleForNode(
     if (nodeType === 'DOMAIN') return '模块概览'
     if (nodeType === 'SUBMODULE') return '场景说明'
     if (nodeType === 'PAGE') return '页面需求摘要'
-    if (nodeType === 'FEATURE') return '功能点说明'
+    if (nodeType === 'FEATURE') return '能力绑定说明'
     return '模块 PRD'
   }
 
@@ -551,7 +555,7 @@ export function getRequirementArtifactTitleForNode(
     if (nodeType === 'DOMAIN') return '模块流程总览'
     if (nodeType === 'SUBMODULE') return '场景流程'
     if (nodeType === 'PAGE') return '页面流程摘要'
-    if (nodeType === 'FEATURE') return '功能点流程'
+    if (nodeType === 'FEATURE') return '能力绑定流程'
     return '业务流程'
   }
 
@@ -577,7 +581,7 @@ export function getRequirementArtifactTitleForNode(
     if (nodeType === 'DOMAIN') return '接口域总览'
     if (nodeType === 'SUBMODULE') return '场景接口清单'
     if (nodeType === 'PAGE') return '页面接口摘要'
-    if (nodeType === 'FEATURE') return '功能点接口'
+    if (nodeType === 'FEATURE') return '能力绑定接口'
     return '接口契约'
   }
 
@@ -585,7 +589,7 @@ export function getRequirementArtifactTitleForNode(
     if (nodeType === 'DOMAIN') return '模块测试范围'
     if (nodeType === 'SUBMODULE') return '场景测试规格'
     if (nodeType === 'PAGE') return '页面测试摘要'
-    if (nodeType === 'FEATURE') return '功能点测试'
+    if (nodeType === 'FEATURE') return '能力绑定测试'
     return '测试规格'
   }
 
@@ -597,7 +601,7 @@ export function getRequirementArtifactTitleForNode(
     if (nodeType === 'DOMAIN') return '模块交付说明'
     if (nodeType === 'SUBMODULE') return '场景开发说明'
     if (nodeType === 'PAGE') return '页面开发交接包'
-    if (nodeType === 'FEATURE') return '功能点开发说明'
+    if (nodeType === 'FEATURE') return '能力绑定开发说明'
     return '开发交接包'
   }
 
@@ -614,13 +618,13 @@ export function getRequirementArtifactDescriptionForNode(
     if (nodeType === 'DOMAIN') return '说明模块目标、边界、模块组成和高层验收标准。'
     if (nodeType === 'SUBMODULE') return '说明当前业务场景的目标、边界、页面组成和关键规则。'
     if (nodeType === 'PAGE') return '说明页面目标、入口、用户任务和验收标准。'
-    if (nodeType === 'FEATURE') return '说明功能点触发条件、规则边界、成功失败路径和验收标准。'
+    if (nodeType === 'FEATURE') return '说明能力绑定触发条件、规则边界、成功失败路径和验收标准。'
     return '说明模块边界、角色、核心能力、页面组成、业务规则和验收标准。'
   }
 
   if (artifactType === 'BUSINESS_FLOW') {
     if (nodeType === 'PAGE') return '描述页面内按钮、提交、状态变化和异常提示。'
-    if (nodeType === 'FEATURE') return '描述功能点处理步骤、成功失败分支和边界条件。'
+    if (nodeType === 'FEATURE') return '描述能力绑定处理步骤、成功失败分支和边界条件。'
     return '描述主流程、分支流程、异常流程、状态流转和关键规则。'
   }
 
@@ -667,7 +671,7 @@ export function getRequirementNodeGenerationHint(
     case 'PAGE':
       return '页面是页面契约入口。系统会生成页面规范和交互原型，作为 Dev Agent 生成页面代码的视觉与交互依据。页面通常不需要单独生成完整模块交接包。'
     case 'FEATURE':
-      return '功能点默认是父页面的内联细节，用来表达按钮、校验、跳转和异常场景；通常不单独生成完整资产。'
+      return '能力绑定默认是父页面的内联细节，用来表达按钮、校验、跳转和异常场景；通常不单独生成完整资产。'
     default:
       return '请选择模块树节点后查看开发准备建议。'
   }
@@ -688,7 +692,7 @@ export function getRequirementCoreAssetsButtonText(
     case 'SUBMODULE':
       return '分组层无需一键生成'
     case 'FEATURE':
-      return '功能点默认内联到页面'
+      return '能力绑定默认内联到页面'
     default:
       return '生成开发资产'
   }
@@ -709,7 +713,7 @@ export function getRequirementNodeDefaultActionText(
     case 'PAGE':
       return '点击生成 / 更新页面资产，得到当前页面的页面规范和交互原型。'
     case 'FEATURE':
-      return '该功能点会进入父页面规格和测试场景；复杂功能建议升级为独立页面或模块开发切片。'
+      return '该能力绑定会进入父页面规格和测试场景；复杂功能建议升级为独立页面或模块开发切片。'
     default:
       return '请先选择模块树节点。'
   }
@@ -725,3 +729,7 @@ export function getNodeAwareDownstreamArtifactTypes(
     applicableTypes.includes(item),
   )
 }
+
+// A9.10.14.4.3.15.6.24L0B_FIX_CREATE_PAGE_POLICY_BACKEND_DIALOG: visible tree creation uses MODULE -> PAGE; FEATURE remains legacy capability metadata.
+
+// A9.10.14.4.3.15.6.24L0B_FINAL_CREATE_PAGE_POLICY_FIX: frontend create policy exposes PAGE, not visible FEATURE.

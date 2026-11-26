@@ -1,3 +1,5 @@
+// A9.10.14.4.3.15.7.24L3B5B1_7B_FIX_EFFECTIVELY_FINAL_ARTIFACT_CONTENT
+// A9.10.14.4.3.15.7.24L3B5B1_7_JAVA_PRE_VALIDATE_STABLE_KEYS
 package com.codemind.platform.agent.requirement.service;
 
 import com.codemind.platform.agent.common.gateway.AgentGatewayService;
@@ -9,6 +11,7 @@ import com.codemind.platform.context.ContextPackageService;
 import com.codemind.platform.identity.CurrentUser;
 import com.codemind.platform.identity.CurrentUserProvider;
 import com.codemind.platform.module.ProjectModuleEntity;
+import com.codemind.platform.module.ProjectModuleRepository;
 import com.codemind.platform.project.ProjectAccessService;
 import com.codemind.platform.project.ProjectEntity;
 import com.codemind.platform.task.AgentTaskEntity;
@@ -23,14 +26,18 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
 public class UiContractPersistenceService {
 
+    // A9.10.14.4.3.15.6.24L2C4A_UI_CONTRACT_NAV_CONTEXT_FROM_MODULE_TREE
+
     private static final String ARTIFACT_TYPE = "UI_CONTRACT";
 
     private final ProjectAccessService projectAccessService;
+    private final ProjectModuleRepository projectModuleRepository;
     private final AgentTaskService agentTaskService;
     private final ContextPackageService contextPackageService;
     private final AgentGatewayService agentGatewayService;
@@ -44,6 +51,7 @@ public class UiContractPersistenceService {
 
     public UiContractPersistenceService(
             ProjectAccessService projectAccessService,
+            ProjectModuleRepository projectModuleRepository,
             AgentTaskService agentTaskService,
             ContextPackageService contextPackageService,
             AgentGatewayService agentGatewayService,
@@ -56,6 +64,7 @@ public class UiContractPersistenceService {
             UiContractValidationService validationService
     ) {
         this.projectAccessService = projectAccessService;
+        this.projectModuleRepository = projectModuleRepository;
         this.agentTaskService = agentTaskService;
         this.contextPackageService = contextPackageService;
         this.agentGatewayService = agentGatewayService;
@@ -226,6 +235,12 @@ public class UiContractPersistenceService {
                             requestPayload
                     );
 
+            enrichUiContractNavigationContext(
+                    contextPackage,
+                    project,
+                    module
+            );
+
             contextPackage.put(
                     "ui_contract_readiness",
                     readiness.toMap()
@@ -266,9 +281,10 @@ public class UiContractPersistenceService {
             }
 
             Map<String, Object> artifactContent =
-                    extractArtifactContent(responseEnvelope);
-
-            UiContractValidationResult validation =
+                a91578NormalizeStableUiContractRuntimeKeys(
+                        extractArtifactContent(responseEnvelope)
+                );
+UiContractValidationResult validation =
                     validationService.validate(
                             project.getId(),
                             module,
@@ -459,6 +475,340 @@ public class UiContractPersistenceService {
         }
     }
 
+
+    // A9.10.14.4.3.15.6.24L2C4A_UI_CONTRACT_NAV_CONTEXT_FROM_MODULE_TREE
+    // UI_CONTRACT is PAGE-scoped, but page actions such as 新增 / 查看详情 / 编辑 / 返回
+    // require real sibling PAGE ids.  This method injects project/module page candidates
+    // into context_package before the Python UI_CONTRACT agent runs.
+    private void enrichUiContractNavigationContext(
+            Map<String, Object> contextPackage,
+            ProjectEntity project,
+            ProjectModuleEntity currentModule
+    ) {
+        if (contextPackage == null
+                || project == null
+                || project.getId() == null
+                || currentModule == null
+                || currentModule.getId() == null) {
+            return;
+        }
+
+        List<ProjectModuleEntity> activeModules =
+                projectModuleRepository
+                        .findByProjectIdOrderByLevelNoAscSortOrderAsc(project.getId())
+                        .stream()
+                        .filter(item -> item != null && "ACTIVE".equalsIgnoreCase(String.valueOf(item.getStatus())))
+                        .toList();
+
+        Map<UUID, ProjectModuleEntity> byId = new LinkedHashMap<>();
+        for (ProjectModuleEntity item : activeModules) {
+            if (item != null && item.getId() != null) {
+                byId.put(item.getId(), item);
+            }
+        }
+
+        List<Map<String, Object>> allPages = new ArrayList<>();
+        List<Map<String, Object>> siblingPages = new ArrayList<>();
+        List<Map<String, Object>> navigationCandidates = new ArrayList<>();
+
+        UUID currentOwnerModuleId = resolveVisibleOwnerModuleId(
+                currentModule,
+                byId
+        );
+
+        for (ProjectModuleEntity candidate : activeModules) {
+            if (!isPageNode(candidate)) {
+                continue;
+            }
+
+            Map<String, Object> pagePayload =
+                    buildPageNavigationPayload(
+                            candidate,
+                            currentModule,
+                            currentOwnerModuleId,
+                            byId
+                    );
+
+            allPages.add(pagePayload);
+
+            if (isSameNavigationScope(
+                    candidate,
+                    currentModule,
+                    currentOwnerModuleId,
+                    byId
+            )) {
+                siblingPages.add(pagePayload);
+            }
+
+            if (!Objects.equals(candidate.getId(), currentModule.getId())
+                    && isSameNavigationScope(
+                    candidate,
+                    currentModule,
+                    currentOwnerModuleId,
+                    byId
+            )) {
+                navigationCandidates.add(pagePayload);
+            }
+        }
+
+        contextPackage.put("module_tree_pages", allPages);
+        contextPackage.put("moduleTreePages", allPages);
+        contextPackage.put("pages", allPages);
+        contextPackage.put("sibling_pages", siblingPages);
+        contextPackage.put("siblingPages", siblingPages);
+        contextPackage.put("navigation_candidates", navigationCandidates);
+        contextPackage.put("navigationCandidates", navigationCandidates);
+        contextPackage.put("navigationTargets", navigationCandidates);
+
+        Map<String, Object> hiddenPrototypeContext =
+                toMutableMap(contextPackage.get("hidden_prototype_context"));
+
+        hiddenPrototypeContext.put("module_tree_pages", allPages);
+        hiddenPrototypeContext.put("sibling_pages", siblingPages);
+        hiddenPrototypeContext.put("navigation_candidates", navigationCandidates);
+        hiddenPrototypeContext.put(
+                "navigationContextSource",
+                "A9.10.14.4.3.15.6.24L2C4A"
+        );
+
+        contextPackage.put(
+                "hidden_prototype_context",
+                hiddenPrototypeContext
+        );
+
+        System.out.println(
+                "[A9.10.14.4.3.15.6.24L2C4A] injected UI_CONTRACT navigation context: allPages="
+                        + allPages.size()
+                        + ", siblingPages="
+                        + siblingPages.size()
+                        + ", navigationCandidates="
+                        + navigationCandidates.size()
+                        + ", currentPage="
+                        + currentModule.getModuleName()
+        );
+    }
+
+    private Map<String, Object> buildPageNavigationPayload(
+            ProjectModuleEntity page,
+            ProjectModuleEntity currentModule,
+            UUID currentOwnerModuleId,
+            Map<UUID, ProjectModuleEntity> byId
+    ) {
+        Map<String, Object> extra = page.getExtra() == null
+                ? Map.of()
+                : page.getExtra();
+
+        String pageKind = text(
+                extra.get("pageKind"),
+                extra.get("page_kind"),
+                extra.get("pageType"),
+                extra.get("page_type"),
+                extra.get("layoutType"),
+                extra.get("layout_type"),
+                page.getModuleName()
+        );
+
+        String routePath = text(
+                extra.get("routePath"),
+                extra.get("route_path"),
+                extra.get("route"),
+                "/" + safeRouteSegment(page.getModuleKey())
+        );
+
+        UUID ownerModuleId = resolveVisibleOwnerModuleId(
+                page,
+                byId
+        );
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("targetPageId", page.getId().toString());
+        result.put("targetPageKey", text(page.getModuleKey()));
+        result.put("targetPageName", text(page.getModuleName()));
+        result.put("targetRoute", routePath);
+        result.put("route", routePath);
+        result.put("routePath", routePath);
+        result.put("navigationStatus", "RESOLVED");
+        result.put("status", "RESOLVED");
+
+        result.put("pageId", page.getId().toString());
+        result.put("pageKey", text(page.getModuleKey()));
+        result.put("pageName", text(page.getModuleName()));
+        result.put("moduleId", page.getId().toString());
+        result.put("moduleKey", text(page.getModuleKey()));
+        result.put("moduleName", text(page.getModuleName()));
+        result.put("moduleType", text(page.getModuleType()));
+        result.put("pageKind", pageKind);
+        result.put("layoutType", text(extra.get("layoutType"), extra.get("layout_type")));
+        result.put("parentId", page.getParentId() == null ? "" : page.getParentId().toString());
+        result.put("ownerModuleId", ownerModuleId == null ? "" : ownerModuleId.toString());
+        result.put("currentPage", Objects.equals(page.getId(), currentModule.getId()));
+        result.put("sameParent", Objects.equals(page.getParentId(), currentModule.getParentId()));
+        result.put("sameOwnerModule", Objects.equals(ownerModuleId, currentOwnerModuleId));
+        result.put("source", "A9.10.14.4.3.15.6.24L2C4A");
+
+        Object pagePrototypeContext = extra.get("pagePrototypeContext");
+        if (pagePrototypeContext instanceof Map<?, ?> rawContext) {
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : rawContext.entrySet()) {
+                if (entry.getKey() != null) {
+                    normalized.put(String.valueOf(entry.getKey()), entry.getValue());
+                }
+            }
+            result.put("pagePrototypeContext", normalized);
+        }
+
+        return result;
+    }
+
+    private boolean isSameNavigationScope(
+            ProjectModuleEntity candidate,
+            ProjectModuleEntity currentModule,
+            UUID currentOwnerModuleId,
+            Map<UUID, ProjectModuleEntity> byId
+    ) {
+        if (candidate == null || currentModule == null) {
+            return false;
+        }
+
+        if (Objects.equals(candidate.getParentId(), currentModule.getParentId())) {
+            return true;
+        }
+
+        UUID candidateOwnerId =
+                resolveVisibleOwnerModuleId(
+                        candidate,
+                        byId
+                );
+
+        return currentOwnerModuleId != null
+                && Objects.equals(candidateOwnerId, currentOwnerModuleId);
+    }
+
+    private UUID resolveVisibleOwnerModuleId(
+            ProjectModuleEntity node,
+            Map<UUID, ProjectModuleEntity> byId
+    ) {
+        if (node == null) {
+            return null;
+        }
+
+        ProjectModuleEntity cursor = node;
+
+        while (cursor != null) {
+            if ("MODULE".equalsIgnoreCase(normalizeModuleType(cursor.getModuleType()))) {
+                return cursor.getId();
+            }
+
+            UUID parentId = cursor.getParentId();
+            cursor = parentId == null ? null : byId.get(parentId);
+        }
+
+        return node.getParentId();
+    }
+
+    private boolean isPageNode(
+            ProjectModuleEntity node
+    ) {
+        if (node == null) {
+            return false;
+        }
+
+        String type = normalizeModuleType(node.getModuleType());
+
+        return "PAGE".equals(type)
+                || "PAGE_MODULE".equals(type);
+    }
+
+    private String normalizeModuleType(
+            String value
+    ) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+
+        String text = value.trim().toUpperCase();
+
+        if (text.contains("PAGE")
+                || text.contains("SCREEN")
+                || text.contains("VIEW")
+                || text.contains("DIALOG")
+                || text.contains("MODAL")) {
+            return "PAGE";
+        }
+
+        if (text.contains("MODULE")
+                || text.contains("DOMAIN")
+                || text.contains("SCENE")) {
+            return "MODULE";
+        }
+
+        if (text.contains("FEATURE")
+                || text.contains("CAPABILITY")
+                || text.contains("FUNCTION")) {
+            return "FEATURE";
+        }
+
+        return text;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> toMutableMap(
+            Object value
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        if (value instanceof Map<?, ?> source) {
+            for (Map.Entry<?, ?> entry : source.entrySet()) {
+                if (entry.getKey() != null) {
+                    result.put(
+                            String.valueOf(entry.getKey()),
+                            entry.getValue()
+                    );
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private String safeRouteSegment(
+            String value
+    ) {
+        String text = value == null ? "" : value.trim();
+
+        if (text.isBlank()) {
+            return "page";
+        }
+
+        return text
+                .replaceAll("[^a-zA-Z0-9_\\-]+", "-")
+                .replaceAll("-+", "-")
+                .replaceAll("^-+|-+$", "");
+    }
+
+    private String text(
+            Object... values
+    ) {
+        if (values == null) {
+            return "";
+        }
+
+        for (Object value : values) {
+            if (value == null) {
+                continue;
+            }
+
+            String text = String.valueOf(value).trim();
+
+            if (!text.isBlank()) {
+                return text;
+            }
+        }
+
+        return "";
+    }
+
+
     private ProjectEntity resolveProject(
             UUID workspaceId,
             String projectCode
@@ -613,6 +963,390 @@ public class UiContractPersistenceService {
 
         return responseEnvelope;
     }
+
+
+    // A9.10.14.4.3.15.7.24L3B5B1_7_JAVA_PRE_VALIDATE_STABLE_KEYS
+    // Final Java-side hardening before validationService.validate(...).
+    // This does not relax validation. It converts label-like Chinese runtime keys
+    // into deterministic ASCII keys while keeping visible label/title unchanged.
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> a91578NormalizeStableUiContractRuntimeKeys(
+            Map<String, Object> artifactContent
+    ) {
+        if (artifactContent == null || artifactContent.isEmpty()) {
+            return artifactContent;
+        }
+
+        Map<String, Object> mockData = a91578AsMap(artifactContent.get("mockData"));
+
+        for (Map<String, Object> component : a91578CollectUiContractComponents(artifactContent)) {
+            String componentType = a91578String(
+                    component.getOrDefault(
+                            "componentType",
+                            component.getOrDefault("type", "")
+                    )
+            ).toUpperCase();
+
+            if (componentType.contains("TABLE")) {
+                a91578NormalizeTableRuntimeKeys(component, mockData);
+            }
+
+            if (
+                    componentType.contains("FORM")
+                            || componentType.contains("FIELD_GROUP")
+                            || componentType.contains("SEARCH")
+                            || componentType.contains("FILTER")
+                            || componentType.contains("QUERY")
+            ) {
+                a91578NormalizeFormRuntimeKeys(component);
+            }
+        }
+
+        if (!mockData.isEmpty()) {
+            artifactContent.put("mockData", mockData);
+        }
+
+        return artifactContent;
+    }
+
+    @SuppressWarnings("unchecked")
+    private java.util.List<Map<String, Object>> a91578CollectUiContractComponents(Object root) {
+        java.util.List<Map<String, Object>> result = new java.util.ArrayList<>();
+        java.util.Set<Object> visited = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        a91578VisitUiContractComponents(root, result, visited);
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void a91578VisitUiContractComponents(
+            Object value,
+            java.util.List<Map<String, Object>> result,
+            java.util.Set<Object> visited
+    ) {
+        if (value == null || visited.contains(value)) {
+            return;
+        }
+
+        visited.add(value);
+
+        if (value instanceof Map<?, ?> sourceMap) {
+            Map<String, Object> map = (Map<String, Object>) sourceMap;
+
+            if (
+                    map.containsKey("componentId")
+                            || map.containsKey("componentType")
+                            || map.containsKey("type")
+            ) {
+                result.add(map);
+            }
+
+            for (String key : java.util.List.of(
+                    "page",
+                    "layout",
+                    "componentTree",
+                    "components",
+                    "children",
+                    "items",
+                    "sections",
+                    "panels",
+                    "cards",
+                    "slots",
+                    "body"
+            )) {
+                Object child = map.get(key);
+
+                if (child instanceof java.util.List<?> list) {
+                    for (Object item : list) {
+                        a91578VisitUiContractComponents(item, result, visited);
+                    }
+                } else if (child instanceof Map<?, ?>) {
+                    a91578VisitUiContractComponents(child, result, visited);
+                }
+            }
+
+            return;
+        }
+
+        if (value instanceof java.util.List<?> list) {
+            for (Object item : list) {
+                a91578VisitUiContractComponents(item, result, visited);
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void a91578NormalizeTableRuntimeKeys(
+            Map<String, Object> component,
+            Map<String, Object> mockData
+    ) {
+        Map<String, Object> props = a91578AsMap(component.get("props"));
+        java.util.List<Object> columns = a91578AsList(component.get("columns"));
+
+        if (columns.isEmpty()) {
+            columns = a91578AsList(props.get("columns"));
+        }
+
+        if (columns.isEmpty()) {
+            return;
+        }
+
+        String dataBindingKey = a91578FirstNonBlank(
+                component.get("dataBindingKey"),
+                props.get("dataKey"),
+                props.get("dataBindingKey"),
+                "rows"
+        );
+
+        Object rowsValue = mockData.get(dataBindingKey);
+        java.util.List<Object> rows =
+                rowsValue instanceof java.util.List<?> list
+                        ? (java.util.List<Object>) list
+                        : java.util.List.of();
+
+        java.util.Set<String> usedKeys = new java.util.LinkedHashSet<>();
+        java.util.List<String[]> renamePairs = new java.util.ArrayList<>();
+
+        for (int index = 0; index < columns.size(); index += 1) {
+            Object columnValue = columns.get(index);
+
+            if (!(columnValue instanceof Map<?, ?> sourceColumn)) {
+                continue;
+            }
+
+            Map<String, Object> column = (Map<String, Object>) sourceColumn;
+
+            String oldColumnKey = a91578String(column.get("columnKey"));
+            String oldFieldKey = a91578String(column.get("fieldKey"));
+            String oldDataIndex = a91578String(column.get("dataIndex"));
+            String oldKey = a91578String(column.get("key"));
+            String oldName = a91578String(column.get("name"));
+
+            String label = a91578FirstNonBlank(
+                    column.get("label"),
+                    column.get("title"),
+                    oldColumnKey,
+                    oldFieldKey,
+                    oldDataIndex,
+                    oldKey,
+                    oldName
+            );
+
+            String stableKey = a91578StableRuntimeKey(
+                    a91578FirstNonBlank(oldColumnKey, oldFieldKey, oldDataIndex, oldKey, oldName, label),
+                    label,
+                    "column",
+                    index,
+                    usedKeys
+            );
+
+            for (String old : java.util.List.of(oldColumnKey, oldFieldKey, oldDataIndex, oldKey, oldName)) {
+                if (!old.isBlank() && !old.equals(stableKey)) {
+                    renamePairs.add(new String[] { old, stableKey });
+                }
+            }
+
+            column.put("columnKey", stableKey);
+            column.put("fieldKey", stableKey);
+            column.put("dataIndex", stableKey);
+            column.put("key", stableKey);
+            column.put("name", stableKey);
+
+            if (!label.isBlank()) {
+                column.putIfAbsent("label", label);
+                column.putIfAbsent("title", label);
+            }
+        }
+
+        component.put("columns", columns);
+        props.put("columns", columns);
+        component.put("props", props);
+
+        for (Object rowValue : rows) {
+            if (!(rowValue instanceof Map<?, ?> sourceRow)) {
+                continue;
+            }
+
+            Map<String, Object> row = (Map<String, Object>) sourceRow;
+
+            for (String[] pair : renamePairs) {
+                String oldKey = pair[0];
+                String stableKey = pair[1];
+
+                if (row.containsKey(oldKey) && !row.containsKey(stableKey)) {
+                    row.put(stableKey, row.get(oldKey));
+                }
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void a91578NormalizeFormRuntimeKeys(Map<String, Object> component) {
+        Map<String, Object> props = a91578AsMap(component.get("props"));
+        java.util.List<Object> fields = a91578AsList(component.get("fields"));
+
+        if (fields.isEmpty()) {
+            fields = a91578AsList(props.get("fields"));
+        }
+
+        if (fields.isEmpty()) {
+            return;
+        }
+
+        java.util.Set<String> usedKeys = new java.util.LinkedHashSet<>();
+
+        for (int index = 0; index < fields.size(); index += 1) {
+            Object fieldValue = fields.get(index);
+
+            if (!(fieldValue instanceof Map<?, ?> sourceField)) {
+                continue;
+            }
+
+            Map<String, Object> field = (Map<String, Object>) sourceField;
+
+            String label = a91578FirstNonBlank(
+                    field.get("label"),
+                    field.get("title"),
+                    field.get("fieldKey"),
+                    field.get("key"),
+                    field.get("name")
+            );
+
+            String stableKey = a91578StableRuntimeKey(
+                    a91578FirstNonBlank(field.get("fieldKey"), field.get("key"), field.get("name"), label),
+                    label,
+                    "field",
+                    index,
+                    usedKeys
+            );
+
+            field.put("fieldKey", stableKey);
+            field.put("key", stableKey);
+            field.put("name", stableKey);
+
+            if (!label.isBlank()) {
+                field.putIfAbsent("label", label);
+                field.putIfAbsent("title", label);
+            }
+        }
+
+        component.put("fields", fields);
+        props.put("fields", fields);
+        component.put("props", props);
+    }
+
+    private String a91578StableRuntimeKey(
+            String raw,
+            String label,
+            String prefix,
+            int index,
+            java.util.Set<String> usedKeys
+    ) {
+        String candidate = a91578String(raw);
+
+        if (a91578IsStableAsciiKey(candidate) && !usedKeys.contains(candidate)) {
+            usedKeys.add(candidate);
+            return candidate;
+        }
+
+        String text = a91578FirstNonBlank(label, raw);
+        java.util.List<String> parts = new java.util.ArrayList<>();
+
+        java.util.Map<String, String> semanticMap = new java.util.LinkedHashMap<>();
+        semanticMap.put("订单金额", "order_amount");
+        semanticMap.put("金额", "amount");
+        semanticMap.put("负责人", "owner");
+        semanticMap.put("责任人", "owner");
+        semanticMap.put("订单编号", "order_no");
+        semanticMap.put("订单号", "order_no");
+        semanticMap.put("订单状态", "order_status");
+        semanticMap.put("状态", "status");
+        semanticMap.put("客户", "customer");
+        semanticMap.put("供应商", "supplier");
+        semanticMap.put("商品", "product");
+        semanticMap.put("数量", "quantity");
+        semanticMap.put("时间", "time");
+        semanticMap.put("日期", "date");
+        semanticMap.put("名称", "name");
+        semanticMap.put("编号", "code");
+        semanticMap.put("备注", "remark");
+        semanticMap.put("导出", "export");
+        semanticMap.put("导入", "import");
+
+        for (Map.Entry<String, String> entry : semanticMap.entrySet()) {
+            if (text.contains(entry.getKey()) && !parts.contains(entry.getValue())) {
+                parts.add(entry.getValue());
+            }
+        }
+
+        String base;
+
+        if (!parts.isEmpty()) {
+            base = String.join("_", parts);
+        } else {
+            base = text
+                    .toLowerCase(java.util.Locale.ROOT)
+                    .replaceAll("[^a-z0-9_\\-:.]+", "_")
+                    .replaceAll("_+", "_")
+                    .replaceAll("^_+|_+$", "");
+
+            if (base.isBlank()) {
+                base = prefix + "_" + (index + 1);
+            }
+        }
+
+        if (!base.matches("^[A-Za-z].*")) {
+            base = prefix + "_" + base;
+        }
+
+        candidate = base;
+        int suffix = 2;
+
+        while (usedKeys.contains(candidate) || !a91578IsStableAsciiKey(candidate)) {
+            candidate = base + "_" + suffix;
+            suffix += 1;
+        }
+
+        usedKeys.add(candidate);
+        return candidate;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> a91578AsMap(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            return (Map<String, Object>) map;
+        }
+
+        return new java.util.LinkedHashMap<>();
+    }
+
+    @SuppressWarnings("unchecked")
+    private java.util.List<Object> a91578AsList(Object value) {
+        if (value instanceof java.util.List<?> list) {
+            return (java.util.List<Object>) list;
+        }
+
+        return new java.util.ArrayList<>();
+    }
+
+    private String a91578FirstNonBlank(Object... values) {
+        for (Object value : values) {
+            String text = a91578String(value);
+            if (!text.isBlank()) {
+                return text;
+            }
+        }
+
+        return "";
+    }
+
+    private String a91578String(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private boolean a91578IsStableAsciiKey(String value) {
+        return value != null && value.matches("^[A-Za-z0-9][A-Za-z0-9_\\-:.]*$");
+    }
+
 
     private String extractMarkdown(
             Map<String, Object> responseEnvelope,

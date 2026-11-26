@@ -1,0 +1,144 @@
+{
+  "schemaVersion" : "1.0",
+  "packageType" : "CODEMIND_CODEBASE_SNAPSHOT",
+  "snapshotId" : "20260730-123319",
+  "snapshotStatus" : "CREATED",
+  "reason" : "CODE_PROJECT_MATERIALIZE",
+  "projectCode" : "002",
+  "targetStack" : "NODEJS_FULLSTACK",
+  "codebaseRoot" : "generated/nodejs/002/app",
+  "snapshotRoot" : "generated/nodejs/002/app/.codemind/snapshots/20260730-123319",
+  "archivePlatformPath" : "generated/nodejs/002/app/.codemind/snapshots/20260730-123319/codebase.zip",
+  "archiveAbsolutePath" : "E:\\CodeMind\\codemind-studio\\generated\\nodejs\\002\\app\\.codemind\\snapshots\\20260730-123319\\codebase.zip",
+  "fileCount" : 25,
+  "totalBytes" : 105748,
+  "checksum" : "151a2b0e6651bf2634e1ffa1ec52081bf0c549333b15a388cfd60446006461a6",
+  "createdAt" : "2026-07-30T12:33:19.927754200",
+  "warnings" : [ "快照会排除 node_modules、构建产物、运行日志和历史快照目录。" ],
+  "files" : [ {
+    "filePath" : "README.md",
+    "sha256" : "a4b09922ca145f82484dead673f7b6f2d30bd49b8f14f7fe4aed3abadad92d1b",
+    "bytes" : 2220,
+    "updatedAt" : "2026-07-30T10:56:53.1368816"
+  }, {
+    "filePath" : "backend/package.json",
+    "sha256" : "c6e74c66f6518c64c037831db9d6b94d44c167e928f5d7a0e8f75baedad2e125",
+    "bytes" : 264,
+    "updatedAt" : "2026-07-30T10:56:53.1518816"
+  }, {
+    "filePath" : "backend/server.js",
+    "sha256" : "dfcbcd0d5d6518babe367cb5d0ae11ffdae5e56a6b17189c0dbf910821572dba",
+    "bytes" : 215,
+    "updatedAt" : "2026-07-30T10:56:53.1538829"
+  }, {
+    "filePath" : "backend/src/app.js",
+    "sha256" : "7786ba583924d39c7ed0624a89226c33594b13f928106d92d6944692eec4eef3",
+    "bytes" : 498,
+    "updatedAt" : "2026-07-30T10:56:53.1548816"
+  }, {
+    "filePath" : "backend/src/db/localStore.js",
+    "sha256" : "7981327bd5e174cd1aebb8763a85e76690b94b83ed24b048223470e91a4dfce3",
+    "bytes" : 738,
+    "updatedAt" : "2026-07-30T10:56:53.1598989"
+  }, {
+    "filePath" : "backend/src/db/seedData.js",
+    "sha256" : "8bd7385f81cedb3d5989158febda7596fcded679c3f425aef5ec7f803c1dac3f",
+    "bytes" : 187,
+    "updatedAt" : "2026-07-30T10:56:53.1608545"
+  }, {
+    "filePath" : "backend/src/modules/auth-module/auth-module.routes.js",
+    "sha256" : "12b57a61a4e7783aa259c19ca7966ba9d74719aa0437ab8cea3d42aa68e2f372",
+    "bytes" : 66,
+    "updatedAt" : "2026-07-30T10:56:53.1708908"
+  }, {
+    "filePath" : "backend/src/routes/index.js",
+    "sha256" : "38c34b44f0fc28647a4eb4a79a5e1b2b3b7efaaca9f527ae1fbdbf2bd0c1dd0a",
+    "bytes" : 1849,
+    "updatedAt" : "2026-07-30T10:56:53.1568852"
+  }, {
+    "filePath" : "backend/src/shared/response.js",
+    "sha256" : "4831ff82c4f72e3d0d5a8223296eac035e3e4ef9bbe5453ec4795116941c9c43",
+    "bytes" : 317,
+    "updatedAt" : "2026-07-30T10:56:53.1578819"
+  }, {
+    "filePath" : "codemind.generated.json",
+    "sha256" : "1455cef9ed1d2e99d1eeff073a3a4c715926a8d3b1f6b3717d114ffe3c7297f3",
+    "bytes" : 11998,
+    "updatedAt" : "2026-07-30T10:56:53.1888823"
+  }, {
+    "filePath" : "database/schema.json",
+    "sha256" : "563e93d7f0d70239f14222f1e0f8e5f3d635b1f8323b3ea715c5b3cb82be1187",
+    "bytes" : 462,
+    "updatedAt" : "2026-07-30T10:56:53.1628835"
+  }, {
+    "filePath" : "database/seed.json",
+    "sha256" : "f1d3f2bb2e0fda42a684447b932da55182d99d19ee05142761ee0c90f0089cce",
+    "bytes" : 125,
+    "updatedAt" : "2026-07-30T10:56:53.1638834"
+  }, {
+    "filePath" : "frontend/index.html",
+    "sha256" : "f9610748fd73486128a1565b221ae88e5184c76c0a9544c1d56eb7d442d1b83d",
+    "bytes" : 311,
+    "updatedAt" : "2026-07-30T10:56:53.1398838"
+  }, {
+    "filePath" : "frontend/package.json",
+    "sha256" : "0b17294b8e0dff0acaca1f9fac6cb953c386b39ede09dbede92a32f6e42e6ca6",
+    "bytes" : 386,
+    "updatedAt" : "2026-07-30T10:56:53.1388855"
+  }, {
+    "filePath" : "frontend/src/App.vue",
+    "sha256" : "2269c44e749388c1cefff87e1834ee5ccddf19e6f301b9e66e3d6d5597e489f1",
+    "bytes" : 586,
+    "updatedAt" : "2026-07-30T10:56:53.1448817"
+  }, {
+    "filePath" : "frontend/src/main.js",
+    "sha256" : "fb757b85a0d84af72ff65bf018fcb64177c53a3078a6c7e8501e5b0566adc3e3",
+    "bytes" : 124,
+    "updatedAt" : "2026-07-30T10:56:53.1428824"
+  }, {
+    "filePath" : "frontend/src/modules/auth-module/index.js",
+    "sha256" : "76a88339858ab2ac64f1d825c20cfb06e31e8c9a3c2c44943c5e62ffe8145e96",
+    "bytes" : 461,
+    "updatedAt" : "2026-07-30T10:56:53.1668833"
+  }, {
+    "filePath" : "frontend/src/modules/auth-module/routes.js",
+    "sha256" : "3f02a37c51e91b36f66966c3490008bb3b5531c719b01379d92e07f17b566c79",
+    "bytes" : 32,
+    "updatedAt" : "2026-07-30T10:56:53.1678901"
+  }, {
+    "filePath" : "frontend/src/modules/generated/pages/GeneratedHomePage.vue",
+    "sha256" : "7f887ce2a3b2c5ed3f825a6b8057183795b146fa0799455fe3480fa10b68d070",
+    "bytes" : 260,
+    "updatedAt" : "2026-07-30T10:56:53.1488816"
+  }, {
+    "filePath" : "frontend/src/router/routes.js",
+    "sha256" : "7f8a53c584b78c3c10ad675042bbe1c6c6a163d6d7d3e0cc021513a06288e512",
+    "bytes" : 203,
+    "updatedAt" : "2026-07-30T10:56:53.1458835"
+  }, {
+    "filePath" : "frontend/src/shared/styles/app.css",
+    "sha256" : "a20770d4f557c02bcee879232915f2ae807ccbf6780a5bade1a3296cdb5dcab0",
+    "bytes" : 1201,
+    "updatedAt" : "2026-07-30T10:56:53.1508885"
+  }, {
+    "filePath" : "frontend/vite.config.js",
+    "sha256" : "c8ee217e05ac778c84ae1d5a2d00b1a176ba9592a83c6736b6bdede3d264665c",
+    "bytes" : 204,
+    "updatedAt" : "2026-07-30T10:56:53.1418894"
+  }, {
+    "filePath" : "package-lock.json",
+    "sha256" : "b6978e65fc38a08e62f605810edb0c207c8ab9e87e609e48955fe85b3c3a0c5b",
+    "bytes" : 82127,
+    "updatedAt" : "2026-07-30T11:02:36.321991"
+  }, {
+    "filePath" : "package.json",
+    "sha256" : "e31c8aa5abc32a3787684444aeb3a578e98bd8e0b6b2890b78b052e9c719e353",
+    "bytes" : 579,
+    "updatedAt" : "2026-07-30T10:56:53.1348813"
+  }, {
+    "filePath" : "tests/smoke.spec.js",
+    "sha256" : "31a15d1edb59850f9eb49bbc183b56ef788db62c9de9e19b27f03a37a40f5c9e",
+    "bytes" : 335,
+    "updatedAt" : "2026-07-30T10:56:53.1648843"
+  } ]
+}

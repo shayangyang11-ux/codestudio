@@ -1,0 +1,5 @@
+{
+  "authUsers": [
+    { "id": "user-demo-001", "account": "demo", "nickname": "演示用户", "password": "demo123", "status": "ACTIVE" }
+  ]
+}

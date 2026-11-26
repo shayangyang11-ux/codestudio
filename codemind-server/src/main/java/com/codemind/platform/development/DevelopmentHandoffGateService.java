@@ -1464,6 +1464,12 @@ public class DevelopmentHandoffGateService {
                 .count());
         pages.put("items", pageItems);
         payload.put("pages", pages);
+        payload.put("prototypeRoutingContract", buildPrototypeRoutingContract(pageItems, confirmedUiContractPayload));
+        payload.put("dataBindingPlan", buildDataBindingPlan(pageItems));
+        payload.put("apiPlan", buildApiPlan(pageItems));
+        payload.put("databasePlan", buildDatabasePlan(pageItems));
+        payload.put("mockToRealMapping", buildMockToRealMapping(pageItems));
+        payload.put("developmentRules", buildDevelopmentRules());
 
         Map<String, Object> requirements = new LinkedHashMap<>();
         requirements.put("sourceMode", "DYNAMIC_REQUIREMENT_ASSETS");
@@ -1553,6 +1559,318 @@ public class DevelopmentHandoffGateService {
         }
 
         return payload;
+    }
+
+    private Map<String, Object> buildPrototypeRoutingContract(
+            List<Map<String, Object>> pageItems,
+            Map<String, Object> confirmedUiContractPayload
+    ) {
+        List<Map<String, Object>> routes = new ArrayList<>();
+        List<Map<String, Object>> navigationEdges = new ArrayList<>();
+
+        for (Map<String, Object> page : pageItems == null ? List.<Map<String, Object>>of() : pageItems) {
+            Map<String, Object> uiContract = mapValue(page.get("uiContract"));
+            Map<String, Object> route = new LinkedHashMap<>();
+            route.put("pageId", page.get("pageId"));
+            route.put("pageKey", page.get("pageKey"));
+            route.put("pageName", page.get("pageName"));
+            route.put("routePath", page.get("routePath"));
+            route.put("confirmed", page.get("confirmed"));
+            route.put("mustUseVueRouter", true);
+            routes.add(route);
+
+            appendNavigationEdges(navigationEdges, page, uiContract == null ? null : uiContract.get("navigationEdges"));
+            Map<String, Object> metadata = uiContract == null ? null : mapValue(uiContract.get("metadata"));
+            appendNavigationEdges(navigationEdges, page, metadata == null ? null : metadata.get("navigation_edges"));
+            appendNavigationEdges(navigationEdges, page, metadata == null ? null : metadata.get("navigationEdges"));
+            appendPrototypeInteractions(navigationEdges, page, uiContract == null ? null : uiContract.get("prototypeInteractions"));
+            appendPrototypeInteractions(navigationEdges, page, uiContract == null ? null : uiContract.get("interactions"));
+        }
+
+        Map<String, Object> contract = new LinkedHashMap<>();
+        contract.put("source", confirmedUiContractPayload == null ? "DEVELOPMENT_BUILD_CONTEXT" : "MODULE_PROTOTYPE_SNAPSHOT");
+        contract.put("routeMode", "VUE_ROUTER_FROM_PROTOTYPE_CONTRACT");
+        contract.put("routes", routes);
+        contract.put("navigationEdges", navigationEdges);
+        contract.put("rules", List.of(
+                "按钮跳转、保存后跳转、列表行编辑、列表行详情必须从 navigationEdges / prototype interactions 推导。",
+                "目标页面切换时必须传递 rowContext；新增保存和编辑保存必须把真实接口返回数据同步到目标列表页。",
+                "如果契约中存在 targetDataBindingKey，目标页必须使用该数据源刷新真实接口或本地状态。"
+        ));
+        return contract;
+    }
+
+    private void appendNavigationEdges(
+            List<Map<String, Object>> target,
+            Map<String, Object> sourcePage,
+            Object rawEdges
+    ) {
+        if (!(rawEdges instanceof List<?> list)) {
+            return;
+        }
+
+        for (Object item : list) {
+            Map<String, Object> edge = mapValue(item);
+            if (edge == null || edge.isEmpty()) {
+                continue;
+            }
+
+            Map<String, Object> normalized = new LinkedHashMap<>(edge);
+            normalized.putIfAbsent("sourcePageId", sourcePage.get("pageId"));
+            normalized.putIfAbsent("sourcePageKey", sourcePage.get("pageKey"));
+            normalized.putIfAbsent("sourcePageName", sourcePage.get("pageName"));
+            normalized.putIfAbsent("sourceRoutePath", sourcePage.get("routePath"));
+            normalized.putIfAbsent("implementationSource", "PROTOTYPE_NAVIGATION_EDGE");
+            target.add(normalized);
+        }
+    }
+
+    private void appendPrototypeInteractions(
+            List<Map<String, Object>> target,
+            Map<String, Object> sourcePage,
+            Object rawInteractions
+    ) {
+        if (!(rawInteractions instanceof List<?> list)) {
+            return;
+        }
+
+        for (Object item : list) {
+            Map<String, Object> interaction = mapValue(item);
+            if (interaction == null || interaction.isEmpty()) {
+                continue;
+            }
+
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            normalized.put("sourcePageId", sourcePage.get("pageId"));
+            normalized.put("sourcePageKey", sourcePage.get("pageKey"));
+            normalized.put("sourcePageName", sourcePage.get("pageName"));
+            normalized.put("sourceRoutePath", sourcePage.get("routePath"));
+            normalized.put("interaction", interaction);
+            normalized.put("implementationSource", "PROTOTYPE_INTERACTION");
+            target.add(normalized);
+        }
+    }
+
+    private Map<String, Object> buildDataBindingPlan(
+            List<Map<String, Object>> pageItems
+    ) {
+        List<Map<String, Object>> bindings = new ArrayList<>();
+
+        for (Map<String, Object> page : pageItems == null ? List.<Map<String, Object>>of() : pageItems) {
+            Map<String, Object> uiContract = mapValue(page.get("uiContract"));
+            Set<String> keys = new LinkedHashSet<>();
+            collectDataBindingKeys(keys, uiContract);
+
+            if (keys.isEmpty()) {
+                keys.add(toStableDataKey(page));
+            }
+
+            for (String key : keys) {
+                Map<String, Object> binding = new LinkedHashMap<>();
+                binding.put("pageId", page.get("pageId"));
+                binding.put("pageKey", page.get("pageKey"));
+                binding.put("pageName", page.get("pageName"));
+                binding.put("dataBindingKey", key);
+                binding.put("apiResource", "/api/" + normalizeDataKey(key));
+                binding.put("databaseEntity", toEntityName(key));
+                binding.put("persistenceMode", "BACKEND_REPOSITORY_LOCAL_DATA_LAYER");
+                bindings.add(binding);
+            }
+        }
+
+        Map<String, Object> plan = new LinkedHashMap<>();
+        plan.put("source", "PAGE_UI_CONTRACT_DATA_BINDING");
+        plan.put("bindings", bindings);
+        plan.put("rules", List.of(
+                "runtime mock table key / data binding key 必须映射到真实 API resource。",
+                "同一个 dataBindingKey 在列表、新增、编辑、详情页面之间共享同一后端数据集合。",
+                "保存接口返回的记录必须作为页面跳转 rowContext 和目标列表刷新数据。"
+        ));
+        return plan;
+    }
+
+    private void collectDataBindingKeys(
+            Set<String> keys,
+            Object value
+    ) {
+        if (value == null) {
+            return;
+        }
+
+        if (value instanceof Map<?, ?> rawMap) {
+            Map<String, Object> map = mapValue(rawMap);
+            for (Map.Entry<String, Object> entry : map.entrySet()) {
+                String name = entry.getKey();
+                Object entryValue = entry.getValue();
+                if (name != null
+                        && (name.equalsIgnoreCase("dataBindingKey")
+                        || name.equalsIgnoreCase("targetDataBindingKey")
+                        || name.equalsIgnoreCase("sourceDataBindingKey"))
+                        && entryValue != null
+                        && !String.valueOf(entryValue).isBlank()) {
+                    keys.add(String.valueOf(entryValue));
+                }
+                collectDataBindingKeys(keys, entryValue);
+            }
+            return;
+        }
+
+        if (value instanceof List<?> list) {
+            for (Object item : list) {
+                collectDataBindingKeys(keys, item);
+            }
+        }
+    }
+
+    private Map<String, Object> buildApiPlan(
+            List<Map<String, Object>> pageItems
+    ) {
+        List<Map<String, Object>> endpoints = new ArrayList<>();
+        Map<String, Object> dataBindingPlan = buildDataBindingPlan(pageItems);
+        List<Map<String, Object>> bindings = mapListValue(dataBindingPlan.get("bindings"));
+
+        for (Map<String, Object> binding : bindings) {
+            String apiResource = textValue(binding.get("apiResource"), "/api/records");
+            String pageName = textValue(binding.get("pageName"), "业务页面");
+            endpoints.add(apiEndpoint("GET", apiResource, pageName + "列表查询", binding));
+            endpoints.add(apiEndpoint("POST", apiResource, pageName + "新增保存", binding));
+            endpoints.add(apiEndpoint("GET", apiResource + "/:id", pageName + "详情读取", binding));
+            endpoints.add(apiEndpoint("PUT", apiResource + "/:id", pageName + "编辑保存", binding));
+            endpoints.add(apiEndpoint("DELETE", apiResource + "/:id", pageName + "删除记录", binding));
+        }
+
+        Map<String, Object> plan = new LinkedHashMap<>();
+        plan.put("source", "UI_CONTRACT_AND_DATA_BINDING_PLAN");
+        plan.put("endpoints", endpoints);
+        plan.put("rules", List.of(
+                "前端页面不直接读写 mock 文件，所有业务动作必须请求 API client。",
+                "API client 路径必须和 prototypeRoutingContract / dataBindingPlan 对齐。",
+                "后端 endpoint 必须调用 service，再由 repository 访问数据层。"
+        ));
+        return plan;
+    }
+
+    private Map<String, Object> apiEndpoint(
+            String method,
+            String path,
+            String purpose,
+            Map<String, Object> binding
+    ) {
+        Map<String, Object> endpoint = new LinkedHashMap<>();
+        endpoint.put("method", method);
+        endpoint.put("path", path);
+        endpoint.put("purpose", purpose);
+        endpoint.put("dataBindingKey", binding.get("dataBindingKey"));
+        endpoint.put("databaseEntity", binding.get("databaseEntity"));
+        endpoint.put("sourcePageId", binding.get("pageId"));
+        endpoint.put("sourcePageName", binding.get("pageName"));
+        return endpoint;
+    }
+
+    private Map<String, Object> buildDatabasePlan(
+            List<Map<String, Object>> pageItems
+    ) {
+        Map<String, Object> dataBindingPlan = buildDataBindingPlan(pageItems);
+        List<Map<String, Object>> bindings = mapListValue(dataBindingPlan.get("bindings"));
+        List<Map<String, Object>> entities = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+
+        for (Map<String, Object> binding : bindings) {
+            String entityName = textValue(binding.get("databaseEntity"), "GeneratedRecord");
+            if (!seen.add(entityName)) {
+                continue;
+            }
+
+            Map<String, Object> entity = new LinkedHashMap<>();
+            entity.put("entityName", entityName);
+            entity.put("sourceDataBindingKey", binding.get("dataBindingKey"));
+            entity.put("storage", "local data layer repository");
+            entity.put("minimumFields", List.of("id", "createdAt", "updatedAt", "status"));
+            entity.put("operations", List.of("list", "create", "detail", "update", "delete"));
+            entities.add(entity);
+        }
+
+        Map<String, Object> plan = new LinkedHashMap<>();
+        plan.put("source", "DATA_BINDING_PLAN");
+        plan.put("entities", entities);
+        plan.put("rules", List.of(
+                "seed data 只用于首次初始化，不是前端 mock。",
+                "新增、编辑、删除必须持久化到后端数据层。",
+                "列表页必须从后端查询最新数据，不能只更新前端内存。"
+        ));
+        return plan;
+    }
+
+    private Map<String, Object> buildMockToRealMapping(
+            List<Map<String, Object>> pageItems
+    ) {
+        Map<String, Object> dataBindingPlan = buildDataBindingPlan(pageItems);
+        List<Map<String, Object>> mappings = new ArrayList<>();
+
+        for (Map<String, Object> binding : mapListValue(dataBindingPlan.get("bindings"))) {
+            Map<String, Object> mapping = new LinkedHashMap<>();
+            mapping.put("mockSource", binding.get("dataBindingKey"));
+            mapping.put("realApi", binding.get("apiResource"));
+            mapping.put("realDatabaseEntity", binding.get("databaseEntity"));
+            mapping.put("frontendPolicy", "replace mock reads/writes with API client calls");
+            mapping.put("backendPolicy", "route -> service -> repository -> local data layer");
+            mappings.add(mapping);
+        }
+
+        Map<String, Object> plan = new LinkedHashMap<>();
+        plan.put("source", "PROTOTYPE_RUNTIME_DATA_BINDING");
+        plan.put("mappings", mappings);
+        plan.put("rules", List.of(
+                "禁止生成 frontend/src/**/mock 作为主业务数据源。",
+                "如果保留 seed 文件，必须放在后端或 database 初始化范围。",
+                "验收时新增/编辑/详情必须经过真实 API 与数据层。"
+        ));
+        return plan;
+    }
+
+    private List<String> buildDevelopmentRules() {
+        return List.of(
+                "Dev Agent 必须以需求 Agent 已确认的完整模块原型作为开发基线。",
+                "Dev Agent 不重新发明页面跳转、菜单结构、保存后流转和行上下文传递。",
+                "UI 结构优先复用 Ant Design Vue 主渲染语义和 UI Contract 布局。",
+                "mock 行为替换为 API、service、repository、数据层读写。",
+                "列表、新增、编辑、详情的端到端行为必须和原型一致。"
+        );
+    }
+
+    private String toStableDataKey(Map<String, Object> page) {
+        String pageKey = textValue(page == null ? null : page.get("pageKey"), "");
+        if (!pageKey.isBlank()) {
+            return pageKey + "_data";
+        }
+
+        String pageName = textValue(page == null ? null : page.get("pageName"), "records");
+        return normalizeDataKey(pageName) + "_data";
+    }
+
+    private String normalizeDataKey(String value) {
+        String normalized = safeText(value)
+                .replaceAll("([a-z])([A-Z])", "$1_$2")
+                .replaceAll("[^a-zA-Z0-9]+", "_")
+                .replaceAll("_+", "_")
+                .replaceAll("^_|_$", "")
+                .toLowerCase(Locale.ROOT);
+        return normalized.isBlank() ? "records" : normalized;
+    }
+
+    private String toEntityName(String value) {
+        String normalized = normalizeDataKey(value);
+        StringBuilder builder = new StringBuilder();
+        for (String part : normalized.split("_")) {
+            if (part.isBlank()) {
+                continue;
+            }
+            builder.append(part.substring(0, 1).toUpperCase(Locale.ROOT));
+            if (part.length() > 1) {
+                builder.append(part.substring(1));
+            }
+        }
+        return builder.isEmpty() ? "GeneratedRecord" : builder.toString();
     }
 
     private Map<String, Object> buildDevelopmentNodePayload(

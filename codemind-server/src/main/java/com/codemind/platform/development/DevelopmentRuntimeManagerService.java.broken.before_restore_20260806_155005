@@ -1,0 +1,1220 @@
+package com.codemind.platform.development;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.URI;
+import java.net.Socket;
+import java.net.InetSocketAddress;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Locale;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
+
+@Service
+public class DevelopmentRuntimeManagerService {
+
+    // A9.10.11.7.2_RUNTIME_COMPILE_REPAIR
+
+    private EndpointProbe probeFrontendPreview() {
+        EndpointProbe socketProbe = probeTcpPort("127.0.0.1", DEFAULT_FRONTEND_PORT);
+        if (socketProbe.reachable()) {
+            return socketProbe;
+        }
+
+        EndpointProbe httpProbe = probeEndpoint(frontendUrl());
+        if (httpProbe.reachable()) {
+            return httpProbe;
+        }
+
+        String message = socketProbe.message();
+        if (message == null || message.isBlank()) {
+            message = httpProbe.message();
+        }
+        return new EndpointProbe(false, true, null, message);
+    }
+
+    private EndpointProbe probeTcpPort(String host, int port) {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(host, port), FRONTEND_SOCKET_TIMEOUT_MILLIS);
+            return new EndpointProbe(
+                    true,
+                    false,
+                    200,
+                    "TCP " + host + ":" + port + " 可连接"
+            );
+        } catch (Exception e) {
+            return new EndpointProbe(
+                    false,
+                    true,
+                    null,
+                    e.getClass().getSimpleName() + ": " + e.getMessage()
+            );
+        }
+    }
+
+    private final DevelopmentHandoffGateService developmentHandoffGateService;
+    private final DevelopmentGeneratedPathService generatedPathService;
+    private final DevelopmentCodebaseRegistryService codebaseRegistryService;
+    private final ConcurrentHashMap<String, RuntimeSlot> runtimeSlots = new ConcurrentHashMap<>();
+    private final ExecutorService executorService = Executors.newCachedThreadPool();
+    private final HttpClient healthClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofMillis(HTTP_PROBE_TIMEOUT_MILLIS))
+            .build();
+
+    public DevelopmentRuntimeManagerService(
+            DevelopmentHandoffGateService developmentHandoffGateService,
+            DevelopmentGeneratedPathService generatedPathService,
+            DevelopmentCodebaseRegistryService codebaseRegistryService
+    ) {
+        this.developmentHandoffGateService = developmentHandoffGateService;
+        this.generatedPathService = generatedPathService;
+        this.codebaseRegistryService = codebaseRegistryService;
+    }
+
+    public DevelopmentRuntimeStatusResponse getStatus(
+            UUID workspaceId,
+            String projectCode,
+            UUID moduleId,
+            String targetStack
+    ) {
+        RuntimeContext context = resolveRuntimeContext(workspaceId, projectCode, moduleId, targetStack);
+        RuntimeSlot slot = slotFor(context);
+        slot.refreshProcessState();
+        return toStatusResponse(context, slot);
+    }
+
+    public DevelopmentRuntimeStatusResponse installDependencies(
+            UUID workspaceId,
+            String projectCode,
+            UUID moduleId,
+            DevelopmentRuntimeActionRequest request
+    ) {
+        RuntimeContext context = resolveRuntimeContext(workspaceId, projectCode, moduleId, request == null ? null : request.targetStack());
+        ensureCodebaseReady(context);
+        RuntimeSlot slot = slotFor(context);
+        slot.refreshProcessState();
+
+        synchronized (slot) {
+            if (slot.installProcess != null && slot.installProcess.isAlive()) {
+                slot.appendLog("[runtime] npm install 已在执行中，跳过重复启动。", true);
+                return toStatusResponse(context, slot);
+            }
+
+            if (slot.runtimeProcess != null && slot.runtimeProcess.isAlive()) {
+                throw new ResponseStatusException(
+                        HttpStatus.CONFLICT,
+                        "生成项目正在运行中，请先停止项目后再重新安装依赖。"
+                );
+            }
+
+            try {
+                ProcessBuilder builder = processBuilder(context.absoluteCodebaseRoot(), List.of("npm", "install"));
+                Process process = builder.start();
+                slot.installProcess = process;
+                slot.installStatus.set("INSTALLING");
+                slot.lastInstallExitCode = null;
+                slot.lastActionAt = LocalDateTime.now();
+                slot.appendLog("[runtime] 开始安装依赖：npm install", true);
+                captureProcessOutput(slot, process.getInputStream(), "install");
+                captureProcessOutput(slot, process.getErrorStream(), "install:err");
+                waitInstallProcess(slot, process);
+            } catch (IOException e) {
+                slot.installStatus.set("INSTALL_FAILED");
+                slot.lastActionAt = LocalDateTime.now();
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "启动 npm install 失败。", e);
+            }
+        }
+
+        return toStatusResponse(context, slot);
+    }
+
+    public DevelopmentRuntimeStatusResponse startRuntime(
+            UUID workspaceId,
+            String projectCode,
+            UUID moduleId,
+            DevelopmentRuntimeActionRequest request
+    ) {
+        RuntimeContext context = resolveRuntimeContext(workspaceId, projectCode, moduleId, request == null ? null : request.targetStack());
+        ensureCodebaseReady(context);
+        RuntimeSlot slot = slotFor(context);
+        slot.refreshProcessState();
+
+        synchronized (slot) {
+            RuntimeState currentState = resolveRuntimeState(context, slot);
+            if ("RUNNING".equals(currentState.runtimeStatus())) {
+                adoptExternalRuntime(slot, currentState.health(), "启动前检测到已有 5178/3101 服务，不重复启动 npm run dev。");
+                return toStatusResponse(context, slot);
+            }
+
+            if (slot.runtimeProcess != null && slot.runtimeProcess.isAlive()) {
+                slot.runtimeStatus.set("RUNNING");
+                slot.appendLog("[runtime] 生成项目已经在运行中。", true);
+                return toStatusResponse(context, slot);
+            }
+
+            if (slot.installProcess != null && slot.installProcess.isAlive()) {
+                throw new ResponseStatusException(
+                        HttpStatus.CONFLICT,
+                        "依赖安装仍在执行中，安装完成后再启动项目。"
+                );
+            }
+
+            HealthSnapshot preflightHealth = checkRuntimeHealth("RUNNING");
+            if (preflightHealth.frontendReachable() || preflightHealth.backendReachable()) {
+                adoptExternalRuntime(slot, preflightHealth, "启动前检测到已有端口服务，平台已接管运行状态，不再启动第二份进程。 ");
+                return toStatusResponse(context, slot);
+            }
+
+            try {
+                ProcessBuilder builder = processBuilder(context.absoluteCodebaseRoot(), List.of("npm", "run", "dev"));
+                Process process = builder.start();
+                slot.runtimeProcess = process;
+                slot.runtimeStatus.set("RUNNING");
+                slot.startedAt = LocalDateTime.now();
+                slot.stoppedAt = null;
+                slot.lastActionAt = LocalDateTime.now();
+                slot.lastExitCode = null;
+                slot.appendLog("[runtime] 启动生成项目：npm run dev", true);
+                slot.appendLog("[runtime] 工作目录：" + context.absoluteCodebaseRoot(), true);
+                slot.appendLog("[runtime] 前端预览地址：" + frontendUrl(), true);
+                slot.appendLog("[runtime] 后端接口地址：" + backendUrl(), true);
+                captureProcessOutput(slot, process.getInputStream(), "dev");
+                captureProcessOutput(slot, process.getErrorStream(), "dev:err");
+                waitRuntimeProcess(slot, process);
+            } catch (IOException e) {
+                HealthSnapshot fallbackHealth = checkRuntimeHealth("RUNNING");
+                if (fallbackHealth.frontendReachable() || fallbackHealth.backendReachable()) {
+                    adoptExternalRuntime(slot, fallbackHealth, "启动命令异常，但检测到端口服务已可访问，已接管为 RUNNING。 ");
+                    return toStatusResponse(context, slot);
+                }
+                slot.runtimeStatus.set("START_FAILED");
+                slot.lastActionAt = LocalDateTime.now();
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "启动生成项目失败。", e);
+            }
+        }
+
+        return toStatusResponse(context, slot);
+    }
+
+    public DevelopmentRuntimeStatusResponse stopRuntime(
+            UUID workspaceId,
+            String projectCode,
+            UUID moduleId,
+            DevelopmentRuntimeActionRequest request
+    ) {
+        RuntimeContext context = resolveRuntimeContext(workspaceId, projectCode, moduleId, request == null ? null : request.targetStack());
+        RuntimeSlot slot = slotFor(context);
+        slot.refreshProcessState();
+
+        synchronized (slot) {
+            if (slot.runtimeProcess == null || !slot.runtimeProcess.isAlive()) {
+                HealthSnapshot externalHealth = checkRuntimeHealth("RUNNING");
+                if (externalHealth.frontendReachable() || externalHealth.backendReachable()) {
+                    adoptExternalRuntime(slot, externalHealth, "检测到生成系统由外部进程提供，平台没有持有进程句柄，未执行停止。 ");
+                    return toStatusResponse(context, slot);
+                }
+
+                slot.runtimeStatus.set(context.codebaseExists() ? "STOPPED" : "NOT_READY");
+                slot.stoppedAt = LocalDateTime.now();
+                slot.lastActionAt = LocalDateTime.now();
+                slot.appendLog("[runtime] 当前没有正在运行的生成项目。", true);
+                return toStatusResponse(context, slot);
+            }
+
+            stopProcessTree(slot.runtimeProcess);
+            slot.runtimeStatus.set("STOPPED");
+            slot.stoppedAt = LocalDateTime.now();
+            slot.lastActionAt = LocalDateTime.now();
+            slot.appendLog("[runtime] 已停止生成项目运行进程。", true);
+        }
+
+        return toStatusResponse(context, slot);
+    }
+
+    public DevelopmentRuntimeStatusResponse restartRuntime(
+            UUID workspaceId,
+            String projectCode,
+            UUID moduleId,
+            DevelopmentRuntimeActionRequest request
+    ) {
+        DevelopmentRuntimeActionRequest safeRequest = request == null
+                ? new DevelopmentRuntimeActionRequest(null, true)
+                : request;
+
+        stopRuntime(workspaceId, projectCode, moduleId, safeRequest);
+        return startRuntime(workspaceId, projectCode, moduleId, safeRequest);
+    }
+
+    public DevelopmentRuntimeLogsResponse getLogs(
+            UUID workspaceId,
+            String projectCode,
+            UUID moduleId,
+            String targetStack,
+            Integer lines
+    ) {
+        RuntimeContext context = resolveRuntimeContext(workspaceId, projectCode, moduleId, targetStack);
+        RuntimeSlot slot = slotFor(context);
+        // A9.10.11.7.1_RUNTIME_GETSTATUS_FORCE_PROBE
+        RuntimeState state = resolveRuntimeState(context, slot);
+        int limit = lines == null || lines <= 0 ? 200 : Math.min(lines, MAX_LOG_LINES);
+        List<String> logLines = new ArrayList<>(slot.tail(limit));
+
+        HealthSnapshot health = state.health();
+        if (health.checkedAt() != null) {
+            logLines.add(String.format(
+                    "%s [runtime] 当前健康检查：runtime=%s, health=%s, frontend=%s%s, backend=%s%s",
+                    LocalDateTime.now().toString().replace('T', ' ').substring(0, 19),
+                    state.runtimeStatus(),
+                    health.healthStatus(),
+                    health.frontendReachable() ? "OK" : "NOT_READY",
+                    health.frontendStatusCode() == null ? "" : " HTTP " + health.frontendStatusCode(),
+                    health.backendReachable() ? "OK" : "NOT_READY",
+                    health.backendHealthStatusCode() == null ? "" : " HTTP " + health.backendHealthStatusCode()
+            ));
+        }
+
+        List<String> diagnosticLines = currentRunWindow(logLines);
+        LogDiagnostics logDiagnostics = analyzeLogs(diagnosticLines);
+
+        return new DevelopmentRuntimeLogsResponse(
+                context.readiness().projectId(),
+                context.readiness().moduleId(),
+                context.targetStack(),
+                context.codebaseRoot(),
+                state.runtimeStatus(),
+                state.installStatus(),
+                logLines.size(),
+                slot.size() > limit,
+                logLines,
+                logDiagnostics.errorLines().size(),
+                logDiagnostics.warningLines().size(),
+                logDiagnostics.errorLines(),
+                logDiagnostics.warningLines(),
+                logDiagnostics.suggestions(),
+                LocalDateTime.now()
+        );
+    }
+
+    private RuntimeContext resolveRuntimeContext(
+            UUID workspaceId,
+            String projectCode,
+            UUID moduleId,
+            String targetStack
+    ) {
+        DevelopmentHandoffReadinessResponse readiness = developmentHandoffGateService.getReadiness(
+                workspaceId,
+                projectCode,
+                moduleId
+        );
+
+        String resolvedTargetStack = resolveTargetStack(targetStack);
+        DevelopmentCodebaseRegistryResponse codebaseRegistry = codebaseRegistryService.resolveCodebase(
+                workspaceId,
+                readiness.projectId(),
+                projectCode,
+                resolvedTargetStack
+        );
+        Path workspaceRoot = generatedPathService.resolveGeneratedStorageRoot();
+        String codebaseRoot = codebaseRegistry.platformRootPath();
+        Path absoluteCodebaseRoot = Path.of(codebaseRegistry.absoluteRootPath()).toAbsolutePath().normalize();
+        boolean exists = Files.isDirectory(absoluteCodebaseRoot);
+        boolean packageJsonExists = Files.isRegularFile(absoluteCodebaseRoot.resolve("package.json"));
+        boolean dependencyInstalled = Files.isDirectory(absoluteCodebaseRoot.resolve("node_modules"));
+
+        return new RuntimeContext(
+                workspaceId,
+                projectCode,
+                moduleId,
+                resolvedTargetStack,
+                readiness,
+                codebaseRegistry,
+                workspaceRoot,
+                codebaseRoot,
+                absoluteCodebaseRoot,
+                exists,
+                packageJsonExists,
+                dependencyInstalled
+        );
+    }
+
+    private void ensureCodebaseReady(RuntimeContext context) {
+        if (!context.codebaseExists()) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Node.js 项目主干尚未写入 generated/nodejs，请先生成并写入代码。"
+            );
+        }
+
+        if (!context.packageJsonExists()) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "生成项目缺少 package.json，不能安装或启动。"
+            );
+        }
+    }
+
+    private RuntimeSlot slotFor(RuntimeContext context) {
+        return runtimeSlots.computeIfAbsent(
+                context.workspaceId() + ":" + context.projectCode() + ":" + context.targetStack(),
+                ignored -> new RuntimeSlot()
+        );
+    }
+
+    private DevelopmentRuntimeStatusResponse toStatusResponse(RuntimeContext context, RuntimeSlot slot) {
+        RuntimeState state = resolveRuntimeState(context, slot);
+        String installStatus = state.installStatus();
+        String runtimeStatus = state.runtimeStatus();
+        HealthSnapshot health = state.health();
+        RuntimeDiagnostics diagnostics = diagnoseRuntime(context, slot, runtimeStatus, installStatus, health);
+        codebaseRegistryService.updateRuntimeStatus(
+                context.workspaceId(),
+                context.readiness().projectId(),
+                context.projectCode(),
+                context.targetStack(),
+                runtimeStatus,
+                DEFAULT_FRONTEND_PORT,
+                DEFAULT_BACKEND_PORT
+        );
+
+        return new DevelopmentRuntimeStatusResponse(
+                context.readiness().projectId(),
+                context.readiness().moduleId(),
+                context.readiness().moduleKey(),
+                context.readiness().moduleName(),
+                context.targetStack(),
+                context.codebaseRegistry(),
+                runtimeStatus,
+                installStatus,
+                context.codebaseExists(),
+                context.packageJsonExists(),
+                context.dependencyInstalled(),
+                context.codebaseRoot(),
+                context.absoluteCodebaseRoot().toString(),
+                frontendUrl(),
+                backendUrl(),
+                healthUrl(),
+                previewUrl(),
+                health.healthStatus(),
+                health.frontendReachable(),
+                health.backendReachable(),
+                health.frontendStatusCode(),
+                health.backendHealthStatusCode(),
+                health.frontendHealthMessage(),
+                health.backendHealthMessage(),
+                health.checkedAt(),
+                diagnostics.level(),
+                diagnostics.title(),
+                diagnostics.summary(),
+                diagnostics.detectedProblems(),
+                diagnostics.suggestions(),
+                diagnostics.nextActions(),
+                diagnostics.recentErrorLines(),
+                pid(slot.runtimeProcess),
+                pid(slot.installProcess),
+                slot.lastExitCode,
+                slot.lastInstallExitCode,
+                slot.startedAt,
+                slot.stoppedAt,
+                slot.lastActionAt,
+                allowedActions(context, runtimeStatus, installStatus),
+                summary(context, runtimeStatus, installStatus, health)
+        );
+    }
+
+    private RuntimeState resolveRuntimeState(RuntimeContext context, RuntimeSlot slot) {
+        String installStatus = resolveInstallStatus(context, slot);
+        String runtimeStatus = resolveRuntimeStatus(context, slot);
+
+        if (!context.codebaseExists() || !context.packageJsonExists()) {
+            return new RuntimeState(runtimeStatus, installStatus, checkRuntimeHealth(runtimeStatus));
+        }
+
+        // A9.10.11.7.1_RUNTIME_GETSTATUS_FORCE_PROBE
+        // Always probe real endpoints when the generated codebase exists. The generated
+        // application can be alive even when the platform does not own the Process handle.
+        HealthSnapshot actualHealth = checkRuntimeHealth("RUNNING");
+        boolean frontendAlive = actualHealth.frontendReachable();
+        boolean backendAlive = actualHealth.backendReachable();
+
+        if (frontendAlive && backendAlive) {
+            runtimeStatus = "RUNNING";
+            if (!"INSTALLING".equals(installStatus)) {
+                installStatus = "INSTALLED";
+            }
+
+            synchronized (slot) {
+                slot.runtimeStatus.set("RUNNING");
+                if (!"INSTALLING".equals(slot.installStatus.get())) {
+                    slot.installStatus.set("INSTALLED");
+                }
+                if (slot.startedAt == null) {
+                    slot.startedAt = LocalDateTime.now();
+                }
+                slot.stoppedAt = null;
+                slot.lastActionAt = LocalDateTime.now();
+
+                boolean alreadyLogged = slot.tail(16).stream()
+                        .anyMatch(line -> line.contains("5178/3101 已可访问") || line.contains("外部运行状态已接管"));
+                if (!alreadyLogged) {
+                    slot.appendLog("[runtime] 检测到 5178/3101 已可访问，外部运行状态已接管并同步为 RUNNING。", true);
+                }
+            }
+
+            return new RuntimeState(runtimeStatus, installStatus, actualHealth);
+        }
+
+        if (frontendAlive || backendAlive) {
+            if (!"RUNNING".equals(runtimeStatus)) {
+                runtimeStatus = "STARTING";
+            }
+            return new RuntimeState(runtimeStatus, installStatus, actualHealth);
+        }
+
+        HealthSnapshot health = "RUNNING".equals(runtimeStatus)
+                ? actualHealth
+                : checkRuntimeHealth(runtimeStatus);
+        return new RuntimeState(runtimeStatus, installStatus, health);
+    }
+
+    private void adoptExternalRuntime(RuntimeSlot slot, HealthSnapshot health, String reason) {
+        synchronized (slot) {
+            slot.runtimeStatus.set("RUNNING");
+            if (!"INSTALLING".equals(slot.installStatus.get())) {
+                slot.installStatus.set("INSTALLED");
+            }
+            if (slot.startedAt == null) {
+                slot.startedAt = LocalDateTime.now();
+            }
+            slot.stoppedAt = null;
+            slot.lastActionAt = LocalDateTime.now();
+
+            String marker;
+            if (health != null && health.frontendReachable() && health.backendReachable()) {
+                marker = "检测到 5178/3101 已可访问";
+            } else if (health != null && health.frontendReachable()) {
+                marker = "检测到前端 5178 已可访问";
+            } else if (health != null && health.backendReachable()) {
+                marker = "检测到后端 3101 已可访问";
+            } else {
+                marker = "检测到外部运行状态";
+            }
+
+            String safeReason = reason == null || reason.isBlank() ? marker : reason;
+            boolean alreadyLogged = slot.tail(24).stream()
+                    .anyMatch(line -> line.contains(marker) || line.contains(safeReason));
+            if (!alreadyLogged) {
+                slot.appendLog("[runtime] " + safeReason, true);
+                if (health != null) {
+                    slot.appendLog("[runtime] 外部状态：frontend=" + (health.frontendReachable() ? "OK" : "NOT_READY")
+                            + (health.frontendStatusCode() == null ? "" : " HTTP " + health.frontendStatusCode())
+                            + ", backend=" + (health.backendReachable() ? "OK" : "NOT_READY")
+                            + (health.backendHealthStatusCode() == null ? "" : " HTTP " + health.backendHealthStatusCode()), true);
+                }
+            }
+        }
+    }
+
+    private String resolveRuntimeStatus(RuntimeContext context, RuntimeSlot slot) {
+        slot.refreshProcessState();
+
+        if (!context.codebaseExists() || !context.packageJsonExists()) {
+            return "NOT_READY";
+        }
+
+        if (slot.runtimeProcess != null && slot.runtimeProcess.isAlive()) {
+            return "RUNNING";
+        }
+
+        String current = slot.runtimeStatus.get();
+
+        if ("EXITED".equals(current) || "START_FAILED".equals(current)) {
+            return current;
+        }
+
+        return "STOPPED";
+    }
+
+    private String resolveInstallStatus(RuntimeContext context, RuntimeSlot slot) {
+        slot.refreshProcessState();
+
+        if (!context.codebaseExists() || !context.packageJsonExists()) {
+            return "NOT_READY";
+        }
+
+        if (slot.installProcess != null && slot.installProcess.isAlive()) {
+            return "INSTALLING";
+        }
+
+        String current = slot.installStatus.get();
+
+        if ("INSTALLED".equals(current) || "INSTALL_FAILED".equals(current)) {
+            return current;
+        }
+
+        return context.dependencyInstalled() ? "INSTALLED" : "NOT_INSTALLED";
+    }
+
+    private List<String> allowedActions(RuntimeContext context, String runtimeStatus, String installStatus) {
+        if (!context.codebaseExists() || !context.packageJsonExists()) {
+            return List.of("WRITE_CODEBASE_FIRST");
+        }
+
+        List<String> actions = new ArrayList<>();
+
+        if (!"RUNNING".equals(runtimeStatus) && !"INSTALLING".equals(installStatus)) {
+            actions.add("INSTALL_DEPENDENCIES");
+        }
+
+        if (!"RUNNING".equals(runtimeStatus) && !"INSTALLING".equals(installStatus)) {
+            actions.add("START_RUNTIME");
+        }
+
+        if ("RUNNING".equals(runtimeStatus)) {
+            actions.add("STOP_RUNTIME");
+            actions.add("RESTART_RUNTIME");
+            actions.add("OPEN_PREVIEW");
+        }
+
+        actions.add("VIEW_LOGS");
+        return actions;
+    }
+
+    private RuntimeDiagnostics diagnoseRuntime(
+            RuntimeContext context,
+            RuntimeSlot slot,
+            String runtimeStatus,
+            String installStatus,
+            HealthSnapshot health
+    ) {
+        List<String> recentLogs = currentRunWindow(slot.tail(260));
+        LogDiagnostics logDiagnostics = analyzeLogs(recentLogs);
+        List<String> problems = new ArrayList<>();
+        List<String> suggestions = new ArrayList<>();
+        List<String> nextActions = new ArrayList<>();
+
+        if (!context.codebaseExists()) {
+            addUnique(problems, "尚未写入 generated/nodejs 项目主干。");
+            addUnique(suggestions, "先在代码工作区生成并写入 Node.js 项目主干，再进行运行管理。");
+            addUnique(nextActions, "生成当前节点代码并写入 generated/nodejs。 ");
+        } else if (!context.packageJsonExists()) {
+            addUnique(problems, "生成项目缺少 package.json。");
+            addUnique(suggestions, "重新生成项目主干，确保根目录包含 package.json、frontend/package.json 与 backend/package.json。");
+            addUnique(nextActions, "覆盖写入生成目录，修复缺失的项目主干文件。");
+        }
+
+        if ("INSTALL_FAILED".equals(installStatus)) {
+            addUnique(problems, "依赖安装失败。 ");
+            addUnique(suggestions, "查看 npm install 日志，优先处理 package.json、网络代理、npm 源或依赖版本问题。");
+            addUnique(nextActions, "修复依赖问题后重新点击“安装依赖”。");
+        }
+
+        if ("START_FAILED".equals(runtimeStatus)) {
+            addUnique(problems, "启动命令未能成功拉起生成项目。");
+            addUnique(suggestions, "检查 npm run dev 是否存在、package.json scripts 是否完整、Node.js 是否可用。");
+            addUnique(nextActions, "查看日志中的第一条错误，再重新启动项目。");
+        }
+
+        if ("EXITED".equals(runtimeStatus)) {
+            addUnique(problems, "生成项目进程已退出。 ");
+            addUnique(suggestions, "通常由端口占用、依赖缺失、语法错误或运行时异常导致，先查看错误日志。 ");
+            addUnique(nextActions, "修复代码或端口问题后重新启动项目。");
+        }
+
+        if ("RUNNING".equals(runtimeStatus)) {
+            if ("UNHEALTHY".equals(health.healthStatus())) {
+                addUnique(problems, "生成项目进程存在，但前端和后端健康检查均不可访问。 ");
+                addUnique(suggestions, "确认生成项目是否监听 5178 / 3101，或日志中是否存在端口、脚本、编译错误。 ");
+                addUnique(nextActions, "查看运行日志，必要时停止后重启项目。");
+            } else if ("STARTING".equals(health.healthStatus())) {
+                addUnique(problems, "生成项目仍在启动中，前端或后端尚未全部可访问。 ");
+                addUnique(suggestions, "等待数秒后刷新状态；如果长时间未恢复，请查看日志。 ");
+                addUnique(nextActions, "继续观察健康状态或查看日志。");
+            }
+        }
+
+        for (String suggestion : logDiagnostics.suggestions()) {
+            addUnique(suggestions, suggestion);
+        }
+
+        String level;
+        String title;
+
+        if (!problems.isEmpty() && ("INSTALL_FAILED".equals(installStatus) || "START_FAILED".equals(runtimeStatus) || "EXITED".equals(runtimeStatus) || "UNHEALTHY".equals(health.healthStatus()) || !context.codebaseExists() || !context.packageJsonExists())) {
+            level = "ERROR";
+            title = "需要处理运行阻断项";
+        } else if (!problems.isEmpty() || !logDiagnostics.warningLines().isEmpty()) {
+            level = "WARNING";
+            title = "运行状态需要关注";
+        } else if ("RUNNING".equals(runtimeStatus) && "HEALTHY".equals(health.healthStatus())) {
+            level = "PASS";
+            title = "运行健康";
+            addUnique(nextActions, "打开当前节点预览或在平台内预览生成系统。 ");
+        } else if ("NOT_INSTALLED".equals(installStatus)) {
+            level = "INFO";
+            title = "等待安装依赖";
+            addUnique(nextActions, "点击“安装依赖”。");
+        } else {
+            level = "INFO";
+            title = "等待运行操作";
+            addUnique(nextActions, "点击“启动项目”运行生成系统。 ");
+        }
+
+        String summary = problems.isEmpty()
+                ? "当前未检测到明确阻断项。"
+                : String.join("；", problems);
+
+        return new RuntimeDiagnostics(
+                level,
+                title,
+                summary,
+                problems,
+                suggestions,
+                nextActions,
+                logDiagnostics.errorLines()
+        );
+    }
+
+    private List<String> currentRunWindow(List<String> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return List.of();
+        }
+
+        int start = 0;
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i) == null ? "" : lines.get(i);
+            if (line.contains("[runtime] 启动生成项目")
+                    || line.contains("[runtime] 检测到 5178/3101 已可访问")
+                    || line.contains("[runtime] 启动前检测到已有端口服务")
+                    || line.contains("[runtime] 启动前检测到已有 5178/3101 服务")
+                    || line.contains("[runtime] 检测到部分运行端口已可访问")
+                    || line.contains("[runtime] 检测到生成系统由外部进程提供")
+                    || line.contains("[runtime] 已停止生成项目运行进程")
+                    || line.contains("[runtime] 当前没有正在运行的生成项目")) {
+                start = i;
+            }
+        }
+
+        return new ArrayList<>(lines.subList(start, lines.size()));
+    }
+
+    private LogDiagnostics analyzeLogs(List<String> lines) {
+        List<String> errorLines = new ArrayList<>();
+        List<String> warningLines = new ArrayList<>();
+        List<String> suggestions = new ArrayList<>();
+
+        for (String line : lines) {
+            String lower = line == null ? "" : line.toLowerCase(Locale.ROOT);
+
+            boolean isError =
+                    lower.contains("npm err") ||
+                            lower.contains(" error") ||
+                            lower.contains("error:") ||
+                            lower.contains("failed") ||
+                            lower.contains("exception") ||
+                            lower.contains("cannot find module") ||
+                            lower.contains("module not found") ||
+                            lower.contains("missing script") ||
+                            lower.contains("syntaxerror") ||
+                            lower.contains("referenceerror") ||
+                            lower.contains("typeerror") ||
+                            lower.contains("eaddrinuse") ||
+                            lower.contains("enoent") ||
+                            lower.contains("not recognized") ||
+                            lower.contains("command not found");
+
+            boolean isWarning = lower.contains(" warning") || lower.contains("warn ") || lower.contains("npm warn");
+
+            if (isError) {
+                keepTail(errorLines, line, 16);
+            } else if (isWarning) {
+                keepTail(warningLines, line, 12);
+            }
+
+            if (lower.contains("eaddrinuse")) {
+                addUnique(suggestions, "检测到端口占用。请停止占用 5178 / 3101 的进程，或后续调整生成项目端口配置。 ");
+            }
+
+            if (lower.contains("missing script")) {
+                addUnique(suggestions, "检测到 package.json 缺少 npm script。请重新生成项目主干，确保存在 dev 脚本。 ");
+            }
+
+            if (lower.contains("cannot find module") || lower.contains("module not found")) {
+                addUnique(suggestions, "检测到模块缺失。请先执行“安装依赖”，或检查生成文件 import 路径是否正确。 ");
+            }
+
+            if (lower.contains("syntaxerror") || lower.contains("referenceerror") || lower.contains("typeerror")) {
+                addUnique(suggestions, "检测到代码运行时错误。请打开关联代码文件，优先修复日志指向的文件和行号。 ");
+            }
+
+            if (lower.contains("enoent")) {
+                addUnique(suggestions, "检测到文件或命令不存在。请确认 Node.js、npm、package.json 和生成目录是否完整。 ");
+            }
+
+            if (lower.contains("not recognized") || lower.contains("command not found")) {
+                addUnique(suggestions, "检测到命令不可用。请确认本机已安装 Node.js，并且 npm 可以在系统 PATH 中访问。 ");
+            }
+        }
+
+        if (!errorLines.isEmpty() && suggestions.isEmpty()) {
+            addUnique(suggestions, "日志中存在错误信息，请优先查看最近的错误行，并从首个错误开始修复。 ");
+        }
+
+        return new LogDiagnostics(errorLines, warningLines, suggestions);
+    }
+
+    private void keepTail(List<String> target, String value, int maxSize) {
+        target.add(value);
+        while (target.size() > maxSize) {
+            target.remove(0);
+        }
+    }
+
+    private void addUnique(List<String> target, String value) {
+        if (value == null || value.isBlank() || target.contains(value)) {
+            return;
+        }
+
+        target.add(value);
+    }
+
+    private String summary(RuntimeContext context, String runtimeStatus, String installStatus, HealthSnapshot health) {
+        if (!context.codebaseExists()) {
+            return "尚未写入 generated/nodejs 项目主干，请先在代码工作区生成并写入代码。";
+        }
+
+        if (!context.packageJsonExists()) {
+            return "生成目录已存在，但缺少 package.json，暂不能安装或启动。";
+        }
+
+        if ("INSTALLING".equals(installStatus)) {
+            return "正在安装依赖，请查看日志等待 npm install 完成。";
+        }
+
+        if ("RUNNING".equals(runtimeStatus)) {
+            if ("HEALTHY".equals(health.healthStatus())) {
+                return "生成项目正在运行，前端预览与后端健康检查均可访问，可以在平台内预览或打开新窗口查看。";
+            }
+            if ("STARTING".equals(health.healthStatus())) {
+                return "生成项目进程已启动，但前端或后端还在启动中，请稍等并查看日志。";
+            }
+            return "生成项目进程正在运行，但健康检查未通过，请查看日志定位端口、依赖或代码问题。";
+        }
+
+        if ("EXITED".equals(runtimeStatus)) {
+            return "生成项目进程已退出，请查看日志确认是否端口占用、依赖缺失或代码错误。";
+        }
+
+        if ("START_FAILED".equals(runtimeStatus) || "INSTALL_FAILED".equals(installStatus)) {
+            return "运行管理动作失败，请查看日志后修复生成代码或重新安装依赖。";
+        }
+
+        if ("NOT_INSTALLED".equals(installStatus)) {
+            return "项目主干已写入，但依赖尚未安装。请先点击“安装依赖”。";
+        }
+
+        return "项目主干已就绪，可以点击“启动项目”运行生成出来的 Node.js 系统。";
+    }
+
+        // A9.10.11.7.3.1_RUNTIME_TCP_PROBE_COMPILE_REPAIR
+    private HealthSnapshot checkRuntimeHealth(String runtimeStatus) {
+        if (!"RUNNING".equals(runtimeStatus)) {
+            return new HealthSnapshot(
+                    "NOT_CHECKED",
+                    false,
+                    false,
+                    null,
+                    null,
+                    "项目未运行，未检查前端预览。",
+                    "项目未运行，未检查后端健康。",
+                    null
+            );
+        }
+
+        EndpointProbe frontendProbe = probeTcpPort(
+                "127.0.0.1",
+                DEFAULT_FRONTEND_PORT,
+                "前端 TCP 127.0.0.1:" + DEFAULT_FRONTEND_PORT + " 可连接"
+        );
+        EndpointProbe backendProbe = probeEndpoint(healthUrl());
+        String healthStatus;
+
+        if (frontendProbe.reachable() && backendProbe.reachable()) {
+            healthStatus = "HEALTHY";
+        } else if (frontendProbe.connectionFailed() && backendProbe.connectionFailed()) {
+            healthStatus = "UNHEALTHY";
+        } else {
+            healthStatus = "STARTING";
+        }
+
+        return new HealthSnapshot(
+                healthStatus,
+                frontendProbe.reachable(),
+                backendProbe.reachable(),
+                frontendProbe.statusCode(),
+                backendProbe.statusCode(),
+                frontendProbe.message(),
+                backendProbe.message(),
+                LocalDateTime.now()
+        );
+    }
+
+    private EndpointProbe probeTcpPort(String host, int port, String okMessage) {
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(host, port), 450);
+            return new EndpointProbe(true, false, 200, okMessage);
+        } catch (Exception e) {
+            String message = e.getClass().getSimpleName() + ": " + (e.getMessage() == null ? "" : e.getMessage());
+            return new EndpointProbe(false, true, null, message);
+        }
+    }
+
+private EndpointProbe probeEndpoint(String url) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofMillis(HTTP_PROBE_TIMEOUT_MILLIS))
+                    .GET()
+                    .build();
+
+            HttpResponse<Void> response = healthClient.send(request, HttpResponse.BodyHandlers.discarding());
+            int statusCode = response.statusCode();
+            boolean reachable = statusCode >= 200 && statusCode < 400;
+            return new EndpointProbe(
+                    reachable,
+                    false,
+                    statusCode,
+                    reachable ? "可访问" : "HTTP " + statusCode
+            );
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new EndpointProbe(false, true, null, "健康检查被中断");
+        } catch (Exception e) {
+            return new EndpointProbe(false, true, null, e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    private ProcessBuilder processBuilder(Path workingDirectory, List<String> command) {
+        List<String> platformCommand = platformCommand(command);
+        ProcessBuilder builder = new ProcessBuilder(platformCommand);
+        builder.directory(workingDirectory.toFile());
+        builder.environment().putIfAbsent("CODEMIND_GENERATED_APP", "true");
+        builder.environment().putIfAbsent("PORT", String.valueOf(DEFAULT_BACKEND_PORT));
+        return builder;
+    }
+
+    private List<String> platformCommand(List<String> command) {
+        String joined = String.join(" ", command);
+
+        if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
+            return List.of("cmd", "/c", joined);
+        }
+
+        return List.of("bash", "-lc", joined);
+    }
+
+    private void captureProcessOutput(RuntimeSlot slot, InputStream inputStream, String channel) {
+        executorService.submit(() -> {
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, Charset.defaultCharset()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    slot.appendLog("[" + channel + "] " + line, false);
+                }
+            } catch (IOException e) {
+                slot.appendLog("[runtime] 日志读取失败：" + e.getMessage(), true);
+            }
+        });
+    }
+
+    private void waitInstallProcess(RuntimeSlot slot, Process process) {
+        executorService.submit(() -> {
+            try {
+                int exitCode = process.waitFor();
+                slot.lastInstallExitCode = exitCode;
+                slot.installStatus.set(exitCode == 0 ? "INSTALLED" : "INSTALL_FAILED");
+                slot.lastActionAt = LocalDateTime.now();
+                slot.appendLog("[runtime] npm install 结束，退出码：" + exitCode, true);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                slot.installStatus.set("INSTALL_FAILED");
+                slot.appendLog("[runtime] npm install 等待过程被中断。", true);
+            }
+        });
+    }
+
+    private void waitRuntimeProcess(RuntimeSlot slot, Process process) {
+        executorService.submit(() -> {
+            try {
+                int exitCode = process.waitFor();
+                slot.lastExitCode = exitCode;
+                HealthSnapshot externalHealth = checkRuntimeHealth("RUNNING");
+                if (externalHealth.frontendReachable() || externalHealth.backendReachable()) {
+                    adoptExternalRuntime(slot, externalHealth, "npm run dev 包装进程已退出，但检测到 5178/3101 服务仍可访问，保持 RUNNING。 ");
+                    return;
+                }
+                slot.runtimeStatus.set(exitCode == 0 ? "STOPPED" : "EXITED");
+                slot.stoppedAt = LocalDateTime.now();
+                slot.lastActionAt = LocalDateTime.now();
+                slot.appendLog("[runtime] npm run dev 进程退出，退出码：" + exitCode, true);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                HealthSnapshot externalHealth = checkRuntimeHealth("RUNNING");
+                if (externalHealth.frontendReachable() || externalHealth.backendReachable()) {
+                    adoptExternalRuntime(slot, externalHealth, "npm run dev 等待过程被中断，但检测到端口服务仍可访问，保持 RUNNING。 ");
+                    return;
+                }
+                slot.runtimeStatus.set("EXITED");
+                slot.appendLog("[runtime] npm run dev 等待过程被中断。", true);
+            }
+        });
+    }
+
+    private void stopProcessTree(Process process) {
+        if (process == null) {
+            return;
+        }
+
+        ProcessHandle handle = process.toHandle();
+        handle.descendants()
+                .sorted(Comparator.comparingLong(ProcessHandle::pid).reversed())
+                .forEach(child -> {
+                    try {
+                        child.destroy();
+                        if (child.isAlive()) {
+                            child.destroyForcibly();
+                        }
+                    } catch (Exception ignored) {
+                    }
+                });
+
+        process.destroy();
+
+        if (process.isAlive()) {
+            process.destroyForcibly();
+        }
+    }
+
+    private Integer pid(Process process) {
+        if (process == null) {
+            return null;
+        }
+
+        try {
+            return Math.toIntExact(process.pid());
+        } catch (ArithmeticException e) {
+            return null;
+        }
+    }
+
+    private String resolveTargetStack(String targetStack) {
+        try {
+            return DevelopmentTargetStack.resolve(targetStack).stackCode();
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
+        }
+    }
+
+    private Path resolveMaterializationWorkspaceRoot() {
+        String configured = System.getProperty("codemind.development.workspace-root");
+
+        if (configured == null || configured.isBlank()) {
+            configured = System.getenv("CODEMIND_WORKSPACE_ROOT");
+        }
+
+        if (configured != null && !configured.isBlank()) {
+            return Path.of(configured).toAbsolutePath().normalize();
+        }
+
+        Path current = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
+
+        if (
+                current.getFileName() != null &&
+                        "codemind-server".equalsIgnoreCase(current.getFileName().toString()) &&
+                        current.getParent() != null
+        ) {
+            return current.getParent().toAbsolutePath().normalize();
+        }
+
+        return current;
+    }
+
+    private Path resolveSafeGeneratedPath(Path workspaceRoot, String filePath) {
+        return generatedPathService.resolvePlatformGeneratedPath(filePath);
+    }
+
+    private String buildCodebaseRoot(String projectCode) {
+        return generatedPathService.buildPlatformCodebaseRoot(projectCode, "NODEJS_FULLSTACK");
+    }
+
+    private String toPathSegment(String primary, String fallback) {
+        String source = primary == null || primary.isBlank() ? fallback : primary;
+        String normalized = source == null ? "node" : source.trim()
+                .replaceAll("([a-z])([A-Z])", "$1-$2")
+                .replaceAll("[^\u4e00-\u9fa5a-zA-Z0-9]+", "-")
+                .replaceAll("^-+|-+$", "")
+                .toLowerCase(Locale.ROOT);
+
+        return normalized.isBlank() ? "node" : normalized;
+    }
+
+    private String frontendUrl() {
+        return "http://127.0.0.1:" + DEFAULT_FRONTEND_PORT;
+    }
+
+    private String backendUrl() {
+        return "http://127.0.0.1:" + DEFAULT_BACKEND_PORT;
+    }
+
+    private String healthUrl() {
+        return backendUrl() + "/api/health";
+    }
+
+    private String previewUrl() {
+        return frontendUrl();
+    }
+
+    private record RuntimeDiagnostics(
+            String level,
+            String title,
+            String summary,
+            List<String> detectedProblems,
+            List<String> suggestions,
+            List<String> nextActions,
+            List<String> recentErrorLines
+    ) {
+    }
+
+    private record LogDiagnostics(
+            List<String> errorLines,
+            List<String> warningLines,
+            List<String> suggestions
+    ) {
+    }
+
+    private record RuntimeState(
+            String runtimeStatus,
+            String installStatus,
+            HealthSnapshot health
+    ) {
+    }
+
+    private record EndpointProbe(
+            boolean reachable,
+            boolean connectionFailed,
+            Integer statusCode,
+            String message
+    ) {
+    }
+
+    private record HealthSnapshot(
+            String healthStatus,
+            boolean frontendReachable,
+            boolean backendReachable,
+            Integer frontendStatusCode,
+            Integer backendHealthStatusCode,
+            String frontendHealthMessage,
+            String backendHealthMessage,
+            LocalDateTime checkedAt
+    ) {
+    }
+
+    private record RuntimeContext(
+            UUID workspaceId,
+            String projectCode,
+            UUID moduleId,
+            String targetStack,
+            DevelopmentHandoffReadinessResponse readiness,
+            DevelopmentCodebaseRegistryResponse codebaseRegistry,
+            Path workspaceRoot,
+            String codebaseRoot,
+            Path absoluteCodebaseRoot,
+            boolean codebaseExists,
+            boolean packageJsonExists,
+            boolean dependencyInstalled
+    ) {
+    }
+
+    private static final class RuntimeSlot {
+        private final ArrayDeque<String> logs = new ArrayDeque<>();
+        private final AtomicReference<String> runtimeStatus = new AtomicReference<>("STOPPED");
+        private final AtomicReference<String> installStatus = new AtomicReference<>("NOT_INSTALLED");
+        private Process runtimeProcess;
+        private Process installProcess;
+        private Integer lastExitCode;
+        private Integer lastInstallExitCode;
+        private LocalDateTime startedAt;
+        private LocalDateTime stoppedAt;
+        private LocalDateTime lastActionAt;
+
+        synchronized void appendLog(String line, boolean systemLine) {
+            String prefix = LocalDateTime.now().toString().replace('T', ' ').substring(0, 19);
+            logs.addLast(prefix + " " + (systemLine ? "" : "") + line);
+
+            while (logs.size() > MAX_LOG_LINES) {
+                logs.removeFirst();
+            }
+        }
+
+        synchronized List<String> tail(int limit) {
+            List<String> result = new ArrayList<>();
+            int skip = Math.max(0, logs.size() - limit);
+            int index = 0;
+
+            for (String line : logs) {
+                if (index++ >= skip) {
+                    result.add(line);
+                }
+            }
+
+            return result;
+        }
+
+        synchronized int size() {
+            return logs.size();
+        }
+
+        synchronized void refreshProcessState() {
+            if (installProcess != null && !installProcess.isAlive()) {
+                try {
+                    int code = installProcess.exitValue();
+                    lastInstallExitCode = code;
+                    installStatus.compareAndSet("INSTALLING", code == 0 ? "INSTALLED" : "INSTALL_FAILED");
+                } catch (IllegalThreadStateException ignored) {
+                }
+            }
+
+            if (runtimeProcess != null && !runtimeProcess.isAlive()) {
+                try {
+                    int code = runtimeProcess.exitValue();
+                    lastExitCode = code;
+                    if ("RUNNING".equals(runtimeStatus.get()) && code != 0) {
+                        runtimeStatus.set("EXITED");
+                    }
+                    if (stoppedAt == null) {
+                        stoppedAt = LocalDateTime.now();
+                    }
+                } catch (IllegalThreadStateException ignored) {
+                }
+            }
+        }
+    }
+}

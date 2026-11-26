@@ -1,0 +1,569 @@
+{
+  "schemaVersion" : "1.1",
+  "projectId" : "c53e6450-d3ba-4d0c-86b0-f45a0689ca33",
+  "projectCode" : "p009",
+  "targetStack" : "NODEJS_FULLSTACK",
+  "root" : "generated/nodejs/p009/app",
+  "runtimeUnit" : "PROJECT_CODEBASE",
+  "generationUnit" : "MODULE_TREE_NODE_CONTRIBUTION",
+  "previewUnit" : "PAGE_OR_FEATURE_SCENARIO",
+  "codeTraceGraphEnabled" : true,
+  "updatedAt" : "2026-08-10T10:29:49.288819300",
+  "nodes" : [ {
+    "nodeId" : "4c8bc897-88d0-4753-83fc-eac317772b4c",
+    "nodeType" : "MODULE",
+    "nodeName" : "入库单管理",
+    "nodeKey" : "inbound_order_management",
+    "moduleType" : "MODULE",
+    "previewRoute" : "/inbound-order-management",
+    "sourceArtifactTypes" : [ "MODULE_PRD", "BUSINESS_FLOW", "PAGE_MAP", "DATA_MODEL", "API_CONTRACT", "TEST_SPEC", "DEV_HANDOFF_PACKAGE", "PAGE_SPEC", "UI_CONTRACT", "UI_CONTRACT_SNAPSHOT", "THEME_PROFILE_SNAPSHOT" ],
+    "ownedFiles" : [ "generated/nodejs/p009/app/frontend/src/modules/generated/pages/GeneratedHomePage.vue", "generated/nodejs/p009/app/backend/src/modules/generated/generatedResources.js", "generated/nodejs/p009/app/backend/src/modules/generated/generated-resource.routes.js", "generated/nodejs/p009/app/backend/src/modules/generated/generated-resource.service.js", "generated/nodejs/p009/app/backend/src/modules/generated/generated-resource.repository.js", "generated/nodejs/p009/app/backend/src/modules/generated/generated-resource.validation.js", "generated/nodejs/p009/app/frontend/src/modules/inbound-order-management/index.js", "generated/nodejs/p009/app/frontend/src/modules/inbound-order-management/routes.js", "generated/nodejs/p009/app/backend/src/modules/inbound-order-management/inbound-order-management.routes.js", "generated/nodejs/p009/app/frontend/src/modules/generated/pages/InboundOrderCreatePage.vue", "generated/nodejs/p009/app/frontend/src/modules/generated/api/InboundOrderCreatePageApi.js", "generated/nodejs/p009/app/frontend/src/modules/generated/mock/InboundOrderCreatePageMockData.js", "generated/nodejs/p009/app/frontend/src/modules/generated/pages/InboundOrderDetailPage.vue", "generated/nodejs/p009/app/frontend/src/modules/generated/pages/InboundOrderQuantityEditPage.vue", "generated/nodejs/p009/app/frontend/src/modules/generated/types/InboundOrderCreatePageUiContractTypes.js", "generated/nodejs/p009/app/frontend/src/modules/generated/pages/InboundOrderApprovalPage.vue", "generated/nodejs/p009/app/frontend/src/modules/generated/pages/InboundOrderListPage.vue", "generated/nodejs/p009/app/frontend/src/modules/generated/api/InboundOrderListPageApi.js", "generated/nodejs/p009/app/frontend/src/modules/generated/mock/InboundOrderListPageMockData.js", "generated/nodejs/p009/app/frontend/src/modules/generated/types/InboundOrderListPageUiContractTypes.js" ],
+    "contributedFiles" : [ "generated/nodejs/p009/app/frontend/index.html", "generated/nodejs/p009/app/frontend/src/main.js", "generated/nodejs/p009/app/frontend/src/App.vue", "generated/nodejs/p009/app/frontend/src/router/routes.js", "generated/nodejs/p009/app/backend/server.js", "generated/nodejs/p009/app/backend/src/app.js", "generated/nodejs/p009/app/backend/src/routes/index.js", "generated/nodejs/p009/app/tests/smoke.spec.js" ],
+    "sharedFiles" : [ "generated/nodejs/p009/app/package.json", "generated/nodejs/p009/app/README.md", "generated/nodejs/p009/app/frontend/package.json", "generated/nodejs/p009/app/frontend/vite.config.js", "generated/nodejs/p009/app/frontend/src/shared/styles/app.css", "generated/nodejs/p009/app/backend/package.json", "generated/nodejs/p009/app/backend/src/shared/response.js", "generated/nodejs/p009/app/backend/src/db/localStore.js", "generated/nodejs/p009/app/backend/src/db/seedData.js", "generated/nodejs/p009/app/database/schema.json", "generated/nodejs/p009/app/database/seed.json", "generated/nodejs/p009/app/frontend/src/shared/ui-runtime/UiContractPreviewRuntime.vue", "generated/nodejs/p009/app/frontend/src/shared/ui-runtime/UiContractRuntimeNode.vue", "generated/nodejs/p009/app/frontend/src/shared/ui-runtime/ui-contract-runtime/UiContractPatternRenderer.vue", "generated/nodejs/p009/app/frontend/src/shared/ui-runtime/ui-contract-runtime/uiContractTheme.ts", "generated/nodejs/p009/app/frontend/src/shared/ui-runtime/ui-contract-runtime/themeProfileBridge.ts", "generated/nodejs/p009/app/frontend/src/shared/types/uiContract.ts", "generated/nodejs/p009/app/frontend/src/shared/types/themeProfile.ts" ],
+    "updatedAt" : "2026-08-10T10:29:49.260817900"
+  }, {
+    "nodeId" : "51d24519-5f5c-4518-8a12-0974d7bca9eb",
+    "nodeType" : "PAGE",
+    "nodeName" : "入库单创建页",
+    "nodeKey" : "inbound_order_create_page",
+    "moduleType" : "PAGE",
+    "previewRoute" : "/inbound-order-create-page",
+    "sourceArtifactTypes" : [ "PAGE_SPEC", "UI_CONTRACT", "MODULE_PRD", "BUSINESS_FLOW", "PAGE_MAP", "DATA_MODEL", "API_CONTRACT", "TEST_SPEC", "DEV_HANDOFF_PACKAGE" ],
+    "ownedFiles" : [ "generated/nodejs/p009/app/frontend/src/modules/generated/pages/GeneratedHomePage.vue", "generated/nodejs/p009/app/frontend/src/modules/inbound-order-create-page/pages/InboundOrderCreatePagePage.vue", "generated/nodejs/p009/app/frontend/src/modules/generated/pages/InboundOrderCreatePage.vue" ],
+    "contributedFiles" : [ "generated/nodejs/p009/app/frontend/index.html", "generated/nodejs/p009/app/frontend/src/main.js", "generated/nodejs/p009/app/frontend/src/App.vue", "generated/nodejs/p009/app/frontend/src/router/routes.js", "generated/nodejs/p009/app/backend/server.js", "generated/nodejs/p009/app/backend/src/app.js", "generated/nodejs/p009/app/backend/src/routes/index.js", "generated/nodejs/p009/app/tests/smoke.spec.js", "generated/nodejs/p009/app/backend/src/modules/generated/generatedResources.js", "generated/nodejs/p009/app/backend/src/modules/generated/generated-resource.routes.js", "generated/nodejs/p009/app/backend/src/modules/generated/generated-resource.service.js", "generated/nodejs/p009/app/backend/src/modules/generated/generated-resource.repository.js", "generated/nodejs/p009/app/backend/src/modules/generated/generated-resource.validation.js", "generated/nodejs/p009/app/frontend/src/modules/inbound-order-create-page/api/inbound-order-create-pageApi.js", "generated/nodejs/p009/app/backend/src/modules/inbound-order-create-page/inbound-order-create-page.routes.js", "generated/nodejs/p009/app/backend/src/modules/inbound-order-create-page/inbound-order-create-page.controller.js", "generated/nodejs/p009/app/backend/src/modules/inbound-order-create-page/inbound-order-create-page.service.js", "generated/nodejs/p009/app/backend/src/modules/inbound-order-create-page/inbound-order-create-page.repository.js", "generated/nodejs/p009/app/tests/modules/inbound-order-create-page/inbound-order-create-page.spec.js" ],
+    "sharedFiles" : [ "generated/nodejs/p009/app/package.json", "generated/nodejs/p009/app/README.md", "generated/nodejs/p009/app/frontend/package.json", "generated/nodejs/p009/app/frontend/vite.config.js", "generated/nodejs/p009/app/frontend/src/shared/styles/app.css", "generated/nodejs/p009/app/backend/package.json", "generated/nodejs/p009/app/backend/src/shared/response.js", "generated/nodejs/p009/app/backend/src/db/localStore.js", "generated/nodejs/p009/app/backend/src/db/seedData.js", "generated/nodejs/p009/app/database/schema.json", "generated/nodejs/p009/app/database/seed.json" ],
+    "updatedAt" : "2026-08-07T12:06:49.284832400"
+  } ],
+  "fileHashStrategy" : "SHA256_AFTER_MATERIALIZE",
+  "generatedFiles" : [ {
+    "path" : "generated/nodejs/p009/app/package.json",
+    "relativePath" : "package.json",
+    "sha256" : "defe1e06ab1101d5e65dbc07116060b665bbbb42fa92c3b03c64541e47cdad8c",
+    "fileType" : "CONFIG",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "json",
+    "bytes" : 566,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.263817800"
+  }, {
+    "path" : "generated/nodejs/p009/app/README.md",
+    "relativePath" : "README.md",
+    "sha256" : "a3dbdfdeb19d3f83696a2dbcb1df62513218ff436b95124a23d45e14e91af30b",
+    "fileType" : "DOC",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "markdown",
+    "bytes" : 648,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.264820400"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/package.json",
+    "relativePath" : "frontend/package.json",
+    "sha256" : "0f90464f1b10fbc15d75a4bb68729de17ecac9943f796577ba56d9ee4fa7c5f9",
+    "fileType" : "CONFIG",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "json",
+    "bytes" : 392,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.264820400"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/index.html",
+    "relativePath" : "frontend/index.html",
+    "sha256" : "2b5ae698bb10267eb1d45483240b889ad9ca225973d48350b3bc8aac198bbf3d",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_KEEP",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "html",
+    "bytes" : 313,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.265819900"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/vite.config.js",
+    "relativePath" : "frontend/vite.config.js",
+    "sha256" : "e5de0691b4f56d7f8b40ba4280a5bc2b9c2eca62ae7c78b421b71c38c5f82de6",
+    "fileType" : "CONFIG",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "javascript",
+    "bytes" : 263,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.265819900"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/main.js",
+    "relativePath" : "frontend/src/main.js",
+    "sha256" : "cc07f0fcf58e125feb9879c0c592e9b8809a239c003a6ece0549c2c6cabb7223",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "javascript",
+    "bytes" : 176,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.265819900"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/App.vue",
+    "relativePath" : "frontend/src/App.vue",
+    "sha256" : "19ef9bda2e64be39ac5dc4dc6a29329c4945f44cf118a5436c61945a5f0327c9",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "vue",
+    "bytes" : 8111,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.266817600"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/router/routes.js",
+    "relativePath" : "frontend/src/router/routes.js",
+    "sha256" : "8ce6703ef0db50cec8b60d0ba7119e4b63cf17a0d42bb7e3009613b2a6bda934",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "javascript",
+    "bytes" : 2651,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.266817600"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/modules/generated/pages/GeneratedHomePage.vue",
+    "relativePath" : "frontend/src/modules/generated/pages/GeneratedHomePage.vue",
+    "sha256" : "a4d69902493ab453323ed995dd5938ced54ba9a661fc36a4086824e7570c678c",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_KEEP",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "vue",
+    "bytes" : 1151,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.267817800"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/shared/styles/app.css",
+    "relativePath" : "frontend/src/shared/styles/app.css",
+    "sha256" : "148770f5fd19f7d37f8cbcb868ee0d57bbd1b3d0f04c9d152475f6243adb4db2",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "css",
+    "bytes" : 3987,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.267817800"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/package.json",
+    "relativePath" : "backend/package.json",
+    "sha256" : "e29c4003a83b29397ed3502e14e19a6f430385ef1b4be5761f1643b949c94319",
+    "fileType" : "CONFIG",
+    "action" : "CREATE_OR_KEEP",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "json",
+    "bytes" : 259,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.268818500"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/server.js",
+    "relativePath" : "backend/server.js",
+    "sha256" : "a4b64c5d2535624ed1077c83b077067f0b8702a2db0df270e56bbc4d32caebf9",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_KEEP",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "javascript",
+    "bytes" : 203,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.269818800"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/src/app.js",
+    "relativePath" : "backend/src/app.js",
+    "sha256" : "1c206f7d5e0a5aa0761618372890cb3f2b5f8b40f7247e91f84683708d3b7237",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "javascript",
+    "bytes" : 424,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.271818400"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/src/routes/index.js",
+    "relativePath" : "backend/src/routes/index.js",
+    "sha256" : "777cc55079804321d03bfe540e7ea8e777f861ef8f68db33f2e5e739a67ef11d",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "javascript",
+    "bytes" : 7573,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.273819"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/src/shared/response.js",
+    "relativePath" : "backend/src/shared/response.js",
+    "sha256" : "9b277884b72af6a55b4e6d7069dfd657a65209961196f35a882756a21251f8f2",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "javascript",
+    "bytes" : 2909,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.274817500"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/src/db/localStore.js",
+    "relativePath" : "backend/src/db/localStore.js",
+    "sha256" : "f8e4cd45828bb378fd7ad60ab1949d0a1268d91b79c0aa0e78a6a21de7dcb4ff",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_KEEP",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "javascript",
+    "bytes" : 280,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.275819400"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/src/db/seedData.js",
+    "relativePath" : "backend/src/db/seedData.js",
+    "sha256" : "ed9a4880aa19712e8ddd63aa328fb812a44883ff8192f8bd588dedc78e75bd03",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "javascript",
+    "bytes" : 641,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.275819400"
+  }, {
+    "path" : "generated/nodejs/p009/app/database/schema.json",
+    "relativePath" : "database/schema.json",
+    "sha256" : "5108def5c6ddb79ccfc3a4a28ee0eb2f858b25e55740074f3d1dd7759300db6e",
+    "fileType" : "DATABASE",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "json",
+    "bytes" : 4615,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.276817700"
+  }, {
+    "path" : "generated/nodejs/p009/app/database/seed.json",
+    "relativePath" : "database/seed.json",
+    "sha256" : "bb11a1628bd077a50c6778bc2a95655b6417fd23a0e1f9a3cb60c41e21db6be9",
+    "fileType" : "DATABASE",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "json",
+    "bytes" : 3589,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.277817800"
+  }, {
+    "path" : "generated/nodejs/p009/app/tests/smoke.spec.js",
+    "relativePath" : "tests/smoke.spec.js",
+    "sha256" : "462ff756dd8cdb75083e6290a6fbdb5c22dfcee219f6b5fdb575cdea7964f6c6",
+    "fileType" : "TEST",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "javascript",
+    "bytes" : 2591,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.277817800"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/modules/inbound-order-management/index.js",
+    "relativePath" : "frontend/src/modules/inbound-order-management/index.js",
+    "sha256" : "46c648b7f34cf8cdb24be0cbccc56d6c26909d1cb1c5e9ea9cce2b1099f126b2",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "MODULE_PRD + BUSINESS_FLOW",
+    "language" : "javascript",
+    "bytes" : 299,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.281790600"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/modules/inbound-order-management/routes.js",
+    "relativePath" : "frontend/src/modules/inbound-order-management/routes.js",
+    "sha256" : "3f02a37c51e91b36f66966c3490008bb3b5531c719b01379d92e07f17b566c79",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "MODULE_PRD",
+    "language" : "javascript",
+    "bytes" : 32,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.281790600"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/src/modules/inbound-order-management/inbound-order-management.routes.js",
+    "relativePath" : "backend/src/modules/inbound-order-management/inbound-order-management.routes.js",
+    "sha256" : "12b57a61a4e7783aa259c19ca7966ba9d74719aa0437ab8cea3d42aa68e2f372",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "API_CONTRACT",
+    "language" : "javascript",
+    "bytes" : 66,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.282817600"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/src/modules/generated/generatedResources.js",
+    "relativePath" : "backend/src/modules/generated/generatedResources.js",
+    "sha256" : "867750acedc2e8567e491e492e84a355149300ef8e82e628de2a01dcbfc18a5e",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "javascript",
+    "bytes" : 98655,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.279817700"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/src/modules/generated/generated-resource.routes.js",
+    "relativePath" : "backend/src/modules/generated/generated-resource.routes.js",
+    "sha256" : "89fdb34cde2a36012d372dda99fe456adebeca630feac4bb85bf3001b7de466d",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "javascript",
+    "bytes" : 1495,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.279817700"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/src/modules/generated/generated-resource.service.js",
+    "relativePath" : "backend/src/modules/generated/generated-resource.service.js",
+    "sha256" : "283baceb9309273204bd965b19665fc062060463350263ceb57cda5a5a119d87",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "javascript",
+    "bytes" : 2647,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.280818"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/src/modules/generated/generated-resource.repository.js",
+    "relativePath" : "backend/src/modules/generated/generated-resource.repository.js",
+    "sha256" : "8d88e69d0dc00d830ca682c3d1975082def54afeadcb5d632f717e85eaf98e56",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "javascript",
+    "bytes" : 419,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.280818"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/src/modules/generated/generated-resource.validation.js",
+    "relativePath" : "backend/src/modules/generated/generated-resource.validation.js",
+    "sha256" : "877ee4490587dca33f16e7c299b9f49469f08963b58930036bc33f3fd9c04052",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR",
+    "language" : "javascript",
+    "bytes" : 369,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.281790600"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/modules/generated/pages/InboundOrderListPage.vue",
+    "relativePath" : "frontend/src/modules/generated/pages/InboundOrderListPage.vue",
+    "sha256" : "7e52b05a888d8c195bbe925181a573b620675c1cdf2a473bc80e9c2a7610f688",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR+PAGE_UI_CONTRACT+NODEJS_RUNTIME_BINDING",
+    "language" : "vue",
+    "bytes" : 34767,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.286815700"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/modules/generated/pages/InboundOrderCreatePage.vue",
+    "relativePath" : "frontend/src/modules/generated/pages/InboundOrderCreatePage.vue",
+    "sha256" : "65b89e2acb1ee555ea8cb56417d971a79f2e5fd116a8d1924579db5755a92189",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR+PAGE_UI_CONTRACT+NODEJS_RUNTIME_BINDING",
+    "language" : "vue",
+    "bytes" : 49289,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.283802800"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/modules/generated/pages/InboundOrderApprovalPage.vue",
+    "relativePath" : "frontend/src/modules/generated/pages/InboundOrderApprovalPage.vue",
+    "sha256" : "2ac17d311b34e6f716febbce515620836a269593446df6fd15b0c502f7d59d36",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "MODULE_PROTOTYPE_PLACEHOLDER",
+    "language" : "vue",
+    "bytes" : 449,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.286815700"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/modules/generated/pages/InboundOrderQuantityEditPage.vue",
+    "relativePath" : "frontend/src/modules/generated/pages/InboundOrderQuantityEditPage.vue",
+    "sha256" : "c90861b0b07ab432600c966eaa59efb235544f1d830e0f5676a223bb1969e219",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "MODULE_PROTOTYPE_PLACEHOLDER",
+    "language" : "vue",
+    "bytes" : 455,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.285790600"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/modules/generated/pages/InboundOrderDetailPage.vue",
+    "relativePath" : "frontend/src/modules/generated/pages/InboundOrderDetailPage.vue",
+    "sha256" : "e7541e2054c1c45fdcae7c1e6432f8651de35299b89ba5ab41686a78f05b7acf",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "MODULE_PROTOTYPE_PLACEHOLDER",
+    "language" : "vue",
+    "bytes" : 449,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.284817500"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/modules/inbound-order-create-page/pages/InboundOrderCreatePagePage.vue",
+    "relativePath" : "frontend/src/modules/inbound-order-create-page/pages/InboundOrderCreatePagePage.vue",
+    "sha256" : "177395846c1cffebc04135f0c16d2baf06b9e0948a639300ddc6eb43087da43b",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "UI_CONTRACT + PAGE_SPEC",
+    "language" : "vue",
+    "bytes" : 1481,
+    "lastGeneratedAt" : "2026-08-07T12:06:50.649906400"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/modules/inbound-order-create-page/api/inbound-order-create-pageApi.js",
+    "relativePath" : "frontend/src/modules/inbound-order-create-page/api/inbound-order-create-pageApi.js",
+    "sha256" : "a7bba71e9de4467366911c0c260aeb294e74a65a23b203c3103d1dafa18d86c1",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "API_CONTRACT",
+    "language" : "javascript",
+    "bytes" : 649,
+    "lastGeneratedAt" : "2026-08-07T12:06:50.649906400"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/src/modules/inbound-order-create-page/inbound-order-create-page.routes.js",
+    "relativePath" : "backend/src/modules/inbound-order-create-page/inbound-order-create-page.routes.js",
+    "sha256" : "9ce9a000bb6fd47733e3b044f686e4e886d1f6aea6aef947f3384f707537eb21",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "API_CONTRACT",
+    "language" : "javascript",
+    "bytes" : 493,
+    "lastGeneratedAt" : "2026-08-07T12:06:50.649906400"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/src/modules/inbound-order-create-page/inbound-order-create-page.controller.js",
+    "relativePath" : "backend/src/modules/inbound-order-create-page/inbound-order-create-page.controller.js",
+    "sha256" : "7ad3116a56efe22caad93ba1d688992fd1e470ac76bb3fd9be4ff8b1e78b2739",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "API_CONTRACT + PAGE_SPEC",
+    "language" : "javascript",
+    "bytes" : 752,
+    "lastGeneratedAt" : "2026-08-07T12:06:50.650906500"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/src/modules/inbound-order-create-page/inbound-order-create-page.service.js",
+    "relativePath" : "backend/src/modules/inbound-order-create-page/inbound-order-create-page.service.js",
+    "sha256" : "e0b4cf5826112a099f11db3a5caa887db1dff13d5d7bd8e2fd9b570c0cbc2d09",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "MODULE_PRD + BUSINESS_FLOW + TEST_SPEC",
+    "language" : "javascript",
+    "bytes" : 785,
+    "lastGeneratedAt" : "2026-08-07T12:06:50.650906500"
+  }, {
+    "path" : "generated/nodejs/p009/app/backend/src/modules/inbound-order-create-page/inbound-order-create-page.repository.js",
+    "relativePath" : "backend/src/modules/inbound-order-create-page/inbound-order-create-page.repository.js",
+    "sha256" : "85d4b433e1bebd929dd6725617a43328607740973f936e148884aef206121b2a",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "DATA_MODEL",
+    "language" : "javascript",
+    "bytes" : 545,
+    "lastGeneratedAt" : "2026-08-07T12:06:50.651907300"
+  }, {
+    "path" : "generated/nodejs/p009/app/tests/modules/inbound-order-create-page/inbound-order-create-page.spec.js",
+    "relativePath" : "tests/modules/inbound-order-create-page/inbound-order-create-page.spec.js",
+    "sha256" : "0cbaa01f53ecd6ffc8da404077eeeb2c4b793e64b97cbbfbad12668fd066e9cb",
+    "fileType" : "TEST",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "TEST_SPEC",
+    "language" : "javascript",
+    "bytes" : 654,
+    "lastGeneratedAt" : "2026-08-07T12:06:50.651907300"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/modules/generated/api/InboundOrderCreatePageApi.js",
+    "relativePath" : "frontend/src/modules/generated/api/InboundOrderCreatePageApi.js",
+    "sha256" : "3948221bf5ff10ec10ad3bb7f1dfa3fb96c1b4b5530c6880be7b9008b3602229",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR+PAGE_UI_CONTRACT+NODEJS_RUNTIME_BINDING",
+    "language" : "javascript",
+    "bytes" : 3330,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.283802800"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/modules/generated/mock/InboundOrderCreatePageMockData.js",
+    "relativePath" : "frontend/src/modules/generated/mock/InboundOrderCreatePageMockData.js",
+    "sha256" : "5055a87f25e8a54320acb3b3b6eb2efd0cf5e306acc00f20f8b4f68a11066c3b",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR+PAGE_UI_CONTRACT+NODEJS_RUNTIME_BINDING",
+    "language" : "javascript",
+    "bytes" : 846,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.284817500"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/modules/generated/types/InboundOrderCreatePageUiContractTypes.js",
+    "relativePath" : "frontend/src/modules/generated/types/InboundOrderCreatePageUiContractTypes.js",
+    "sha256" : "7af6d045992b00c8eeab8efc1e42397299f76a938021223129c7e2c97dfc0eea",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR+PAGE_UI_CONTRACT+NODEJS_RUNTIME_BINDING",
+    "language" : "javascript",
+    "bytes" : 3911,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.285790600"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/modules/generated/api/InboundOrderListPageApi.js",
+    "relativePath" : "frontend/src/modules/generated/api/InboundOrderListPageApi.js",
+    "sha256" : "68f3a2ca23bd734dea72241fdf8b66bc67a5b997bb305f2412282102a1345888",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR+PAGE_UI_CONTRACT+NODEJS_RUNTIME_BINDING",
+    "language" : "javascript",
+    "bytes" : 1951,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.287819600"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/modules/generated/mock/InboundOrderListPageMockData.js",
+    "relativePath" : "frontend/src/modules/generated/mock/InboundOrderListPageMockData.js",
+    "sha256" : "ff4ec8141e66cd90c2294d609f0e9a134cd22ca4d92a3eb403d8872a372e90fa",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR+PAGE_UI_CONTRACT+NODEJS_RUNTIME_BINDING",
+    "language" : "javascript",
+    "bytes" : 739,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.287819600"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/modules/generated/types/InboundOrderListPageUiContractTypes.js",
+    "relativePath" : "frontend/src/modules/generated/types/InboundOrderListPageUiContractTypes.js",
+    "sha256" : "6ab614dd1d85e4af006c53f941c4a26deb818427324d5f625865699e6e15c1bb",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "NODEJS_FULLSTACK_ORCHESTRATOR+PAGE_UI_CONTRACT+NODEJS_RUNTIME_BINDING",
+    "language" : "javascript",
+    "bytes" : 2254,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.288819300"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/shared/ui-runtime/UiContractPreviewRuntime.vue",
+    "relativePath" : "frontend/src/shared/ui-runtime/UiContractPreviewRuntime.vue",
+    "sha256" : "acc5c089bfcbc5eea5698e93918f079cc4da836a5e50d9e9c006545dbb2a4b57",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "SHARED_UI_CONTRACT_RUNTIME",
+    "language" : "vue",
+    "bytes" : 70972,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.269818800"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/shared/ui-runtime/UiContractRuntimeNode.vue",
+    "relativePath" : "frontend/src/shared/ui-runtime/UiContractRuntimeNode.vue",
+    "sha256" : "090fc2da15ce8fc08d5a89cbd500032ff7d82e3d693f89d8fda908779ac2ebac",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "SHARED_UI_CONTRACT_RUNTIME",
+    "language" : "vue",
+    "bytes" : 76136,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.271818400"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/shared/ui-runtime/ui-contract-runtime/UiContractPatternRenderer.vue",
+    "relativePath" : "frontend/src/shared/ui-runtime/ui-contract-runtime/UiContractPatternRenderer.vue",
+    "sha256" : "3bd16657bc684e306db4b9f2dcc6e88e104dd594cd3a8c9528f8be9cda8f1316",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "SHARED_UI_CONTRACT_RUNTIME",
+    "language" : "vue",
+    "bytes" : 47709,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.272819200"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/shared/ui-runtime/ui-contract-runtime/uiContractTheme.ts",
+    "relativePath" : "frontend/src/shared/ui-runtime/ui-contract-runtime/uiContractTheme.ts",
+    "sha256" : "66ef82da160a0597a84050e36d35c3f5b16b8977dd3427e242aa3fbc366901e5",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "SHARED_UI_CONTRACT_RUNTIME",
+    "language" : "typescript",
+    "bytes" : 18594,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.273819"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/shared/ui-runtime/ui-contract-runtime/themeProfileBridge.ts",
+    "relativePath" : "frontend/src/shared/ui-runtime/ui-contract-runtime/themeProfileBridge.ts",
+    "sha256" : "85d0654afc3eddc3bf9b74192d7ecc1d6a4473fe8c1b180ec999f8d924c7c46e",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "SHARED_UI_CONTRACT_RUNTIME",
+    "language" : "typescript",
+    "bytes" : 1991,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.274817500"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/shared/types/uiContract.ts",
+    "relativePath" : "frontend/src/shared/types/uiContract.ts",
+    "sha256" : "e902f6d55b65805bf4f2b42ae01e50124ba8962abc86cbb159009df0e3e84fc2",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "SHARED_UI_CONTRACT_RUNTIME",
+    "language" : "typescript",
+    "bytes" : 7308,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.275819400"
+  }, {
+    "path" : "generated/nodejs/p009/app/frontend/src/shared/types/themeProfile.ts",
+    "relativePath" : "frontend/src/shared/types/themeProfile.ts",
+    "sha256" : "65557fff1a261ab7e37b83db6f23a27b41b2769fcfa6d3986aaf4b86310c8e50",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "SHARED_UI_CONTRACT_RUNTIME",
+    "language" : "typescript",
+    "bytes" : 4655,
+    "lastGeneratedAt" : "2026-08-10T10:29:49.276817700"
+  } ]
+}

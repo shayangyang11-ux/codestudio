@@ -1,9 +1,15 @@
 package com.codemind.platform.assistant;
 
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 
@@ -97,4 +103,44 @@ public class WorkspaceProjectAssistantController {
             );
         }
     }
+
+    @GetMapping("/attachments/{attachmentId}/content")
+    public ResponseEntity<Resource> downloadAttachmentContent(
+            @PathVariable UUID workspaceId,
+            @PathVariable String projectCode,
+            @PathVariable UUID attachmentId
+    ) {
+        AssistantAttachmentService.AttachmentContent content =
+                assistantAttachmentService.loadAttachmentContent(
+                        workspaceId,
+                        projectCode,
+                        attachmentId
+                );
+
+        Resource resource = new FileSystemResource(content.getPath());
+
+        MediaType mediaType;
+        try {
+            mediaType = MediaType.parseMediaType(content.getMimeType());
+        } catch (Exception ignored) {
+            mediaType = MediaType.APPLICATION_OCTET_STREAM;
+        }
+
+        return ResponseEntity
+                .ok()
+                .contentType(mediaType)
+                .header(
+                        HttpHeaders.CONTENT_DISPOSITION,
+                        ContentDisposition
+                                .inline()
+                                .filename(
+                                        content.getFileName(),
+                                        StandardCharsets.UTF_8
+                                )
+                                .build()
+                                .toString()
+                )
+                .body(resource);
+    }
+
 }

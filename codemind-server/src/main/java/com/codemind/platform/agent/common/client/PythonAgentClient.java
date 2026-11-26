@@ -364,6 +364,24 @@ public class PythonAgentClient {
         return restTemplate.postForObject(url, payload, Object.class);
     }
 
+
+    // A9.10.14.4.3.15.6.24J2_PROTOTYPE_EDIT_PLANNER_V1
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> planPrototypeEdit(Map<String, Object> payload) {
+        String url = agentBaseUrl + "/agent/runtime/prototype-edit/plan";
+        Object response = restTemplate.postForObject(url, payload == null ? Map.of() : payload, Object.class);
+        if (response instanceof Map<?, ?> responseMap) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : responseMap.entrySet()) {
+                if (entry.getKey() != null) result.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+            return result;
+        }
+        Map<String, Object> fallback = new LinkedHashMap<>();
+        fallback.put("raw_response", response);
+        return fallback;
+    }
+
     @SuppressWarnings("unchecked")
     public Map<String, Object> getLlmRuntimeStatus() {
         String url = agentBaseUrl + "/agent/runtime/llm/status";

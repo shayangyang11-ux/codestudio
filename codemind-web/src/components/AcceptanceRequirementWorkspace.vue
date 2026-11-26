@@ -67,42 +67,80 @@
       <p>选择一个模块、功能点或页面后，可以继续完善需求、生成页面原型，或检查后续开发准备状态。</p>
     </section>
 
-    <section v-else class="a9-node-card">
-      <header class="a9-node-header">
-        <div>
+    <section v-else :class="['a9-node-card', { 'a9-node-card-syncing': isSyncingPrdToUiContract }]">
+      <header class="a9-node-header a9-node-header-three-slot">
+        <div class="a9-node-title-slot">
           <span class="a9-kind-pill">{{ selectedKindLabel }}</span>
           <h3>{{ nodeName }}</h3>
         </div>
 
-        <div class="a9-node-actions">
+        <div class="a9-node-sync-slot">
+          <div v-if="isModule && moduleAppEntryContract" class="a9-node-center-actions">
+            <button
+              type="button"
+              class="a9-module-preview-button compact"
+              @click="openModuleAppOverlay"
+            >
+              查看完整模块预览
+            </button>
+          </div>
+
+          <button
+              v-if="isPage && showPrototypeRequirementUpdateBanner && hasPrototype && (!prototypeEditDraftDirty || isSyncingPrdToUiContract)"
+              type="button"
+              :class="['a9-prd-sync-button', 'compact', { syncing: isSyncingPrdToUiContract }]"
+              :disabled="isGeneratingUiContract || isSyncingPrdToUiContract"
+              :title="prototypeRequirementUpdateMessage"
+              @click="emit('sync-prd-to-ui-contract')"
+            >
+              {{ isSyncingPrdToUiContract ? '正在同步 PRD 变更...' : '同步 PRD 变更到原型' }}
+            </button>
+        </div>
+
+        <div class="a9-node-actions a9-node-right-actions">
+          <!-- A9.10.14.4.3.15.7.24L3B2_MODULE_PRD_GENERATE_REGENERATE_ENTRY -->
+          <button
+            v-if="showModulePrdGenerateAction"
+            type="button"
+            class="a9-ai-prd-button compact"
+            :disabled="isGeneratingPrd || isSyncingPrdToUiContract"
+            @click="emit('generate-module-prd')"
+          >
+            {{ modulePrdGenerateActionText }}
+          </button>
+
           <button
             v-if="showModuleRequirementAction"
             type="button"
             class="a9-primary-button"
-            :disabled="isGeneratingFullChain"
+            :disabled="isGeneratingFullChain || isSyncingPrdToUiContract"
             @click="emit('generate-full-chain')"
           >
             {{ isGeneratingFullChain ? '后台准备中...' : moduleRequirementButtonText }}
           </button>
 
           <span
-            v-if="showPrototypeRequirementUpdateBanner && !prototypeEditDraftDirty"
-            class="a9-prototype-impact-pill"
-            :title="prototypeRequirementUpdateMessage"
+            v-if="isPage"
+            :class="[
+              'a9-page-prototype-header-status',
+              hasPrototype ? 'ready' : 'waiting',
+            ]"
           >
-            需求已更新，建议重新生成本页原型
+            {{ hasPrototype ? '已生成' : '未生成' }}
           </span>
 
           <button
             v-if="isPage"
             type="button"
-            class="a9-primary-button"
-            :disabled="isGeneratingUiContract"
-            @click="emit('generate-ui-contract')"
+            :class="[
+              'a9-page-prototype-generate-button',
+              hasPrototype ? 'regenerate' : 'generate',
+            ]"
+            :disabled="isGeneratingUiContract || isSyncingPrdToUiContract"
+            @click="handlePagePrototypeGenerateClick"
           >
             {{ isGeneratingUiContract ? '正在生成原型...' : prototypeButtonText }}
           </button>
-
 
           <span
             v-if="isModule && moduleRequirementReaderArtifact?.versionNo"
@@ -110,17 +148,6 @@
           >
             v{{ moduleRequirementReaderArtifact.versionNo }}
           </span>
-
-          <button
-            v-if="isModule && moduleAppContract"
-            type="button"
-            class="a9-primary-button compact a9-header-module-preview-button"
-            @click="openModuleAppOverlay"
-          >
-            查看完整模块预览
-          </button>
-
-
         </div>
       </header>
       <section v-if="showModuleRequirementDocument" class="a9-section-card a9-module-document-card">
@@ -143,6 +170,9 @@
         </div>
 
         <ModulePrdView
+          :workspace-id="workspaceId"
+          :project-code="projectCode"
+          :module-tree="moduleTree"
           :artifact="moduleRequirementReaderArtifact"
           :markdown="moduleRequirementMarkdownForReader"
           :manual-edit-saving="manualEditSaving"
@@ -184,7 +214,7 @@
       <!-- A9.10.13.0.1 MODULE APP PROTOTYPE BEGIN -->
       <!-- A9.10.13.0.7 MODULE APP INTEGRATED PROTOTYPE STUDIO BEGIN -->
       <ModuleAppPrototypeStudioOverlay
-        v-if="moduleAppContract"
+        v-if="moduleAppEntryContract"
         :visible="moduleAppOverlayVisible"
         :module-title="moduleAppTitle"
         :module-app-contract="moduleAppEffectiveContract"
@@ -193,6 +223,8 @@
         :active-page="activeModuleAppPage"
         :active-page-route="activeModuleAppPageRoute"
         :active-contract="activeModuleAppUiContract"
+        :initial-row-context="moduleAppActiveRowContext"
+        :initial-runtime-data-session="moduleAppRuntimeDataSession"
         :project-theme-profile="projectThemeProfile || null"
         :focused-component-id="moduleAppFocusedComponentId"
         :focused-component-label="moduleAppFocusedComponentLabel"
@@ -391,9 +423,9 @@
         <div v-if="hasPrototype && uiContractObject" class="a9-prototype-studio-entry-card">
           <div class="a9-prototype-studio-entry-main">
             <p>Prototype Studio</p>
-            <strong>以正常页面比例查看和编辑原型</strong>
+            <strong>进入原型工作台</strong>
             <span>
-              原型不再挤在中间工作区里；进入后使用 1440px 真实桌面视口；工作台只负责预览缩放，后续生成代码仍按正常网页比例运行。
+              打开当前页面原型，选择按钮、字段、表格列或区域后，在右侧 Prototype Copilot 中修改。
             </span>
           </div>
 
@@ -407,8 +439,8 @@
         <PrototypeStudioOverlay
           v-if="uiContractObject"
           :visible="prototypeStudioVisible && hasPrototype"
-          :contract="uiContractObject"
-          :page-title="nodeName"
+          :contract="prototypeStudioRuntimeContract"
+          :page-title="prototypeStudioRuntimeTitle"
           :project-theme-profile="projectThemeProfile || null"
           :focused-component-id="focusedComponentId || null"
           :focused-component-label="focusedComponentDisplayLabel"
@@ -429,7 +461,11 @@
           @send-instruction="handlePrototypeStudioInstruction"
           @save-draft="handlePrototypeStudioSaveDraft"
           @discard-draft="emit('discard-prototype-draft')"
-        />
+        
+              :workspace-id="workspaceId"
+              :project-code="projectCode"
+              :module-tree="moduleTree"
+            />
 
         <div v-else-if="hasPrototype" class="a9-prototype-empty warning">
           <strong>原型数据暂不可直接渲染</strong>
@@ -582,6 +618,7 @@
 import { computed, ref, watch, nextTick } from 'vue'
 import { getModuleDisplayName, getModuleStableKey } from '../api'
 import { fetchCurrentModuleArtifact, saveManualArtifactEdit } from '../api/artifactApi'
+import { planPrototypeEdit } from '../api/assistantApi'
 import type { ArtifactResponse, ManualArtifactEditPayload, ModuleTreeNode } from '../types/codemind'
 import type { ProjectThemeProfile } from '../types/themeProfile'
 import type { UiContractComponent, UiContractContent } from '../types/uiContract'
@@ -595,10 +632,35 @@ import ModuleAppPrototypeStudioOverlay from './ModuleAppPrototypeStudioOverlay.v
 import UiContractPreviewRuntime from './UiContractPreviewRuntime.vue'
 import ModulePrdView from './ModulePrdView.vue'
 import { applyPrototypeLocalEdit, isPrototypeLocalEditInstruction } from '../domain/uiContractPrototypeLocalEdit'
+import {
+  applyPrototypeEditPlanBridge,
+  buildPrototypeEditPlannerFallbackPlan,
+  buildPrototypeEditPlannerPayload,
+} from '../domain/uiContractPrototypeEditPlanBridge'
 
 defineOptions({
   name: 'AcceptanceRequirementWorkspace',
 })
+
+// A9.10.14.4.3.15.7.24L3B5C1_PRD_PAGE_DESIGN_FORCE_LIST_TEMPLATE
+
+// A9.10.14.4.3.15.7.24L3B5B1_6_FIX_SYNC_AUTOSAVE_AUTOOPEN_QUALITY_KEYS
+
+// A9.10.14.4.3.15.7.24L3B5B1_2_FIX_SYNC_AUTOSAVE_AND_ASYNC_DUP
+
+// A9.10.14.4.3.15.7.24L3B5B1_1_SYNC_GENERATE_UX_STATE_MACHINE
+
+// A9.10.14.4.3.15.7.24L3B5A3_HEADER_SYNC_CENTER_AND_PRD_EDITOR_GUIDE
+
+// A9.10.14.4.3.15.7.24L3B5A2_SPLIT_SYNC_REGENERATE_AND_DIFF_ONLY
+
+// A9.10.14.4.3.15.7.24L3B5A_PRD_TO_UI_CONTRACT_SYNC_ENTRY
+
+// A9.10.14.4.3.15.7.24L3B3A_PRD_HEADER_AND_EDITOR_TOOLBAR_POLISH
+
+// A9.10.14.4.3.15.6.24L2C4H_V2_PAGE_LEVEL_PROTOTYPE_NAVIGATE_CLOSURE
+
+// A9.10.14.4.3.15.6.24L2C4G_PAGE_PROTOTYPE_RUNTIME_NAVIGATE_CLOSURE
 
 type PrototypeElementSelection = {
   componentId?: string | null
@@ -622,8 +684,10 @@ const props = withDefaults(
     workspaceId?: string
     projectCode?: string
     moduleTree?: ModuleTreeNode[]
-    isGeneratingFullChain?: boolean
+    isGeneratingPrd?: boolean
+  isGeneratingFullChain?: boolean
     isGeneratingUiContract?: boolean
+    isSyncingPrdToUiContract?: boolean
     modulePrdArtifact?: ArtifactResponse | null
     prdArtifact?: ArtifactResponse | null
     modulePrdMarkdown?: string
@@ -650,8 +714,10 @@ const props = withDefaults(
     moduleTree: () => [],
     workspaceId: '',
     projectCode: '',
-    isGeneratingFullChain: false,
+    isGeneratingPrd: false,
+  isGeneratingFullChain: false,
     isGeneratingUiContract: false,
+    isSyncingPrdToUiContract: false,
     modulePrdArtifact: null,
     prdArtifact: null,
     modulePrdMarkdown: '',
@@ -677,8 +743,10 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{
+  'generate-module-prd': []
   'generate-full-chain': []
   'generate-ui-contract': []
+  'sync-prd-to-ui-contract': []
   'open-ui-contract-preview': []
   'save-prototype-draft': []
   'discard-prototype-draft': []
@@ -693,6 +761,9 @@ const emit = defineEmits<{
 const prototypeInspectMode = ref(false)
 const prototypeStudioVisible = ref(false)
 const prototypeStudioStartInspectMode = ref(false)
+
+const prototypeStudioNavigatedContract = ref<UiContractContent | null>(null)
+const prototypeStudioNavigatedTitle = ref('')
 // A9.9.1 safe prop aliases for prototype draft status.
 // Some computed/template branches refer to prototypeEditDraftDirty directly;
 // keep an explicit local binding to avoid runtime ReferenceError.
@@ -702,6 +773,21 @@ const prototypeEditDraftSummary = computed(() => props.prototypeEditDraftSummary
 
 function togglePrototypeInspectMode() {
   prototypeInspectMode.value = !prototypeInspectMode.value
+}
+
+// A9.10.14.4.3.15.6.24J8B_PAGE_PROTOTYPE_HEADER_CLEAN_CONFIRM
+function handlePagePrototypeGenerateClick() {
+  if (hasPrototype.value && typeof window !== 'undefined') {
+    const confirmed = window.confirm(
+      '确认重新生成当前页面的交互原型吗？\n\n重新生成会基于最新需求刷新页面原型，可能改变当前页面布局和元素结构。已保存版本仍会保留在版本记录中。'
+    )
+
+    if (!confirmed) {
+      return
+    }
+  }
+
+  emit('generate-ui-contract')
 }
 
 function openPrototypeStudio() {
@@ -722,9 +808,162 @@ function openPrototypeStudioInspect() {
   prototypeStudioVisible.value = true
 }
 
+
+function a924l2c4gText(...values: unknown[]): string {
+  for (const value of values) {
+    if (value === null || value === undefined) continue
+    const text = String(value).trim()
+    if (text) return text
+  }
+  return ''
+}
+
+function a924l2c4gNorm(value: unknown): string {
+  return a924l2c4gText(value)
+    .toLowerCase()
+    .replace(/[\s_\-\/]+/g, '')
+    .replace(/[^\da-z\u4e00-\u9fff]+/g, '')
+}
+
+function a924l2c4gAllNodes(nodes: ModuleTreeNode[] = []): ModuleTreeNode[] {
+  const result: ModuleTreeNode[] = []
+
+  const visit = (items: ModuleTreeNode[]) => {
+    items.forEach((item) => {
+      result.push(item)
+      const children = Array.isArray((item as any).children)
+        ? (item as any).children as ModuleTreeNode[]
+        : []
+      if (children.length) visit(children)
+    })
+  }
+
+  visit(nodes)
+  return result
+}
+
+function a924l2c4gResolveTargetNode(payload: Record<string, any>): ModuleTreeNode | null {
+  const targetId = a924l2c4gNorm(
+    payload.targetPageId ||
+    payload.pageId ||
+    payload.moduleId ||
+    payload.id,
+  )
+  const targetKey = a924l2c4gNorm(
+    payload.targetPageKey ||
+    payload.pageKey ||
+    payload.moduleKey ||
+    payload.key,
+  )
+  const targetName = a924l2c4gNorm(
+    payload.targetPageName ||
+    payload.pageName ||
+    payload.moduleName ||
+    payload.label ||
+    payload.title,
+  )
+
+  for (const node of a924l2c4gAllNodes(props.moduleTree || [])) {
+    const nodeId = a924l2c4gNorm((node as any).id)
+    const nodeKey = a924l2c4gNorm(
+      (node as any).moduleKey ||
+      (node as any).pageKey ||
+      (node as any).key,
+    )
+    const nodeName = a924l2c4gNorm(
+      (node as any).moduleName ||
+      (node as any).pageName ||
+      (node as any).name ||
+      (node as any).title,
+    )
+
+    if (targetId && nodeId && targetId === nodeId) return node
+    if (targetKey && nodeKey && targetKey === nodeKey) return node
+    if (targetName && nodeName && targetName === nodeName) return node
+  }
+
+  return null
+}
+
+async function handlePrototypeRuntimeNavigate(payload: Record<string, any>): Promise<Record<string, any>> {
+  const targetNode = a924l2c4gResolveTargetNode(payload)
+
+  if (!targetNode?.id || !props.workspaceId || !props.projectCode) {
+    return {
+      ok: false,
+      code: 'TARGET_NOT_FOUND',
+      message: `无法定位目标页面：${a924l2c4gText(payload.targetPageName, payload.label, payload.targetPageId, '目标页面')}`,
+      targetPageId: payload.targetPageId || null,
+      targetPageKey: payload.targetPageKey || null,
+      targetPageName: payload.targetPageName || null,
+      route: payload.route || null,
+    }
+  }
+
+  try {
+    const artifact = await fetchCurrentModuleArtifact(
+      props.workspaceId,
+      props.projectCode,
+      String(targetNode.id),
+      'UI_CONTRACT',
+    )
+
+    const normalized = normalizeUiContractCandidate(artifact?.content) ||
+      normalizeUiContractCandidate((artifact as any)?.contentMarkdown)
+
+    if (!normalized) {
+      return {
+        ok: false,
+        code: 'INVALID_CONTRACT',
+        message: `目标页面没有可渲染的交互原型：${a924l2c4gText((targetNode as any).moduleName, payload.targetPageName)}`,
+        targetPageId: String(targetNode.id),
+        targetPageKey: payload.targetPageKey || null,
+        targetPageName: a924l2c4gText((targetNode as any).moduleName, payload.targetPageName),
+        route: payload.route || null,
+      }
+    }
+
+    prototypeStudioNavigatedContract.value = normalized
+    prototypeStudioNavigatedTitle.value = a924l2c4gText(
+      (targetNode as any).moduleName,
+      payload.targetPageName,
+      normalized.page?.pageName,
+      normalized.page?.title,
+      '目标页面',
+    )
+
+    return {
+      ok: true,
+      code: 'SUCCESS',
+      message: `已切换到：${prototypeStudioNavigatedTitle.value}`,
+      targetPageId: String(targetNode.id),
+      targetPageKey: a924l2c4gText((targetNode as any).moduleKey, payload.targetPageKey),
+      targetPageName: prototypeStudioNavigatedTitle.value,
+      route: a924l2c4gText(payload.route, (targetNode as any).routePath, (targetNode as any).route),
+    }
+  } catch (error) {
+    const message = error instanceof Error && error.message
+      ? error.message
+      : '加载目标页面交互原型失败。'
+
+    return {
+      ok: false,
+      code: 'LOAD_FAILED',
+      message,
+      targetPageId: String(targetNode.id),
+      targetPageKey: payload.targetPageKey || null,
+      targetPageName: a924l2c4gText((targetNode as any).moduleName, payload.targetPageName),
+      route: payload.route || null,
+    }
+  }
+}
+
+
 function closePrototypeStudio() {
   prototypeStudioVisible.value = false
   prototypeStudioStartInspectMode.value = false
+  prototypeStudioNavigatedContract.value = null
+  prototypeStudioNavigatedTitle.value = ''
 }
 
 function handlePrototypeStudioInstruction(instruction: string) {
@@ -1245,6 +1484,18 @@ const hasModuleRequirement = computed(() => Boolean(hasModuleDocument.value || i
 const isTerminalRequirementModule = computed(() => isModule.value && !hasChildModules.value)
 const showModuleRequirementDocument = computed(() => isTerminalRequirementModule.value)
 const showModuleRequirementAction = computed(() => isTerminalRequirementModule.value && !moduleRequirementDocumentAvailable.value)
+
+const showModulePrdGenerateAction = computed(() => isTerminalRequirementModule.value)
+const modulePrdGenerateActionText = computed(() => {
+  if (props.isGeneratingPrd) {
+    return 'AI 生成 PRD 中...'
+  }
+
+  return moduleRequirementDocumentAvailable.value
+    ? 'AI 重新生成模块 PRD'
+    : 'AI 生成模块 PRD'
+})
+
 const hasPrototype = computed(() => Boolean(props.uiContractArtifact?.content || props.uiContractMarkdown))
 
 // A9.10.14.4.3.6_PRD_IMPACT_BANNER_UI_INTEGRITY_FIX
@@ -1282,7 +1533,7 @@ const showPrototypeRequirementUpdateBanner = computed(() => {
 
 const prototypeRequirementUpdateMessage = computed(() => {
   const pageName = nodeName.value || '当前页面'
-  return `模块 PRD 保存了新版本，${pageName} 的筛选条件、表格字段、操作按钮、页面跳转或状态规则可能需要同步。点击重新生成即可，系统会在后台先处理页面规范再更新交互原型。`
+  return `模块 PRD 保存了新版本，${pageName} 的字段、按钮、表格列、行操作或页面跳转可同步到当前原型。`
 })
 
 function artifactStatusNeedsRegeneration(artifact: Record<string, unknown> | null | undefined): boolean {
@@ -1349,7 +1600,7 @@ const currentModuleAppArtifact = ref<ArtifactResponse | null>(null)
 const currentModuleAppArtifactLoading = ref(false)
 
 function openModuleAppOverlay() {
-  if (!moduleAppContract.value) {
+  if (!moduleAppEntryContract.value) {
     return
   }
   moduleAppOverlayVisible.value = true
@@ -1379,29 +1630,15 @@ const moduleAppContract = computed<Record<string, any> | null>(() => {
     currentModuleAppArtifact.value?.content ||
       (currentModuleAppArtifact.value as any)?.contentMarkdown,
   )
-  if (artifactSource) {
-    return normalizeModuleAppContractSource(
-      artifactSource,
-      'MODULE_APP_CONTRACT_CURRENT_ARTIFACT',
-    )
+  if (!artifactSource) {
+    return null
   }
 
   return normalizeModuleAppContractSource(
-    resolveModuleAppContractCompatSource(),
-    'MODULE_PROTOTYPE_MAP_COMPAT',
+    artifactSource,
+    'MODULE_APP_CONTRACT_CURRENT_ARTIFACT',
   )
 })
-
-function resolveModuleAppContractCompatSource(): Record<string, any> | null {
-  const extra = safeExtra(props.selectedModule)
-  const direct = recordValue(extra.moduleAppContract) || recordValue(extra.module_app_contract)
-  const legacy = recordValue(extra.modulePrototypeMap) || recordValue(extra.module_prototype_map)
-  const requirementContext = recordValue(extra.requirementContext) || recordValue(extra.requirement_context)
-  const nestedLegacy = recordValue(requirementContext?.modulePrototypeMap) ||
-    recordValue(requirementContext?.module_prototype_map)
-
-  return direct || legacy || nestedLegacy || null
-}
 
 function normalizeModuleAppContractRawSource(value: unknown): Record<string, any> | null {
   const direct = recordValue(value)
@@ -1440,12 +1677,7 @@ function normalizeModuleAppContractSource(
     current: artifact ? artifact.current !== false : source.current !== false,
     moduleKey: source.moduleKey || source.module_key || nodeKey.value,
     moduleName: source.moduleName || source.module_name || nodeName.value,
-    appShell: {
-      ...appShell,
-      layout: appShell.layout || 'sidebar',
-      title: appShell.title || source.moduleName || source.module_name || nodeName.value,
-      navigation,
-    },
+    appShell: normalizeModuleAppShellConfig(appShell, pages, navigation, source),
     pages,
     navigationEdges,
     source: source.source || sourceLabel,
@@ -1504,9 +1736,598 @@ const moduleAppFocusedComponentId = ref<string | null>(null)
 const moduleAppFocusedElementSelection = ref<PrototypeElementSelection | null>(null)
 const moduleAppPrototypeSaving = ref(false)
 const moduleAppLastEditSummary = ref('')
+const moduleAppRuntimeDataSession = ref<Record<string, unknown>>({})
+const moduleAppActiveRowContext = ref<Record<string, unknown> | null>(null)
+
+
+// A9.10.14.4.3.15.6.24J8C_MODULE_PREVIEW_FALLBACK_PRD_FREEFORM_CLEAN
+// If MODULE_APP_CONTRACT has not been materialized yet, synthesize a preview shell
+// from descendant PAGE nodes so the MODULE-level “查看完整模块预览”入口不会消失.
+const moduleAppTreeFallbackContract = computed<Record<string, any> | null>(() => {
+  if (!isModule.value || !props.selectedModule) return null
+
+  const pageNodes = collectModuleAppPageNodes(props.selectedModule)
+  if (!pageNodes.length) return null
+
+  const pages = pageNodes.map((entry, index) => moduleAppPageFromTreeEntry(entry, index))
+  const appShell = buildModuleAppShellFromTree(pages)
+
+  return {
+    schemaVersion: '1.0',
+    artifactType: 'MODULE_APP_CONTRACT',
+    current: true,
+    moduleKey: nodeKey.value,
+    moduleName: nodeName.value,
+    appShell,
+    pages,
+    navigationEdges: [],
+    source: 'MODULE_TREE',
+  }
+})
+
+// A9.10.14.4.3.15.6.24J8D_MODULE_APP_BIND_PAGE_UI_CONTRACT
+// MODULE_APP_CONTRACT may only contain a navigation shell. The real PAGE_UI_CONTRACT
+// lives on descendant PAGE nodes. Merge the formal shell with tree-derived page node ids,
+// so module preview can fetch each PAGE's current UI_CONTRACT correctly.
+const moduleAppEntryContract = computed<Record<string, any> | null>(() =>
+  a924J8DMergeModuleAppContractWithTreePages(
+    moduleAppContract.value,
+    moduleAppTreeFallbackContract.value,
+  ),
+)
+
+function normalizeModuleAppShellConfig(
+  appShell: Record<string, any>,
+  pages: Record<string, any>[],
+  navigation: Record<string, any>[],
+  source: Record<string, any>,
+): Record<string, any> {
+  const fallbackShell = buildModuleAppShellFromTree(pages)
+  const rawLayout = String(
+    appShell.layout ||
+      appShell.layoutType ||
+      appShell.shellLayout ||
+      appShell.navigationPlacement ||
+      fallbackShell.layout ||
+      '',
+  ).trim().toUpperCase()
+  const layout = normalizeModuleAppShellLayout(rawLayout)
+  const rawStyle = String(
+    appShell.navigationStyle ||
+      appShell.navigation_style ||
+      appShell.navStyle ||
+      fallbackShell.navigationStyle ||
+      '',
+  ).trim().toUpperCase()
+
+  return {
+    ...appShell,
+    layout,
+    navigationStyle: normalizeModuleAppNavigationStyle(rawStyle, layout),
+    title: stringValue(appShell.title || source.moduleName || source.module_name || nodeName.value),
+    navigation,
+    menuItems: arrayValue(appShell.menuItems || appShell.menu_items).length
+      ? arrayValue(appShell.menuItems || appShell.menu_items)
+      : fallbackShell.menuItems,
+    generatedFrom: appShell.generatedFrom || appShell.generated_from || 'MIXED',
+    stableSignature: appShell.stableSignature || appShell.stable_signature || fallbackShell.stableSignature,
+  }
+}
+
+function normalizeModuleAppShellLayout(value: string): string {
+  if (/NONE|NO_NAV|WITHOUT_NAV|无导航/.test(value)) return 'NONE'
+  if (/ACTION_HUB|BUTTON_FLOW|FLOW_ONLY|动作|按钮/.test(value)) return 'ACTION_HUB'
+  if (/SIDEBAR_TOPBAR|MIXED|SIDE_TOP|TOP_SIDE|组合|混合/.test(value)) return 'SIDEBAR_TOPBAR'
+  if (/TOP|TOPBAR|HEADER|HORIZONTAL|顶部|横向/.test(value)) return 'TOPBAR'
+  if (/SIDE|SIDEBAR|LEFT|侧边|左侧/.test(value)) return 'SIDEBAR'
+  return 'SIDEBAR'
+}
+
+function normalizeModuleAppNavigationStyle(value: string, layout: string): string {
+  if (/COMMERCE|ECOMMERCE|SHOP|商城|电商/.test(value)) return 'COMMERCE_TOPBAR'
+  if (/PORTAL|WEBSITE|门户|官网/.test(value)) return 'PORTAL_TOPBAR'
+  if (/WORKFLOW|HUB|FLOW|流程|工作流/.test(value)) return 'WORKFLOW_HUB'
+  if (/MIXED|组合|混合/.test(value) || layout === 'SIDEBAR_TOPBAR') return 'ENTERPRISE_MIXED'
+  if (layout === 'TOPBAR') return 'PORTAL_TOPBAR'
+  if (layout === 'ACTION_HUB' || layout === 'NONE') return 'WORKFLOW_HUB'
+  return 'ENTERPRISE_SIDEBAR'
+}
+
+function a924J8DMergeModuleAppContractWithTreePages(
+  formal: Record<string, any> | null,
+  fallback: Record<string, any> | null,
+): Record<string, any> | null {
+  if (!formal) return fallback
+  if (!fallback) return formal
+
+  const formalPages = arrayValue(formal.pages)
+    .map((item) => recordValue(item))
+    .filter(Boolean) as Record<string, any>[]
+
+  const fallbackPages = arrayValue(fallback.pages)
+    .map((item) => recordValue(item))
+    .filter(Boolean) as Record<string, any>[]
+
+  if (!formalPages.length) return fallback
+  if (!fallbackPages.length) return formal
+
+  const formalPageKeyCounts = a924J8DBuildPageKeyCounts(formalPages)
+  const usedFallbackKeys = new Set<string>()
+
+  const mergedPages: Record<string, any>[] = formalPages.map((page, index) => {
+    const match = a924J8DMatchFallbackPage(page, fallbackPages, usedFallbackKeys)
+    if (!match) {
+      return {
+        ...page,
+        pageKey: a924J8DStablePageKey(page, index),
+        routePath: a924J8DTextValue(page.routePath || page.route),
+        route: a924J8DTextValue(page.routePath || page.route),
+      }
+    }
+
+    usedFallbackKeys.add(a924J8DPageIdentity(match))
+
+    const rawPageKey = a924J8DTextValue(page.pageKey || page.page_key)
+    const duplicatePageKey = rawPageKey
+      ? (formalPageKeyCounts.get(moduleAppComparableKey(rawPageKey)) || 0) > 1
+      : false
+
+    const shouldUseTreePageKey =
+      !rawPageKey ||
+      duplicatePageKey ||
+      a924J8DIsWeakPageKey(rawPageKey)
+
+    const pageKey = shouldUseTreePageKey
+      ? a924J8DTextValue(match.pageKey || match.nodeId || rawPageKey || `page_${index + 1}`)
+      : rawPageKey
+
+    const routePath = a924J8DTextValue(
+      page.routePath ||
+        page.route_path ||
+        page.route ||
+        match.routePath ||
+        match.route ||
+        `/${pageKey}`,
+    )
+
+    return {
+      ...page,
+      pageKey,
+      page_key: pageKey,
+      pageName: a924J8DTextValue(page.pageName || page.page_name || page.title || match.pageName),
+      page_name: a924J8DTextValue(page.pageName || page.page_name || page.title || match.pageName),
+      routePath,
+      route: routePath,
+      nodeId: a924J8DTextValue(page.nodeId || page.node_id || match.nodeId),
+      node_id: a924J8DTextValue(page.nodeId || page.node_id || match.nodeId),
+      pageNodeId: a924J8DTextValue(page.pageNodeId || page.page_node_id || match.nodeId),
+      moduleId: a924J8DTextValue(page.moduleId || page.module_id || match.nodeId),
+      navigationVisible: typeof page.navigationVisible === 'boolean'
+        ? page.navigationVisible
+        : match.navigationVisible !== false,
+      sourcePageKey: rawPageKey,
+    }
+  })
+
+  for (const fallbackPage of fallbackPages) {
+    const identity = a924J8DPageIdentity(fallbackPage)
+    if (!identity || usedFallbackKeys.has(identity)) {
+      continue
+    }
+
+    mergedPages.push(fallbackPage)
+  }
+
+  const appShell = {
+    ...recordValue(formal.appShell),
+  }
+
+  const formalNavigation = arrayValue(recordValue(formal.appShell)?.navigation)
+  appShell.navigation = a924J8DMergeNavigationWithMergedPages(formalNavigation, mergedPages)
+
+  return {
+    ...formal,
+    appShell,
+    pages: mergedPages,
+    source: formal.source
+      ? `${formal.source}+TREE_PAGE_NODE_BINDING`
+      : 'MODULE_APP_CONTRACT_TREE_PAGE_NODE_BINDING',
+  }
+}
+
+function a924J8DTextValue(value: unknown): string {
+  return String(value || '').trim()
+}
+
+function a924J8DBuildPageKeyCounts(pages: Record<string, any>[]): Map<string, number> {
+  const counts = new Map<string, number>()
+
+  for (const page of pages) {
+    const key = moduleAppComparableKey(page.pageKey || page.page_key)
+    if (!key) continue
+    counts.set(key, (counts.get(key) || 0) + 1)
+  }
+
+  return counts
+}
+
+function a924J8DPageIdentity(page: Record<string, any>): string {
+  return moduleAppComparableKey(
+    page.nodeId ||
+      page.node_id ||
+      page.pageNodeId ||
+      page.page_node_id ||
+      page.moduleId ||
+      page.module_id ||
+      page.pageKey ||
+      page.page_key ||
+      page.routePath ||
+      page.route ||
+      page.pageName ||
+      page.page_name,
+  )
+}
+
+function a924J8DStablePageKey(page: Record<string, any>, index: number): string {
+  return a924J8DTextValue(
+    page.nodeId ||
+      page.node_id ||
+      page.pageNodeId ||
+      page.page_node_id ||
+      page.moduleId ||
+      page.module_id ||
+      page.pageKey ||
+      page.page_key ||
+      `page_${index + 1}`,
+  )
+}
+
+function a924J8DIsWeakPageKey(value: unknown): boolean {
+  const raw = a924J8DTextValue(value)
+  if (!raw) return true
+
+  const normalized = raw
+    .trim()
+    .toLowerCase()
+    .replace(/^\/+|\/+$/g, '')
+
+  return (
+    normalized === 'page' ||
+    normalized === 'page-' ||
+    normalized === 'page_' ||
+    /^page[-_]?\d*$/.test(normalized)
+  )
+}
+
+function a924J8DMatchFallbackPage(
+  page: Record<string, any>,
+  fallbackPages: Record<string, any>[],
+  usedFallbackKeys: Set<string>,
+): Record<string, any> | null {
+  const formalKeys = [
+    page.nodeId,
+    page.node_id,
+    page.pageNodeId,
+    page.page_node_id,
+    page.moduleId,
+    page.module_id,
+    page.pageKey,
+    page.page_key,
+    page.routePath,
+    page.route_path,
+    page.route,
+    page.pageName,
+    page.page_name,
+    page.title,
+  ].map(moduleAppComparableKey).filter(Boolean)
+
+  if (!formalKeys.length) return null
+
+  return fallbackPages.find((candidate) => {
+    const identity = a924J8DPageIdentity(candidate)
+    if (identity && usedFallbackKeys.has(identity)) {
+      return false
+    }
+
+    const candidateKeys = [
+      candidate.nodeId,
+      candidate.node_id,
+      candidate.pageNodeId,
+      candidate.page_node_id,
+      candidate.moduleId,
+      candidate.module_id,
+      candidate.pageKey,
+      candidate.page_key,
+      candidate.routePath,
+      candidate.route,
+      candidate.pageName,
+      candidate.page_name,
+      candidate.title,
+    ].map(moduleAppComparableKey).filter(Boolean)
+
+    return formalKeys.some((key) => candidateKeys.includes(key))
+  }) || null
+}
+
+function a924J8DMergeNavigationWithMergedPages(
+  rawNavigation: unknown[],
+  mergedPages: Record<string, any>[],
+): Record<string, any>[] {
+  const visiblePages = mergedPages.filter((page) => page.navigationVisible !== false)
+
+  if (!rawNavigation.length) {
+    return visiblePages.map((page, index) => ({
+      label: a924J8DTextValue(page.pageName || page.title || page.pageKey),
+      pageKey: a924J8DTextValue(page.pageKey),
+      route: a924J8DTextValue(page.routePath || page.route),
+      routePath: a924J8DTextValue(page.routePath || page.route),
+      visible: true,
+      order: index + 1,
+    }))
+  }
+
+  const result: Record<string, any>[] = []
+  rawNavigation.forEach((raw, index) => {
+    const item = recordValue(raw)
+    if (!item) return
+
+    const match = a924J8DMatchNavigationPage(item, mergedPages)
+    const pageKey = a924J8DTextValue(match?.pageKey || item.pageKey || item.page_key)
+    const route = a924J8DTextValue(match?.routePath || match?.route || item.route || item.routePath)
+
+    const entry: Record<string, any> = {
+      ...item,
+      label: a924J8DTextValue(item.label || item.pageName || match?.pageName || pageKey || `页面 ${index + 1}`),
+      pageKey,
+      route,
+      routePath: route,
+      visible: item.visible !== false,
+      order: Number(item.order || index + 1),
+    }
+
+    if (entry.visible !== false && entry.pageKey) result.push(entry)
+  })
+  return result
+}
+
+function a924J8DMatchNavigationPage(
+  item: Record<string, any>,
+  pages: Record<string, any>[],
+): Record<string, any> | null {
+  const keys = [
+    item.pageKey,
+    item.page_key,
+    item.route,
+    item.routePath,
+    item.label,
+    item.pageName,
+  ].map(moduleAppComparableKey).filter(Boolean)
+
+  return pages.find((page) => {
+    const pageKeys = [
+      page.pageKey,
+      page.page_key,
+      page.routePath,
+      page.route,
+      page.pageName,
+      page.page_name,
+      page.title,
+      page.nodeId,
+      page.node_id,
+    ].map(moduleAppComparableKey).filter(Boolean)
+
+    return keys.some((key) => pageKeys.includes(key))
+  }) || null
+}
+
+
+type ModuleAppTreePageEntry = {
+  node: ModuleTreeNode
+  parent: ModuleTreeNode | null
+  depth: number
+}
+
+function collectModuleAppPageNodes(rootNode: ModuleTreeNode): ModuleAppTreePageEntry[] {
+  const result: ModuleAppTreePageEntry[] = []
+
+  const visit = (node: ModuleTreeNode, parent: ModuleTreeNode | null, depth: number) => {
+    if (isPageTreeNode(node)) {
+      result.push({ node, parent, depth })
+    }
+
+    for (const child of Array.isArray(node.children) ? node.children : []) {
+      visit(child, node, depth + 1)
+    }
+  }
+
+  for (const child of Array.isArray(rootNode.children) ? rootNode.children : []) {
+    visit(child, rootNode, 1)
+  }
+
+  return result.sort((left, right) => {
+    const leftOrder = Number(left.node.sortOrder || 0)
+    const rightOrder = Number(right.node.sortOrder || 0)
+    if (left.depth !== right.depth) return left.depth - right.depth
+    if (leftOrder !== rightOrder) return leftOrder - rightOrder
+    return stringValue(left.node.moduleName).localeCompare(stringValue(right.node.moduleName), 'zh-Hans-CN')
+  })
+}
+
+function isPageTreeNode(node: ModuleTreeNode): boolean {
+  const extra = moduleAppNodeExtra(node)
+  const kind = String(
+    node.moduleType ||
+      extra.nodeType ||
+      extra.node_type ||
+      extra.moduleType ||
+      extra.module_type ||
+      '',
+  ).trim().toUpperCase()
+
+  return kind === 'PAGE' || kind.includes('PAGE') || kind === '页面'
+}
+
+function moduleAppNodeExtra(node: ModuleTreeNode | null | undefined): Record<string, any> {
+  return recordValue(node?.extra) || {}
+}
+
+function moduleAppPageFromTreeEntry(entry: ModuleAppTreePageEntry, index: number): Record<string, any> {
+  const { node, parent, depth } = entry
+  const extra = moduleAppNodeExtra(node)
+  const pageName = stringValue(
+    node.moduleName ||
+      extra.pageName ||
+      extra.page_name ||
+      extra.title ||
+      `页面 ${index + 1}`,
+  )
+  const pageKey = stringValue(node.id || node.moduleKey || `page_${index + 1}`)
+  const routePath = moduleAppRouteForPage(pageKey, pageName, extra)
+  const pageKind = stringValue(
+    extra.pageKind ||
+      extra.page_kind ||
+      extra.pageType ||
+      extra.page_type ||
+      node.moduleType ||
+      '',
+  ) || inferModuleAppPageKind(pageName)
+  const shellPolicy = inferModuleAppShellPolicy(pageName, pageKind)
+  const navigationVisible = shellPolicy === 'WITH_SHELL' && isPrimaryModuleAppPage(pageName, pageKind)
+  const parentExtra = moduleAppNodeExtra(parent)
+  const parentKey = stringValue(parent?.id || parent?.moduleKey || parentExtra.pageKey || parentExtra.page_key)
+
+  return {
+    pageKey,
+    pageName,
+    routePath,
+    route: routePath,
+    pageKind,
+    shellPolicy,
+    surfaceType: navigationVisible ? 'MAIN_NAV_PAGE' : shellPolicy === 'WITHOUT_SHELL' ? 'OVERLAY_SURFACE' : 'SECONDARY_ROUTE',
+    entryMode: navigationVisible ? 'NAVIGATION' : shellPolicy === 'WITHOUT_SHELL' ? 'OVERLAY' : 'ACTION_ROUTE',
+    navigationVisible,
+    parentPageKey: parentKey || null,
+    parentModuleKey: parentKey || null,
+    parentModuleName: stringValue(parent?.moduleName) || null,
+    primaryEntity: inferModuleAppEntityName(pageName, parent?.moduleName || nodeName.value),
+    depth,
+    order: index + 1,
+    nodeId: String(node.id || ''),
+    pageNodeId: String(node.id || ''),
+    moduleId: String(node.id || ''),
+  }
+}
+
+function moduleAppRouteForPage(
+  pageKey: string,
+  pageName: string,
+  extra: Record<string, any>,
+): string {
+  const explicit = stringValue(extra.routePath || extra.route_path || extra.route)
+  if (explicit) return explicit
+
+  const slug = stringValue(pageKey)
+    .replace(/^[#/]+/, '')
+    .replace(/[^\da-zA-Z\u4e00-\u9fff]+/g, '-')
+    .replace(/^-+|-+$/g, '') ||
+    pageName.replace(/\s+/g, '-') ||
+    'page'
+
+  return `/${slug}`
+}
+
+function inferModuleAppPageKind(pageName: string): string {
+  const text = pageName.toUpperCase()
+  if (/登录|登陆|REGISTER|注册|找回密码|LOGIN|PASSWORD/.test(text)) return 'AUTH_PAGE'
+  if (/看板|工作台|DASHBOARD|概览|首页/.test(text)) return 'DASHBOARD'
+  if (/列表|查询|管理|台账|LIST|TABLE|MANAGE/.test(text)) return 'LIST'
+  if (/新增|新建|创建|CREATE|NEW|ADD/.test(text)) return 'CREATE_FORM'
+  if (/编辑|修改|EDIT|UPDATE/.test(text)) return 'EDIT_FORM'
+  if (/详情|明细|DETAIL|VIEW/.test(text)) return 'DETAIL'
+  if (/配置|设置|SETTING|CONFIG/.test(text)) return 'SETTINGS'
+  if (/审批|审核|APPROVAL|AUDIT|WORKBENCH/.test(text)) return 'WORKFLOW'
+  return 'PAGE'
+}
+
+function inferModuleAppShellPolicy(pageName: string, pageKind: string): string {
+  const text = `${pageKind} ${pageName}`.toUpperCase()
+  if (/AUTH|LOGIN|REGISTER|PASSWORD|登录|登陆|注册|找回密码|大屏|落地页|外链|弹窗|抽屉|EMBED|MODAL|DRAWER/.test(text)) {
+    return 'WITHOUT_SHELL'
+  }
+  if (/CREATE|NEW|ADD|EDIT|UPDATE|DETAIL|FORM|新增|新建|创建|编辑|修改|详情|表单/.test(text)) {
+    return 'ACTION_ENTRY'
+  }
+  return 'WITH_SHELL'
+}
+
+function isPrimaryModuleAppPage(pageName: string, pageKind: string): boolean {
+  const text = `${pageKind} ${pageName}`.toUpperCase()
+  return /LIST|TABLE|MANAGE|DASHBOARD|WORKBENCH|REPORT|SETTING|CONFIG|INDEX|HOME|列表|查询|管理|看板|工作台|报表|配置|设置|首页|台账|中心/.test(text)
+}
+
+function inferModuleAppEntityName(pageName: string, fallback: unknown): string {
+  const cleaned = pageName
+    .replace(/(列表|查询|管理|台账|详情|明细|新增|新建|创建|编辑|修改|页面|页)$/g, '')
+    .trim()
+  return cleaned || stringValue(fallback) || '业务数据'
+}
+
+function buildModuleAppShellFromTree(pages: Record<string, any>[]): Record<string, any> {
+  const navigationPages = pages.filter((page) => page.navigationVisible !== false)
+  const preferredStyle = String(props.projectThemeProfile?.navigationStyle || '').toUpperCase()
+  const hasDeepMenu = navigationPages.some((page) => Number(page.depth || 0) > 1)
+  const hasManyMenus = navigationPages.length >= 6
+  const hasFewMenus = navigationPages.length > 0 && navigationPages.length <= 4
+  const moduleText = `${nodeName.value} ${props.projectThemeProfile?.industry || ''}`.toUpperCase()
+
+  const layout = (() => {
+    if (!navigationPages.length) return 'ACTION_HUB'
+    if (preferredStyle === 'MIXED' || hasDeepMenu || hasManyMenus) return 'SIDEBAR_TOPBAR'
+    if (preferredStyle === 'TOP_NAV' || (hasFewMenus && /COMMERCE|FOREIGN_TRADE|PORTAL|商城|门户|官网|外贸|电商/.test(moduleText))) return 'TOPBAR'
+    return 'SIDEBAR'
+  })()
+
+  const navigationStyle = (() => {
+    if (layout === 'ACTION_HUB') return 'WORKFLOW_HUB'
+    if (layout === 'TOPBAR' && /COMMERCE|商城|电商|订单|商品/.test(moduleText)) return 'COMMERCE_TOPBAR'
+    if (layout === 'TOPBAR') return 'PORTAL_TOPBAR'
+    if (layout === 'SIDEBAR_TOPBAR') return 'ENTERPRISE_MIXED'
+    return 'ENTERPRISE_SIDEBAR'
+  })()
+
+  const navigation = navigationPages.map((page, index) => ({
+    label: stringValue(page.pageName || page.title || page.pageKey),
+    pageKey: stringValue(page.pageKey),
+    route: stringValue(page.routePath || page.route),
+    routePath: stringValue(page.routePath || page.route),
+    visible: true,
+    order: index + 1,
+    parentKey: page.parentModuleKey || null,
+    level: Math.max(1, Number(page.depth || 1)),
+  }))
+
+  return {
+    layout,
+    navigationStyle,
+    title: nodeName.value,
+    navigation,
+    menuItems: navigation.map((item, index) => ({
+      itemKey: item.pageKey || `menu_${index + 1}`,
+      label: item.label,
+      pageKey: item.pageKey,
+      route: item.route,
+      parentKey: item.parentKey,
+      level: item.level,
+      order: item.order,
+      visible: true,
+    })),
+    generatedFrom: 'MODULE_TREE',
+    stableSignature: navigation.map((item) => `${item.pageKey}:${item.label}:${item.parentKey || ''}`).join('|'),
+  }
+}
 
 const moduleAppEffectiveContract = computed<Record<string, any> | null>(() =>
-  moduleAppShellDraftContent.value || moduleAppContract.value,
+  moduleAppShellDraftContent.value || moduleAppEntryContract.value,
 )
 
 // A9.10.14.4.3.15.4.6.2.1:
@@ -1612,7 +2433,7 @@ const activeModuleAppPageRoute = computed(() => {
 const moduleAppEdgesForActivePage = computed<Record<string, any>[]>(() => {
   const pageKey = activeModuleAppPage.value?.pageKey
   if (!pageKey) return []
-  return (arrayValue(moduleAppContract.value?.navigationEdges) as Record<string, any>[])
+  return (arrayValue(moduleAppEntryContract.value?.navigationEdges) as Record<string, any>[])
     .filter((edge) => !edge.sourcePageKey || edge.sourcePageKey === pageKey)
 })
 
@@ -1910,6 +2731,39 @@ function resolveModuleAppPageNode(page: Record<string, any> | null): ModuleTreeN
   if (!page) return null
 
   const candidates = collectModuleAppPageNodeCandidates()
+
+  // A9.10.14.4.3.15.6.24J8D_MODULE_APP_BIND_PAGE_UI_CONTRACT
+  // Prefer explicit PAGE node identity injected by moduleAppEntryContract.
+  // Fuzzy pageName/route matching is only a fallback.
+  const explicitNodeKeys = [
+    page.nodeId,
+    page.node_id,
+    page.pageNodeId,
+    page.page_node_id,
+    page.moduleId,
+    page.module_id,
+  ].map(moduleAppComparableKey).filter(Boolean)
+
+  if (explicitNodeKeys.length) {
+    const direct = candidates.find((node) => {
+      const extra = safeExtra(node)
+      const nodeKeys = [
+        node.id,
+        getModuleStableKey(node),
+        (node as any).moduleKey,
+        (node as any).moduleCode,
+        extra.nodeId,
+        extra.node_id,
+        extra.pageNodeId,
+        extra.page_node_id,
+      ].map(moduleAppComparableKey).filter(Boolean)
+
+      return explicitNodeKeys.some((key) => nodeKeys.includes(key))
+    })
+
+    if (direct) return direct
+  }
+
   const pageKey = moduleAppComparableKey(page.pageKey)
   const pageName = moduleAppComparableKey(page.pageName)
   const route = moduleAppComparableKey(page.routePath || page.route)
@@ -1982,26 +2836,61 @@ function moduleAppComparableKey(value: unknown): string {
 }
 
 async function handleModuleAppRuntimeNavigate(payload: Record<string, unknown>) {
-  const target = resolveModuleAppNavigationTarget(payload)
+  const patch = recordValue(payload.runtimeDataPatch)
+  if (patch) {
+    moduleAppRuntimeDataSession.value = mergeModuleAppRuntimeDataSession(
+      moduleAppRuntimeDataSession.value,
+      patch,
+    )
+  }
+
+  moduleAppActiveRowContext.value = recordValue(payload.rowContext)
+    ? deepCloneModuleAppRecord(payload.rowContext as Record<string, unknown>)
+    : null
+
+  const target = a924L2A2ResolveModuleRuntimeNavigationTarget(payload)
 
   if (!target) {
     return {
       ok: false,
-      code: 'TARGET_NOT_FOUND' as const,
-      message: '当前模块应用原型没有找到目标页面。',
+      code: 'TARGET_NOT_FOUND',
+      message: '未在当前模块页面目录中找到目标页面。',
     }
   }
 
-  activeModuleAppPageKey.value = target.pageKey || ''
+  activeModuleAppPageKey.value = String(target.pageKey || '')
+  handleModuleAppStudioClearSelection()
+
+  const hasArtifact = Boolean(moduleAppUiContractArtifactCache.value[String(target.pageKey || '')])
 
   return {
     ok: true,
-    code: 'SUCCESS' as const,
-    message: `已切换到：${target.pageName || target.pageKey}`,
+    code: hasArtifact ? 'SUCCESS' : 'ARTIFACT_NOT_FOUND',
+    message: hasArtifact
+      ? `已切换到：${target.pageName || '目标页面'}`
+      : `已定位到：${target.pageName || '目标页面'}，该页面还没有生成交互原型。`,
     targetPageKey: target.pageKey || null,
     targetPageName: target.pageName || null,
     route: target.routePath || target.route || null,
   }
+}
+
+
+
+function mergeModuleAppRuntimeDataSession(
+  current: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...deepCloneModuleAppRecord(current),
+    ...deepCloneModuleAppRecord(patch),
+  }
+}
+
+function deepCloneModuleAppRecord<T>(value: T): T {
+  return value === undefined
+    ? value
+    : JSON.parse(JSON.stringify(value)) as T
 }
 
 function resolveModuleAppNavigationTarget(payload: Record<string, unknown>): Record<string, any> | null {
@@ -2021,7 +2910,7 @@ function resolveModuleAppNavigationTarget(payload: Record<string, unknown>): Rec
 
   if (direct) return direct
 
-  const matchedEdge = (arrayValue(moduleAppContract.value?.navigationEdges) as Record<string, any>[])
+  const matchedEdge = (arrayValue(moduleAppEntryContract.value?.navigationEdges) as Record<string, any>[])
     .find((edge) => {
       return Boolean(
         (actionId && moduleAppComparableKey(edge.actionId || edge.label) === actionId) ||
@@ -2056,9 +2945,89 @@ watch(
   { immediate: true },
 )
 
+// A9.10.14.4.3.15.6.24L2A2_NAV_AND_QUERY_SOURCE_FIX
+function a924L2A2ResolveModuleRuntimeNavigationTarget(
+  payload: Record<string, unknown>,
+): Record<string, any> | null {
+  const pages = moduleAppPages.value || []
+  if (!pages.length) return null
+
+  const directSignals = [
+    payload.targetPageKey,
+    payload.targetPageId,
+    payload.targetPageName,
+    payload.route,
+  ]
+    .map(a924L2A2Comparable)
+    .filter(Boolean)
+
+  for (const page of pages) {
+    const hay = a924L2A2PageHaystack(page)
+    if (directSignals.some((signal) => hay.includes(signal) || signal.includes(hay))) {
+      return page
+    }
+  }
+
+  const label = String(payload.label || '').trim()
+  const tokenGroups = a924L2A2NavigationTokenGroups(label)
+
+  for (const group of tokenGroups) {
+    const matched = pages.find((page) => {
+      const hay = a924L2A2PageHaystack(page)
+      return group.some((token) => hay.includes(a924L2A2Comparable(token)))
+    })
+
+    if (matched) return matched
+  }
+
+  return null
+}
+
+function a924L2A2NavigationTokenGroups(label: string): string[][] {
+  const groups: string[][] = []
+
+  if (/新增|新建|创建|录入/i.test(label)) groups.push(['新增', '新建', '创建', '录入', 'create', 'add'])
+  if (/详情|查看详情|查看/i.test(label)) groups.push(['详情', '查看', 'detail', 'view'])
+  if (/编辑|修改/i.test(label)) groups.push(['编辑', '修改', 'edit'])
+  if (/返回/i.test(label)) groups.push(['列表', '查询', '管理', 'list'])
+  if (/日志|记录/i.test(label)) groups.push(['日志', '操作日志', '记录', 'log'])
+  if (/提交|确认|审核|审批/i.test(label)) groups.push(['提交', '确认', '审核', '审批'])
+  if (/取消订单|取消|作废/i.test(label)) groups.push(['取消', '作废'])
+  if (/解锁/i.test(label)) groups.push(['解锁'])
+  if (/状态/i.test(label)) groups.push(['状态'])
+  if (/异常/i.test(label)) groups.push(['异常'])
+
+  return groups
+}
+
+function a924L2A2PageHaystack(page: Record<string, any>): string {
+  return a924L2A2Comparable([
+    page.pageKey,
+    page.page_key,
+    page.pageName,
+    page.page_name,
+    page.title,
+    page.route,
+    page.routePath,
+    page.route_path,
+    page.nodeId,
+    page.pageNodeId,
+    page.moduleId,
+  ].join(' '))
+}
+
+function a924L2A2Comparable(value: unknown): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\/+|\/+$/g, '')
+    .replace(/[\s_\-]+/g, '')
+}
+
 function openModuleAppPageByNav(item: Record<string, any>) {
   const pageKey = stringValue(item.pageKey)
   if (pageKey) activeModuleAppPageKey.value = pageKey
+  moduleAppActiveRowContext.value = null
   handleModuleAppStudioClearSelection()
 }
 
@@ -2215,7 +3184,7 @@ function handleModuleAppStudioDiscardDraft() {
     : ''
 }
 
-function handleModuleAppStudioInstruction(instruction: string) {
+async function handleModuleAppStudioInstruction(instruction: string) {
   const text = String(instruction || '').trim()
   if (!text) return
 
@@ -2254,30 +3223,67 @@ function handleModuleAppStudioInstruction(instruction: string) {
     return
   }
 
-  if (!isPrototypeLocalEditInstruction(text)) {
-    moduleAppLastEditSummary.value = '这条指令暂未识别为可执行的原型局部修改。'
-    return
-  }
+  moduleAppLastEditSummary.value = '正在理解并规划原型修改...'
 
-  const result = applyPrototypeLocalEdit({
-    contract: current,
+  const plannerPayload = buildPrototypeEditPlannerPayload({
     instruction: text,
+    contract: current,
     focusedComponentId: moduleAppFocusedComponentId.value,
-    prototypeElementSelection: selection as any,
-    focusedPrototypeElementSelection: selection as any,
-    selectionRef: selection as any,
+    selection: selection as any,
+    page: {
+      pageKey,
+      pageName: stringValue(activeModuleAppPage.value?.pageName),
+      pageKind: stringValue(activeModuleAppPage.value?.pageKind),
+      routePath: stringValue(activeModuleAppPage.value?.routePath || activeModuleAppPage.value?.route),
+    },
   })
 
-  if (!result.changed) {
-    moduleAppLastEditSummary.value = result.summary || '没有产生可保存的页面原型修改。'
+  let remotePlan: Record<string, unknown> | null = null
+
+  try {
+    remotePlan = props.workspaceId && props.projectCode
+      ? await planPrototypeEdit(props.workspaceId, props.projectCode, plannerPayload)
+      : buildPrototypeEditPlannerFallbackPlan(text)
+  } catch {
+    remotePlan = buildPrototypeEditPlannerFallbackPlan(text)
+  }
+
+  const plannedResult = applyPrototypeEditPlanBridge({
+    contract: current,
+    instruction: text,
+    plan: remotePlan as any,
+    focusedComponentId: moduleAppFocusedComponentId.value,
+    selection: selection as any,
+  })
+
+  if (!plannedResult.changed) {
+    if (isPrototypeLocalEditInstruction(text)) {
+      const fallbackLocal = applyPrototypeLocalEdit({
+        contract: current,
+        instruction: text,
+        focusedComponentId: moduleAppFocusedComponentId.value,
+        prototypeElementSelection: selection as any,
+        focusedPrototypeElementSelection: selection as any,
+        selectionRef: selection as any,
+      })
+      if (fallbackLocal.changed) {
+        moduleAppDraftContractCache.value = {
+          ...moduleAppDraftContractCache.value,
+          [pageKey]: fallbackLocal.contract,
+        }
+        moduleAppLastEditSummary.value = fallbackLocal.summary
+        return
+      }
+    }
+    moduleAppLastEditSummary.value = plannedResult.summary || '没有产生可保存的页面原型修改。'
     return
   }
 
   moduleAppDraftContractCache.value = {
     ...moduleAppDraftContractCache.value,
-    [pageKey]: result.contract,
+    [pageKey]: plannedResult.contract,
   }
-  moduleAppLastEditSummary.value = result.summary
+  moduleAppLastEditSummary.value = plannedResult.summary
 }
 
 async function handleModuleAppStudioSaveDraft() {
@@ -2815,46 +3821,35 @@ function deepCloneRecord<T extends Record<string, any>>(value: T): T {
 
 // A9.10.13.0.1 MODULE APP PROTOTYPE END
 
-// A9.9.4 auto-open Prototype Studio after new UI_CONTRACT generation completes.
+// A9.10.14.4.3.15.7.24L3B5B1_6_DISABLE_PROTOTYPE_AUTO_OPEN
+// 生成 UI_CONTRACT 后不再自动进入 Prototype Studio；用户必须手动点击“进入原型工作台”。
+// PAGE_SPEC 作为 UI_CONTRACT 的隐藏前置步骤时，也不能把用户提前带进工作台。
 const pendingPrototypeStudioAutoOpen = ref(false)
 const lastPrototypeStudioAutoOpenKey = ref('')
-
-watch(
-  () => props.isGeneratingUiContract,
-  (generating) => {
-    if (generating) {
-      pendingPrototypeStudioAutoOpen.value = true
-    }
-  },
-)
-
-watch(
-  () => [
-    props.isGeneratingUiContract,
-    props.uiContractArtifact?.artifactId || '',
-    props.uiContractArtifact?.versionNo || '',
-    hasPrototype.value,
-  ],
-  async ([generating, artifactId, versionNo, prototypeReady]) => {
-    if (generating || !pendingPrototypeStudioAutoOpen.value) return
-    if (!prototypeReady || !isPage.value || !uiContractObject.value) return
-
-    const autoOpenKey = `${artifactId || 'artifact'}:${versionNo || 'current'}`
-    if (autoOpenKey === lastPrototypeStudioAutoOpenKey.value) return
-
-    pendingPrototypeStudioAutoOpen.value = false
-    lastPrototypeStudioAutoOpenKey.value = autoOpenKey
-    await nextTick()
-    openPrototypeStudio()
-  },
-  { flush: 'post' },
-)
 const hasRequirementTree = computed(() => props.moduleTree.length > 0)
 
 const uiContractObject = computed<UiContractContent | null>(() => {
   const content = props.uiContractDraftContent || props.uiContractArtifact?.content || tryParseJson(props.uiContractMarkdown)
   return normalizeUiContractCandidate(content)
 })
+
+const prototypeStudioRuntimeContract = computed<UiContractContent | null>(() =>
+  prototypeStudioNavigatedContract.value || uiContractObject.value,
+)
+
+const prototypeStudioRuntimeTitle = computed(() =>
+  prototypeStudioNavigatedTitle.value || nodeName.value,
+)
+
+
+
+watch(
+  () => props.selectedModule?.id || '',
+  () => {
+    prototypeStudioNavigatedContract.value = null
+    prototypeStudioNavigatedTitle.value = ''
+  },
+)
 
 const prototypeComponentCount = computed(() => {
   return flattenComponents(uiContractObject.value?.page?.componentTree || []).length
@@ -4136,21 +5131,6 @@ void pageDescription
 
 
 /* A9.10.14.4.3.15.4.3.1_REQUIREMENT_UI_CLUTTER_CLEANUP_STYLE */
-.a9-prototype-impact-pill {
-  display: inline-flex;
-  align-items: center;
-  max-width: 320px;
-  min-height: 34px;
-  border: 1px solid #facc15;
-  border-radius: 999px;
-  padding: 7px 12px;
-  background: #fef3c7;
-  color: #92400e;
-  font-size: 12px;
-  font-weight: 900;
-  line-height: 1.35;
-  box-shadow: 0 10px 24px rgba(245, 158, 11, 0.12);
-}
 
 @media (max-width: 860px) {
   .a9-prototype-impact-pill {
@@ -6213,4 +7193,695 @@ void pageDescription
   flex: 0 0 auto;
 }
 
+
+/* A9.10.14.4.3.15.6.24J8A_PAGE_ENTRY_CLEAN_KEEP_MODULE_PREVIEW
+   Page-level prototype panel should only expose the page workbench entry.
+   Module-level full preview is a different button and is intentionally kept:
+   v-if="isModule && moduleAppEntryContract" @click="openModuleAppOverlay".
+*/
+.a9-prototype-ready,
+.a9-prototype-locked-target-card,
+.a9-prototype-quick-edit-card,
+.a9-prototype-version-status-panel,
+.a9-prototype-edit-explain-card,
+.a9-backstage-details {
+  display: none !important;
+}
+
+.a9-prototype-studio-entry-card {
+  margin-top: 0 !important;
+  border: 1px solid #bfdbfe !important;
+  border-radius: 18px !important;
+  padding: 16px 18px !important;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(37, 99, 235, 0.12), transparent 28%),
+    linear-gradient(135deg, #ffffff 0%, #f8fbff 100%) !important;
+}
+
+.a9-prototype-studio-entry-main p {
+  margin: 0 0 5px !important;
+  color: #2563eb !important;
+  font-size: 11px !important;
+  font-weight: 950 !important;
+  letter-spacing: 0.08em !important;
+}
+
+.a9-prototype-studio-entry-main strong {
+  display: block !important;
+  color: #0f172a !important;
+  font-size: 18px !important;
+  line-height: 1.35 !important;
+  font-weight: 950 !important;
+}
+
+.a9-prototype-studio-entry-main span {
+  display: block !important;
+  margin-top: 5px !important;
+  color: #475569 !important;
+  font-size: 13px !important;
+  line-height: 1.65 !important;
+}
+
+.a9-prototype-studio-entry-actions {
+  align-items: center !important;
+}
+
+.a9-prototype-draft-banner {
+  margin-top: 0 !important;
+}
+
+
+/* A9.10.14.4.3.15.6.24J8B_PAGE_PROTOTYPE_HEADER_CLEAN_CONFIRM
+   PAGE-level prototype area:
+   - status moves to the main regenerate button area;
+   - generated regenerate button uses warning/secondary style;
+   - page prototype section is flattened to avoid nested-card noise;
+   - MODULE-level "查看完整模块预览" remains untouched. */
+.a9-page-prototype-header-status {
+  display: inline-flex !important;
+  align-items: center !important;
+  height: 30px !important;
+  border-radius: 999px !important;
+  padding: 0 10px !important;
+  font-size: 12px !important;
+  line-height: 1 !important;
+  font-weight: 900 !important;
+  white-space: nowrap !important;
+}
+
+.a9-page-prototype-header-status.ready {
+  background: #dcfce7 !important;
+  color: #15803d !important;
+}
+
+.a9-page-prototype-header-status.waiting {
+  background: #f1f5f9 !important;
+  color: #64748b !important;
+}
+
+.a9-page-prototype-generate-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 34px !important;
+  border-radius: 999px !important;
+  padding: 8px 15px !important;
+  font-size: 13px !important;
+  font-weight: 900 !important;
+  cursor: pointer !important;
+  transition: all 0.16s ease !important;
+}
+
+.a9-page-prototype-generate-button.generate {
+  border: 1px solid #2563eb !important;
+  background: #2563eb !important;
+  color: #ffffff !important;
+  box-shadow: 0 12px 22px rgba(37, 99, 235, 0.22) !important;
+}
+
+.a9-page-prototype-generate-button.generate:hover:not(:disabled) {
+  background: #1d4ed8 !important;
+}
+
+.a9-page-prototype-generate-button.regenerate {
+  border: 1px solid #fdba74 !important;
+  background: #fff7ed !important;
+  color: #c2410c !important;
+  box-shadow: none !important;
+}
+
+.a9-page-prototype-generate-button.regenerate:hover:not(:disabled) {
+  border-color: #fb923c !important;
+  background: #ffedd5 !important;
+  color: #9a3412 !important;
+}
+
+.a9-page-prototype-generate-button:disabled {
+  opacity: 0.62 !important;
+  cursor: not-allowed !important;
+  box-shadow: none !important;
+}
+
+.a9-page-prototype-card {
+  padding: 16px 18px !important;
+}
+
+.a9-page-prototype-card > .a9-section-title-row {
+  margin-bottom: 8px !important;
+}
+
+.a9-page-prototype-card > .a9-section-title-row p {
+  display: none !important;
+}
+
+.a9-page-prototype-card > .a9-section-title-row > span.a9-status-ready,
+.a9-page-prototype-card > .a9-section-title-row > span.a9-status-waiting {
+  display: none !important;
+}
+
+.a9-page-prototype-card .a9-prd-impact-inline-banner {
+  display: none !important;
+}
+
+.a9-page-prototype-card .a9-prototype-ready,
+.a9-page-prototype-card .a9-prototype-empty:not(.warning) {
+  display: none !important;
+}
+
+.a9-page-prototype-card .a9-prototype-studio-entry-card {
+  margin-top: 2px !important;
+  border: none !important;
+  border-radius: 0 !important;
+  padding: 2px 0 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.a9-page-prototype-card .a9-prototype-studio-entry-main p {
+  display: none !important;
+}
+
+.a9-page-prototype-card .a9-prototype-studio-entry-main strong {
+  font-size: 18px !important;
+  line-height: 1.35 !important;
+}
+
+.a9-page-prototype-card .a9-prototype-studio-entry-main span {
+  margin-top: 5px !important;
+  color: #475569 !important;
+  font-size: 13px !important;
+}
+
+.a9-page-prototype-card .a9-prototype-studio-entry-actions .a9-primary-button {
+  min-height: 34px !important;
+  padding: 8px 15px !important;
+}
+
+/* A9.10.14.4.3.15.7.24L3B3C_HEADER_BUTTON_AND_STICKY_TOOLBAR_FIX */
+.a9-node-header {
+  display: grid !important;
+  grid-template-columns: minmax(260px, 1fr) auto minmax(260px, 1fr) !important;
+  align-items: start !important;
+  gap: 16px !important;
+}
+
+.a9-node-center-actions {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding-top: 12px !important;
+}
+
+.a9-node-actions {
+  justify-self: end !important;
+  display: inline-flex !important;
+  align-items: flex-start !important;
+  justify-content: flex-end !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+}
+
+.a9-module-preview-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  border: 1px solid #91caff !important;
+  border-radius: 8px !important;
+  padding: 0 14px !important;
+  background: #e6f4ff !important;
+  color: #0958d9 !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  line-height: 32px !important;
+  cursor: pointer !important;
+  box-shadow: 0 6px 14px rgba(22, 119, 255, 0.10) !important;
+  transition: all 0.16s ease !important;
+}
+
+.a9-module-preview-button:hover:not(:disabled) {
+  border-color: #4096ff !important;
+  background: #bae0ff !important;
+  color: #003eb3 !important;
+  transform: translateY(-1px);
+}
+
+.a9-ai-prd-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 32px !important;
+  min-height: 32px !important;
+  border: 1px solid #adc6ff !important;
+  border-radius: 8px !important;
+  padding: 0 14px !important;
+  background: linear-gradient(135deg, #f0f5ff 0%, #f9f0ff 100%) !important;
+  color: #1d39c4 !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  line-height: 32px !important;
+  cursor: pointer !important;
+  box-shadow: 0 6px 14px rgba(47, 84, 235, 0.10) !important;
+  transition: all 0.16s ease !important;
+}
+
+.a9-ai-prd-button:hover:not(:disabled) {
+  border-color: #597ef7 !important;
+  background: linear-gradient(135deg, #d6e4ff 0%, #efdbff 100%) !important;
+  color: #061178 !important;
+  transform: translateY(-1px);
+}
+
+.a9-ai-prd-button:disabled,
+.a9-module-preview-button:disabled {
+  opacity: 0.56 !important;
+  cursor: not-allowed !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+@media (max-width: 1080px) {
+  .a9-node-header {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .a9-node-center-actions,
+  .a9-node-actions {
+    justify-self: start !important;
+    justify-content: flex-start !important;
+    padding-top: 0 !important;
+  }
+}
+
+/* A9.10.14.4.3.15.7.24L3B3D_HEADER_ALIGN_AND_SMART_STICKY_TOOLBAR */
+.a9-node-header {
+  display: grid !important;
+  grid-template-columns: minmax(280px, 1fr) auto minmax(280px, 1fr) !important;
+  align-items: center !important;
+  gap: 18px !important;
+}
+
+.a9-node-header > div:first-child {
+  min-width: 0 !important;
+  align-self: center !important;
+}
+
+/* 去掉标题上方的“模块”这类弱提示，保留主标题即可 */
+.a9-node-header > div:first-child > span:first-child,
+.a9-node-header > div:first-child > small:first-child,
+.a9-node-header > div:first-child > p:first-child,
+.a9-node-header > div:first-child > .a9-node-type,
+.a9-node-header > div:first-child > .a9-node-kind,
+.a9-node-header > div:first-child > .a9-node-eyebrow,
+.a9-node-header > div:first-child > .a9-node-label,
+.a9-node-header > div:first-child > .node-type,
+.a9-node-header > div:first-child > .node-kind {
+  display: none !important;
+}
+
+.a9-node-header h3 {
+  margin-top: 0 !important;
+}
+
+.a9-node-center-actions {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  align-self: center !important;
+  padding-top: 0 !important;
+}
+
+.a9-node-actions {
+  justify-self: end !important;
+  align-self: center !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+}
+
+.a9-node-actions > span,
+.a9-node-actions > .a9-version-badge,
+.a9-node-actions > .artifact-version,
+.a9-node-actions > .version-badge,
+.a9-node-actions > .version-pill {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 28px !important;
+  line-height: 28px !important;
+  align-self: center !important;
+}
+
+.a9-module-preview-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  border: 1px solid #91caff !important;
+  border-radius: 8px !important;
+  padding: 0 16px !important;
+  background: #e6f4ff !important;
+  color: #0958d9 !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  line-height: 34px !important;
+  cursor: pointer !important;
+  box-shadow: 0 8px 18px rgba(22, 119, 255, 0.10) !important;
+  transition: all 0.16s ease !important;
+}
+
+.a9-module-preview-button:hover:not(:disabled) {
+  border-color: #4096ff !important;
+  background: #bae0ff !important;
+  color: #003eb3 !important;
+  transform: translateY(-1px);
+}
+
+.a9-ai-prd-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  border: 1px solid #adc6ff !important;
+  border-radius: 8px !important;
+  padding: 0 16px !important;
+  background: linear-gradient(135deg, #f0f5ff 0%, #f9f0ff 100%) !important;
+  color: #1d39c4 !important;
+  font-size: 13px !important;
+  font-weight: 850 !important;
+  line-height: 34px !important;
+  cursor: pointer !important;
+  box-shadow: 0 8px 18px rgba(47, 84, 235, 0.10) !important;
+  transition: all 0.16s ease !important;
+}
+
+.a9-ai-prd-button:hover:not(:disabled) {
+  border-color: #597ef7 !important;
+  background: linear-gradient(135deg, #d6e4ff 0%, #efdbff 100%) !important;
+  color: #061178 !important;
+  transform: translateY(-1px);
+}
+
+@media (max-width: 1080px) {
+  .a9-node-header {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .a9-node-center-actions,
+  .a9-node-actions {
+    justify-self: start !important;
+    justify-content: flex-start !important;
+  }
+}
+
+
+/* A9.10.14.4.3.15.7.24L3B5A2_SPLIT_SYNC_REGENERATE_AND_DIFF_ONLY */
+
+.a9-prd-sync-button {
+  white-space: nowrap;
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #ea580c;
+}
+
+.a9-generate-prototype-button {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+
+
+/* A9.10.14.4.3.15.7.24L3B5A3_HEADER_SYNC_CENTER_AND_PRD_EDITOR_GUIDE */
+.a9-node-header-three-slot {
+  display: grid !important;
+  grid-template-columns: minmax(220px, 1fr) minmax(260px, auto) minmax(260px, 1fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.a9-node-title-slot {
+  min-width: 0;
+}
+
+.a9-node-title-slot h3 {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.a9-node-sync-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  min-width: 0;
+}
+
+.a9-node-right-actions {
+  justify-content: flex-end;
+  align-items: center;
+  min-width: 0;
+}
+
+
+.a9-prd-sync-button {
+  white-space: nowrap;
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #ea580c;
+  box-shadow: none;
+}
+
+.a9-prd-sync-button:hover {
+  border-color: #fb923c;
+  background: #ffedd5;
+}
+
+.a9-page-prototype-generate-button {
+  white-space: nowrap;
+}
+
+@media (max-width: 1080px) {
+  .a9-node-header-three-slot {
+    grid-template-columns: 1fr;
+  }
+
+  .a9-node-sync-slot,
+  .a9-node-right-actions {
+    justify-content: flex-start;
+  }
+}
+
+
+
+/* A9.10.14.4.3.15.7.24L3B5A4_SINGLE_SYNC_BUTTON_ONLY */
+.a9-prd-sync-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid #91caff;
+  background: linear-gradient(180deg, #f0f7ff 0%, #e6f4ff 100%);
+  color: #0958d9;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.10);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.a9-prd-sync-button:hover:not(:disabled) {
+  border-color: #69b1ff;
+  background: linear-gradient(180deg, #e6f4ff 0%, #d6eaff 100%);
+  color: #096dd9;
+  box-shadow: 0 4px 12px rgba(22, 119, 255, 0.16);
+  transform: translateY(-1px);
+}
+
+.a9-prd-sync-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+
+
+/* A9.10.14.4.3.15.7.24L3B5B1_1_SYNC_GENERATE_UX_STATE_MACHINE */
+.a9-node-card-syncing {
+  position: relative;
+}
+
+.a9-node-card-syncing button:not(.a9-prd-sync-button) {
+  pointer-events: none;
+  opacity: 0.52;
+  filter: grayscale(0.15);
+}
+
+.a9-prd-sync-button.syncing {
+  cursor: wait;
+  opacity: 0.95;
+  box-shadow: 0 4px 14px rgba(22, 119, 255, 0.18);
+}
+
+.a9-prd-sync-button.syncing::before {
+  content: '';
+  width: 13px;
+  height: 13px;
+  margin-right: 8px;
+  border: 2px solid rgba(9, 88, 217, 0.22);
+  border-top-color: #0958d9;
+  border-radius: 999px;
+  animation: a9-prd-sync-spin 0.78s linear infinite;
+}
+
+@keyframes a9-prd-sync-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
+
+/* A9.10.14.4.3.15.7.24L3B5B1_2_FIX_SYNC_AUTOSAVE_AND_ASYNC_DUP */
+.a9-node-card-syncing {
+  position: relative;
+}
+
+.a9-node-card-syncing button:not(.a9-prd-sync-button) {
+  pointer-events: none;
+  opacity: 0.52;
+  filter: grayscale(0.15);
+}
+
+.a9-prd-sync-button.syncing {
+  cursor: wait;
+  opacity: 0.96;
+  box-shadow: 0 4px 14px rgba(22, 119, 255, 0.18);
+}
+
+.a9-prd-sync-button.syncing::before {
+  content: '';
+  width: 13px;
+  height: 13px;
+  margin-right: 8px;
+  border: 2px solid rgba(9, 88, 217, 0.22);
+  border-top-color: #0958d9;
+  border-radius: 999px;
+  animation: a9-prd-sync-spin 0.78s linear infinite;
+}
+
+@keyframes a9-prd-sync-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 </style>
+
+
+/* A9.10.14.4.3.15.7.24L3B3A_PRD_HEADER_AND_EDITOR_TOOLBAR_POLISH */
+.a9-node-header {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) !important;
+  align-items: start !important;
+  gap: 16px !important;
+}
+
+.a9-node-header > div:first-child {
+  min-width: 0 !important;
+}
+
+.a9-node-center-actions {
+  display: inline-flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  padding-top: 18px !important;
+}
+
+.a9-node-actions {
+  justify-self: end !important;
+  align-items: flex-start !important;
+  gap: 8px !important;
+}
+
+.a9-ai-prd-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 32px !important;
+  border: 1px solid #c4b5fd !important;
+  border-radius: 999px !important;
+  padding: 7px 13px !important;
+  background: linear-gradient(135deg, #f5f3ff 0%, #eef2ff 100%) !important;
+  color: #5b21b6 !important;
+  font-size: 13px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  cursor: pointer !important;
+  box-shadow: 0 8px 18px rgba(91, 33, 182, 0.09) !important;
+  transition: all 0.16s ease !important;
+}
+
+.a9-ai-prd-button:hover:not(:disabled) {
+  border-color: #8b5cf6 !important;
+  background: linear-gradient(135deg, #ede9fe 0%, #e0e7ff 100%) !important;
+  color: #4c1d95 !important;
+  transform: translateY(-1px);
+}
+
+.a9-ai-prd-button:disabled {
+  opacity: 0.58 !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.a9-module-preview-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 34px !important;
+  border: 1px solid #93c5fd !important;
+  border-radius: 999px !important;
+  padding: 8px 15px !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+  font-size: 13px !important;
+  font-weight: 900 !important;
+  line-height: 1 !important;
+  cursor: pointer !important;
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.10) !important;
+  transition: all 0.16s ease !important;
+}
+
+.a9-module-preview-button:hover:not(:disabled) {
+  border-color: #2563eb !important;
+  background: #dbeafe !important;
+  color: #1e40af !important;
+  transform: translateY(-1px);
+}
+
+.a9-header-module-preview-button {
+  display: none !important;
+}
+
+@media (max-width: 1080px) {
+  .a9-node-header {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .a9-node-center-actions,
+  .a9-node-actions {
+    justify-self: start !important;
+    padding-top: 0 !important;
+  }
+}
+

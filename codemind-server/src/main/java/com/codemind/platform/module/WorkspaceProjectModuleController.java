@@ -203,4 +203,23 @@ public class WorkspaceProjectModuleController {
                 moduleId
         );
     }
+
+    /**
+     * 24L0C: physically retire legacy FEATURE layer.
+     * dryRun=true only reports planned changes; dryRun=false migrates PAGE nodes
+     * to their visible MODULE parent and soft-deletes FEATURE nodes.
+     */
+    @PostMapping("/feature-layer/retire")
+    public Map<String, Object> retireFeatureLayer(
+            @PathVariable UUID workspaceId,
+            @PathVariable String projectCode,
+            @RequestParam(defaultValue = "true") boolean dryRun
+    ) {
+        return projectModuleService.retireFeatureLayerPhysical(
+                workspaceId,
+                projectCode,
+                dryRun
+        );
+    }
+
 }

@@ -1,0 +1,305 @@
+{
+  "schemaVersion" : "1.1",
+  "projectId" : "0df525f9-2981-48c5-a5b0-8ac6943392d3",
+  "projectCode" : "002",
+  "targetStack" : "NODEJS_FULLSTACK",
+  "root" : "generated/nodejs/002/app",
+  "runtimeUnit" : "PROJECT_CODEBASE",
+  "generationUnit" : "MODULE_TREE_NODE_CONTRIBUTION",
+  "previewUnit" : "PAGE_OR_FEATURE_SCENARIO",
+  "updatedAt" : "2026-07-30T12:33:19.968867400",
+  "nodes" : [ {
+    "nodeId" : "60f49770-533e-4f89-b997-19a3e1015afc",
+    "nodeType" : "MODULE",
+    "nodeName" : "认证模块",
+    "nodeKey" : "auth_module",
+    "moduleType" : "MODULE",
+    "previewRoute" : "/auth-module",
+    "sourceArtifactTypes" : [ "MODULE_PRD", "BUSINESS_FLOW", "PAGE_SPEC", "DATA_MODEL", "API_CONTRACT", "TEST_SPEC", "DEV_HANDOFF_PACKAGE", "UI_CONTRACT", "UI_CONTRACT_SNAPSHOT", "THEME_PROFILE_SNAPSHOT" ],
+    "ownedFiles" : [ "generated/nodejs/002/app/frontend/src/modules/generated/pages/GeneratedHomePage.vue", "generated/nodejs/002/app/frontend/src/modules/auth-module/index.js", "generated/nodejs/002/app/frontend/src/modules/auth-module/routes.js", "generated/nodejs/002/app/backend/src/modules/auth-module/auth-module.routes.js", "generated/nodejs/002/app/backend/src/modules/auth-module/auth-module.service.js" ],
+    "contributedFiles" : [ "generated/nodejs/002/app/package.json", "generated/nodejs/002/app/README.md", "generated/nodejs/002/app/frontend/package.json", "generated/nodejs/002/app/frontend/index.html", "generated/nodejs/002/app/frontend/vite.config.js", "generated/nodejs/002/app/frontend/src/main.js", "generated/nodejs/002/app/frontend/src/App.vue", "generated/nodejs/002/app/frontend/src/router/routes.js", "generated/nodejs/002/app/frontend/src/shared/styles/app.css", "generated/nodejs/002/app/backend/package.json", "generated/nodejs/002/app/backend/server.js", "generated/nodejs/002/app/backend/src/app.js", "generated/nodejs/002/app/backend/src/routes/index.js", "generated/nodejs/002/app/backend/src/shared/response.js", "generated/nodejs/002/app/backend/src/db/localStore.js", "generated/nodejs/002/app/backend/src/db/seedData.js", "generated/nodejs/002/app/database/schema.json", "generated/nodejs/002/app/database/seed.json", "generated/nodejs/002/app/tests/smoke.spec.js", "generated/nodejs/002/app/frontend/src/api/authApi.js", "generated/nodejs/002/app/frontend/src/pages/LoginPage.vue", "generated/nodejs/002/app/frontend/src/pages/RegisterPage.vue", "generated/nodejs/002/app/frontend/src/pages/UserHomePage.vue" ],
+    "updatedAt" : "2026-07-30T12:33:18.671279600"
+  } ],
+  "fileHashStrategy" : "SHA256_AFTER_MATERIALIZE",
+  "generatedFiles" : [ {
+    "path" : "generated/nodejs/002/app/package.json",
+    "relativePath" : "package.json",
+    "sha256" : "2c1d7b0342c57faac709212d1cfece23c3b50ae81cd6b5e08578fed19e9a4702",
+    "fileType" : "CONFIG",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "DEV_HANDOFF_PACKAGE",
+    "language" : "json",
+    "bytes" : 575,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.956967100"
+  }, {
+    "path" : "generated/nodejs/002/app/README.md",
+    "relativePath" : "README.md",
+    "sha256" : "166bbb35ddebf10de68e81bfed1fc35498f8e07ce23b167f200d74f712b7c114",
+    "fileType" : "DOC",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "DEV_HANDOFF_PACKAGE",
+    "language" : "markdown",
+    "bytes" : 1159,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.957537900"
+  }, {
+    "path" : "generated/nodejs/002/app/frontend/package.json",
+    "relativePath" : "frontend/package.json",
+    "sha256" : "0b17294b8e0dff0acaca1f9fac6cb953c386b39ede09dbede92a32f6e42e6ca6",
+    "fileType" : "CONFIG",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "DEV_HANDOFF_PACKAGE",
+    "language" : "json",
+    "bytes" : 386,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.958104700"
+  }, {
+    "path" : "generated/nodejs/002/app/frontend/index.html",
+    "relativePath" : "frontend/index.html",
+    "sha256" : "f9610748fd73486128a1565b221ae88e5184c76c0a9544c1d56eb7d442d1b83d",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_KEEP",
+    "source" : "UI_CONTRACT",
+    "language" : "html",
+    "bytes" : 311,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.958104700"
+  }, {
+    "path" : "generated/nodejs/002/app/frontend/vite.config.js",
+    "relativePath" : "frontend/vite.config.js",
+    "sha256" : "c8ee217e05ac778c84ae1d5a2d00b1a176ba9592a83c6736b6bdede3d264665c",
+    "fileType" : "CONFIG",
+    "action" : "CREATE_OR_KEEP",
+    "source" : "DEV_HANDOFF_PACKAGE",
+    "language" : "javascript",
+    "bytes" : 204,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.958670600"
+  }, {
+    "path" : "generated/nodejs/002/app/frontend/src/main.js",
+    "relativePath" : "frontend/src/main.js",
+    "sha256" : "fb757b85a0d84af72ff65bf018fcb64177c53a3078a6c7e8501e5b0566adc3e3",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_KEEP",
+    "source" : "UI_CONTRACT",
+    "language" : "javascript",
+    "bytes" : 124,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.959289200"
+  }, {
+    "path" : "generated/nodejs/002/app/frontend/src/App.vue",
+    "relativePath" : "frontend/src/App.vue",
+    "sha256" : "e7d8868d97f465318e13a6e58ca8e8cdb208db723e7460232ee88708554629a8",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_KEEP",
+    "source" : "AGENT_CONTRACT_COMPLETION",
+    "language" : "vue",
+    "bytes" : 1047,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.959828300"
+  }, {
+    "path" : "generated/nodejs/002/app/frontend/src/router/routes.js",
+    "relativePath" : "frontend/src/router/routes.js",
+    "sha256" : "86f8c07d2f72034a3097da6efb7c69a320677880f7e2206394bc93c21fd5b706",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "AGENT_CONTRACT_COMPLETION",
+    "language" : "javascript",
+    "bytes" : 549,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.959828300"
+  }, {
+    "path" : "generated/nodejs/002/app/frontend/src/modules/generated/pages/GeneratedHomePage.vue",
+    "relativePath" : "frontend/src/modules/generated/pages/GeneratedHomePage.vue",
+    "sha256" : "7f887ce2a3b2c5ed3f825a6b8057183795b146fa0799455fe3480fa10b68d070",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_KEEP",
+    "source" : "DEV_HANDOFF_PACKAGE",
+    "language" : "vue",
+    "bytes" : 260,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.960867400"
+  }, {
+    "path" : "generated/nodejs/002/app/frontend/src/shared/styles/app.css",
+    "relativePath" : "frontend/src/shared/styles/app.css",
+    "sha256" : "7d0ee32eebfa73d2fa6328b7e08309709f2d776c149b2c3a4cb75951c70465f8",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "AGENT_CONTRACT_COMPLETION",
+    "language" : "css",
+    "bytes" : 2578,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.960867400"
+  }, {
+    "path" : "generated/nodejs/002/app/backend/package.json",
+    "relativePath" : "backend/package.json",
+    "sha256" : "c6e74c66f6518c64c037831db9d6b94d44c167e928f5d7a0e8f75baedad2e125",
+    "fileType" : "CONFIG",
+    "action" : "CREATE_OR_KEEP",
+    "source" : "DEV_HANDOFF_PACKAGE",
+    "language" : "json",
+    "bytes" : 264,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.960867400"
+  }, {
+    "path" : "generated/nodejs/002/app/backend/server.js",
+    "relativePath" : "backend/server.js",
+    "sha256" : "dfcbcd0d5d6518babe367cb5d0ae11ffdae5e56a6b17189c0dbf910821572dba",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_KEEP",
+    "source" : "API_CONTRACT + DEV_HANDOFF_PACKAGE",
+    "language" : "javascript",
+    "bytes" : 215,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.961868600"
+  }, {
+    "path" : "generated/nodejs/002/app/backend/src/app.js",
+    "relativePath" : "backend/src/app.js",
+    "sha256" : "7786ba583924d39c7ed0624a89226c33594b13f928106d92d6944692eec4eef3",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_KEEP",
+    "source" : "API_CONTRACT",
+    "language" : "javascript",
+    "bytes" : 498,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.961868600"
+  }, {
+    "path" : "generated/nodejs/002/app/backend/src/routes/index.js",
+    "relativePath" : "backend/src/routes/index.js",
+    "sha256" : "d191fd314d2dc5e771f681abbe076371e41ace5279fac332d3f4c42d94275521",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "AGENT_CONTRACT_COMPLETION",
+    "language" : "javascript",
+    "bytes" : 170,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.962845200"
+  }, {
+    "path" : "generated/nodejs/002/app/backend/src/shared/response.js",
+    "relativePath" : "backend/src/shared/response.js",
+    "sha256" : "4831ff82c4f72e3d0d5a8223296eac035e3e4ef9bbe5453ec4795116941c9c43",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_KEEP",
+    "source" : "API_CONTRACT",
+    "language" : "javascript",
+    "bytes" : 317,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.962845200"
+  }, {
+    "path" : "generated/nodejs/002/app/backend/src/db/localStore.js",
+    "relativePath" : "backend/src/db/localStore.js",
+    "sha256" : "7981327bd5e174cd1aebb8763a85e76690b94b83ed24b048223470e91a4dfce3",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_KEEP",
+    "source" : "DATA_MODEL",
+    "language" : "javascript",
+    "bytes" : 738,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.963867500"
+  }, {
+    "path" : "generated/nodejs/002/app/backend/src/db/seedData.js",
+    "relativePath" : "backend/src/db/seedData.js",
+    "sha256" : "3d47d50bcfeec9c7f55794be8ee9857a0aab2929453d14cea0b7d8969df898fb",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "AGENT_CONTRACT_COMPLETION",
+    "language" : "javascript",
+    "bytes" : 214,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.963867500"
+  }, {
+    "path" : "generated/nodejs/002/app/database/schema.json",
+    "relativePath" : "database/schema.json",
+    "sha256" : "0712330781daee4af6fb99926d5fe74e56fa2b642841a4bfda010a6782468b01",
+    "fileType" : "DATABASE",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "AGENT_CONTRACT_COMPLETION",
+    "language" : "json",
+    "bytes" : 517,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.963867500"
+  }, {
+    "path" : "generated/nodejs/002/app/database/seed.json",
+    "relativePath" : "database/seed.json",
+    "sha256" : "94554c1cd6c427b35e9025d0c2f7b2c293b40c4dc3be664aa6cc0fd8c38ac62b",
+    "fileType" : "DATABASE",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "AGENT_CONTRACT_COMPLETION",
+    "language" : "json",
+    "bytes" : 146,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.964869500"
+  }, {
+    "path" : "generated/nodejs/002/app/tests/smoke.spec.js",
+    "relativePath" : "tests/smoke.spec.js",
+    "sha256" : "7d444cb15c23d25844e47c81e95227fa22d5578105007130d2d78a6882154b38",
+    "fileType" : "TEST",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "AGENT_CONTRACT_COMPLETION",
+    "language" : "javascript",
+    "bytes" : 1220,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.964869500"
+  }, {
+    "path" : "generated/nodejs/002/app/frontend/src/modules/auth-module/index.js",
+    "relativePath" : "frontend/src/modules/auth-module/index.js",
+    "sha256" : "76a88339858ab2ac64f1d825c20cfb06e31e8c9a3c2c44943c5e62ffe8145e96",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "MODULE_PRD + BUSINESS_FLOW",
+    "language" : "javascript",
+    "bytes" : 461,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.966869400"
+  }, {
+    "path" : "generated/nodejs/002/app/frontend/src/modules/auth-module/routes.js",
+    "relativePath" : "frontend/src/modules/auth-module/routes.js",
+    "sha256" : "3f02a37c51e91b36f66966c3490008bb3b5531c719b01379d92e07f17b566c79",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "MODULE_PRD",
+    "language" : "javascript",
+    "bytes" : 32,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.967867300"
+  }, {
+    "path" : "generated/nodejs/002/app/backend/src/modules/auth-module/auth-module.routes.js",
+    "relativePath" : "backend/src/modules/auth-module/auth-module.routes.js",
+    "sha256" : "6bd813308ba1aa045864ab90979c2b4670d08eda766a661b3c24478cd1e95f5f",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "AGENT_CONTRACT_COMPLETION",
+    "language" : "javascript",
+    "bytes" : 726,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.967867300"
+  }, {
+    "path" : "generated/nodejs/002/app/frontend/src/api/authApi.js",
+    "relativePath" : "frontend/src/api/authApi.js",
+    "sha256" : "cceed74968fb2c3e8a5a17646fb6da889f089203a8a3ea89c556259837e5fef4",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "AGENT_CONTRACT_COMPLETION",
+    "language" : "javascript",
+    "bytes" : 851,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.965867300"
+  }, {
+    "path" : "generated/nodejs/002/app/frontend/src/pages/LoginPage.vue",
+    "relativePath" : "frontend/src/pages/LoginPage.vue",
+    "sha256" : "4e330aed6c6c75823fb83af04c293080e8e28869d04b8fe825dff40a2e5daf29",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "AGENT_CONTRACT_COMPLETION",
+    "language" : "vue",
+    "bytes" : 1774,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.965867300"
+  }, {
+    "path" : "generated/nodejs/002/app/frontend/src/pages/RegisterPage.vue",
+    "relativePath" : "frontend/src/pages/RegisterPage.vue",
+    "sha256" : "34993107d086ba88619e14bda1121419092a748a7e9d340607b16452ec1d96ad",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "AGENT_CONTRACT_COMPLETION",
+    "language" : "vue",
+    "bytes" : 2145,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.966869400"
+  }, {
+    "path" : "generated/nodejs/002/app/frontend/src/pages/UserHomePage.vue",
+    "relativePath" : "frontend/src/pages/UserHomePage.vue",
+    "sha256" : "2a5828093b9d5166a72d55bf308e5554338e455e0dc789289f278fac7fee3572",
+    "fileType" : "FRONTEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "AGENT_CONTRACT_COMPLETION",
+    "language" : "vue",
+    "bytes" : 2257,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.966869400"
+  }, {
+    "path" : "generated/nodejs/002/app/backend/src/modules/auth-module/auth-module.service.js",
+    "relativePath" : "backend/src/modules/auth-module/auth-module.service.js",
+    "sha256" : "2ea1e1e7c0fbda590c92ae8c41bfd8080a28e06575e3f4fe024c3da8cdf36640",
+    "fileType" : "BACKEND",
+    "action" : "CREATE_OR_UPDATE",
+    "source" : "AGENT_CONTRACT_COMPLETION",
+    "language" : "javascript",
+    "bytes" : 2049,
+    "lastGeneratedAt" : "2026-07-30T12:33:19.968867400"
+  } ]
+}

@@ -117,7 +117,6 @@ const parentOptions = computed<ParentOption[]>(() => {
   }
 
   const options: ParentOption[] = []
-  const nodeType = resolveRequirementNodeType(node)
 
   if (canMoveToRoot(node)) {
     options.push({

@@ -159,9 +159,9 @@
                       <strong>{{ moduleTitle || '模块应用' }}</strong>
                     </div>
 
-                    <nav v-if="visibleNavigation.length" class="module-app-topbar-menu" aria-label="模块顶部导航">
+                    <nav v-if="shellTopNavigationItems.length" class="module-app-topbar-menu" aria-label="模块顶部导航">
                       <button
-                        v-for="item in visibleNavigation"
+                        v-for="item in shellTopNavigationItems"
                         :key="item.pageKey || item.route || item.label"
                         type="button"
                         :class="{
@@ -197,9 +197,9 @@
                       <span>导航栏属于模块应用原型，可选中后保存到 MODULE_APP_CONTRACT。</span>
                     </header>
 
-                    <nav v-if="visibleNavigation.length" class="module-app-shell-menu" aria-label="模块左侧导航">
+                    <nav v-if="shellSidebarNavigationItems.length" class="module-app-shell-menu" aria-label="模块左侧导航">
                       <button
-                        v-for="item in visibleNavigation"
+                        v-for="item in shellSidebarNavigationItems"
                         :key="item.pageKey || item.route || item.label"
                         type="button"
                         :class="{
@@ -281,10 +281,13 @@
                       :key="runtimeKey"
                       :contract="activeContract"
                       :project-theme-profile="projectThemeProfile || null"
+                      :initial-row-context="initialRowContext || null"
+                      :initial-runtime-data-session="initialRuntimeDataSession || null"
                       :focus-component-id="pageFocusedComponentId"
                       :focus-element-selection="pageFocusedElementSelection"
                       :inspect-component-mode="inspectMode"
                       :navigate-request="runtimeNavigateRequest"
+                      @prototype-navigate="handleRuntimeNavigateRequest"
                       display-mode="artboard"
                       @select-component="handlePageSelect"
                       @exit-inspect-mode="inspectMode = false"
@@ -366,13 +369,16 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { ProjectThemeProfile } from '../types/themeProfile'
 import type { UiContractContent } from '../types/uiContract'
 import UiContractPreviewRuntime from './UiContractPreviewRuntime.vue'
+import { inferSurface } from '../domain/pageSemantics'
 
 defineOptions({
   name: 'ModuleAppPrototypeStudioOverlay',
 })
 
+// A9.10.14.4.3.15.6.24L2C4F_RUNTIME_NAVIGATE_REQUEST_CLOSURE
+
 type ZoomMode = 'auto' | '50' | '67' | '75' | '80' | '90' | '100' | '110' | '125'
-type ShellLayout = 'SIDEBAR' | 'TOP_NAV' | 'ACTION_HUB' | 'NO_NAV'
+type ShellLayout = 'SIDEBAR' | 'TOPBAR' | 'SIDEBAR_TOPBAR' | 'ACTION_HUB' | 'NONE'
 
 type QuickAction = {
   key: string
@@ -416,6 +422,8 @@ const props = withDefaults(
     activePage?: Record<string, any> | null
     activePageRoute?: string
     activeContract?: UiContractContent | null
+    initialRowContext?: Record<string, unknown> | null
+    initialRuntimeDataSession?: Record<string, unknown> | null
     projectThemeProfile?: ProjectThemeProfile | null
     focusedComponentId?: string | null
     focusedComponentLabel?: string
@@ -437,6 +445,8 @@ const props = withDefaults(
     activePage: null,
     activePageRoute: '',
     activeContract: null,
+    initialRowContext: null,
+    initialRuntimeDataSession: null,
     projectThemeProfile: null,
     focusedComponentId: null,
     focusedComponentLabel: '',
@@ -524,29 +534,38 @@ const normalizedLayout = computed<ShellLayout>(() => {
 
   const text = `${raw} ${props.moduleTitle} ${props.moduleAppContract?.moduleName || ''}`
 
-  if (/NO_NAV|NONE|WITHOUT_NAV|ACTION_HUB|BUTTON_FLOW|FLOW_ONLY|无导航|按钮/.test(text)) {
-    return visibleNavigation.value.length ? 'ACTION_HUB' : 'NO_NAV'
+  if (/NO_NAV|NONE|WITHOUT_NAV|无导航/.test(text)) {
+    return visibleNavigation.value.length ? 'ACTION_HUB' : 'NONE'
   }
 
-  if (/TOP|HEADER|HORIZONTAL|TABS|WEBSITE|PORTAL|ECOMMERCE|MARKETPLACE|顶部|横向|电商|商城|门户|官网/.test(text)) {
-    return 'TOP_NAV'
+  if (/ACTION_HUB|BUTTON_FLOW|FLOW_ONLY|按钮|动作/.test(text)) {
+    return 'ACTION_HUB'
+  }
+
+  if (/SIDEBAR_TOPBAR|MIXED|SIDE_TOP|TOP_SIDE|组合|混合/.test(text)) {
+    return 'SIDEBAR_TOPBAR'
+  }
+
+  if (/TOPBAR|TOP|HEADER|HORIZONTAL|TABS|WEBSITE|PORTAL|ECOMMERCE|MARKETPLACE|顶部|横向|电商|商城|门户|官网/.test(text)) {
+    return 'TOPBAR'
   }
 
   if (!visibleNavigation.value.length) {
-    return raw ? 'NO_NAV' : 'ACTION_HUB'
+    return raw ? 'NONE' : 'ACTION_HUB'
   }
 
   return 'SIDEBAR'
 })
 
 const shellLayoutClass = computed(() => `layout-${normalizedLayout.value.toLowerCase().replace(/_/g, '-')}`)
-const usesSidebarNavigation = computed(() => normalizedLayout.value === 'SIDEBAR')
-const usesTopNavigation = computed(() => normalizedLayout.value === 'TOP_NAV')
-const usesActionHub = computed(() => normalizedLayout.value === 'ACTION_HUB' || normalizedLayout.value === 'NO_NAV')
+const usesSidebarNavigation = computed(() => normalizedLayout.value === 'SIDEBAR' || normalizedLayout.value === 'SIDEBAR_TOPBAR')
+const usesTopNavigation = computed(() => normalizedLayout.value === 'TOPBAR' || normalizedLayout.value === 'SIDEBAR_TOPBAR')
+const usesActionHub = computed(() => normalizedLayout.value === 'ACTION_HUB' || normalizedLayout.value === 'NONE')
 const shellLayoutLabel = computed(() => {
-  if (normalizedLayout.value === 'TOP_NAV') return '顶部导航应用壳'
+  if (normalizedLayout.value === 'SIDEBAR_TOPBAR') return '侧边 + 顶部组合应用壳'
+  if (normalizedLayout.value === 'TOPBAR') return '顶部导航应用壳'
   if (normalizedLayout.value === 'ACTION_HUB') return '动作流转应用壳'
-  if (normalizedLayout.value === 'NO_NAV') return '无导航应用壳'
+  if (normalizedLayout.value === 'NONE') return '无导航应用壳'
   return '左侧导航应用壳'
 })
 const shellTheme = computed(() => {
@@ -555,6 +574,15 @@ const shellTheme = computed(() => {
   if (['blue', 'light', 'dark', 'green'].includes(theme)) return theme
   return usesTopNavigation.value ? 'light' : 'dark'
 })
+
+const shellTopNavigationItems = computed<Record<string, any>[]>(() => {
+  if (normalizedLayout.value === 'SIDEBAR_TOPBAR') {
+    return visibleNavigation.value.slice(0, 4)
+  }
+  return visibleNavigation.value
+})
+
+const shellSidebarNavigationItems = computed<Record<string, any>[]>(() => visibleNavigation.value)
 
 const activeEdgeActions = computed<Record<string, any>[]>(() => {
   const active = props.activePage
@@ -621,10 +649,224 @@ const artboardScaleStyle = computed(() => ({
 // A9.10.14.4.3.15.4.5.2_REAL_THUMBNAIL_AND_TYPE_HOTFIX
 // Keep the child Runtime prop typed loosely here because UiContractPreviewRuntime
 // owns the exact PrototypeNavigatePayload type and this overlay only forwards it.
-const runtimeNavigateRequest = computed<((payload: any) => any) | undefined>(() => {
-  const handler = props.navigateRequest
-  if (!handler) return undefined
-  return (payload: any) => handler(recordValue(payload) || {})
+// A9.10.14.4.3.15.6.24L2C4F_RUNTIME_NAVIGATE_REQUEST_CLOSURE
+// Runtime NAVIGATE must actually switch the active module-app page.
+// If the parent did not pass navigateRequest, this overlay resolves the target page
+// from pageNavigatorItems/navigation/allPages and emits navigatePage itself.
+function a924l2c4fText(...values: unknown[]): string {
+  for (const value of values) {
+    if (value === null || value === undefined) continue
+    const text = String(value).trim()
+    if (text) return text
+  }
+  return ''
+}
+
+function a924l2c4fNormalize(value: unknown): string {
+  return a924l2c4fText(value)
+    .toLowerCase()
+    .replace(/[\s_\-\/]+/g, '')
+    .replace(/[^\da-z\u4e00-\u9fff]+/g, '')
+}
+
+function a924l2c4fRecord(value: unknown): Record<string, any> {
+  return recordValue(value) || {}
+}
+
+function a924l2c4fCandidatePages(): Record<string, any>[] {
+  const result: Record<string, any>[] = []
+  const seen = new Set<string>()
+
+  const push = (value: unknown) => {
+    const item = a924l2c4fRecord(value)
+    if (!Object.keys(item).length) return
+
+    const key = [
+      item.id,
+      item.pageId,
+      item.targetPageId,
+      item.moduleId,
+      item.pageKey,
+      item.targetPageKey,
+      item.route,
+      item.routePath,
+      item.label,
+      item.pageName,
+      item.targetPageName,
+      item.title,
+    ].map((part) => a924l2c4fText(part)).filter(Boolean).join('|')
+
+    if (!key || seen.has(key)) return
+    seen.add(key)
+    result.push(item)
+  }
+
+  ;(props.pageNavigatorItems || []).forEach(push)
+  ;(props.navigation || []).forEach(push)
+  visibleNavigation.value.forEach(push)
+  allPages.value.forEach(push)
+
+  return result
+}
+
+function a924l2c4fResolvePageFromPayload(payload: Record<string, any>): Record<string, any> | null {
+  const targetId = a924l2c4fText(
+    payload.targetPageId,
+    payload.pageId,
+    payload.moduleId,
+    payload.id,
+  )
+  const targetKey = a924l2c4fText(
+    payload.targetPageKey,
+    payload.pageKey,
+    payload.moduleKey,
+    payload.key,
+  )
+  const targetName = a924l2c4fText(
+    payload.targetPageName,
+    payload.pageName,
+    payload.moduleName,
+    payload.label,
+    payload.title,
+  )
+  const targetRoute = a924l2c4fText(
+    payload.route,
+    payload.targetRoute,
+    payload.routePath,
+    payload.path,
+  )
+
+  const targetIdNorm = a924l2c4fNormalize(targetId)
+  const targetKeyNorm = a924l2c4fNormalize(targetKey)
+  const targetNameNorm = a924l2c4fNormalize(targetName)
+  const targetRouteNorm = a924l2c4fNormalize(targetRoute)
+
+  for (const item of a924l2c4fCandidatePages()) {
+    const itemIdNorm = a924l2c4fNormalize(
+      item.id ||
+      item.pageId ||
+      item.targetPageId ||
+      item.moduleId ||
+      item.nodeId,
+    )
+    const itemKeyNorm = a924l2c4fNormalize(
+      item.pageKey ||
+      item.targetPageKey ||
+      item.moduleKey ||
+      item.key,
+    )
+    const itemNameNorm = a924l2c4fNormalize(
+      item.pageName ||
+      item.targetPageName ||
+      item.moduleName ||
+      item.label ||
+      item.title ||
+      item.name,
+    )
+    const itemRouteNorm = a924l2c4fNormalize(
+      item.route ||
+      item.routePath ||
+      item.targetRoute ||
+      item.path,
+    )
+
+    if (targetIdNorm && itemIdNorm && targetIdNorm === itemIdNorm) return item
+    if (targetKeyNorm && itemKeyNorm && targetKeyNorm === itemKeyNorm) return item
+    if (targetRouteNorm && itemRouteNorm && targetRouteNorm === itemRouteNorm) return item
+    if (targetNameNorm && itemNameNorm && targetNameNorm === itemNameNorm) return item
+  }
+
+  return null
+}
+
+type RuntimeNavigateResult = {
+  ok: boolean
+  code:
+    | 'SUCCESS'
+    | 'TARGET_NOT_FOUND'
+    | 'ARTIFACT_NOT_FOUND'
+    | 'INVALID_CONTRACT'
+    | 'LOAD_FAILED'
+    | 'BUSY'
+    | 'ROUTER_UNAVAILABLE'
+  message: string
+  targetPageId?: string | null
+  targetPageKey?: string | null
+  targetPageName?: string | null
+  route?: string | null
+}
+
+async function handleRuntimeNavigateRequest(payload: any): Promise<RuntimeNavigateResult> {
+  const payloadRecord = a924l2c4fRecord(payload)
+
+  if (props.navigateRequest) {
+    try {
+      const result = await props.navigateRequest(payloadRecord)
+      const resultRecord = a924l2c4fRecord(result)
+
+      if (resultRecord.ok !== false) {
+        return {
+          ok: true,
+          code: 'SUCCESS',
+          message: a924l2c4fText(resultRecord.message, '页面已切换。'),
+          targetPageId: payloadRecord.targetPageId || null,
+          targetPageKey: payloadRecord.targetPageKey || null,
+          targetPageName: payloadRecord.targetPageName || null,
+          route: payloadRecord.route || null,
+          ...resultRecord,
+        }
+      }
+    } catch {
+      // Fall through to local overlay navigation.
+    }
+  }
+
+  const targetPage = a924l2c4fResolvePageFromPayload(payloadRecord)
+
+  if (targetPage) {
+    emit('navigatePage', targetPage)
+    return {
+      ok: true,
+      code: 'SUCCESS',
+      message: `已切换到：${a924l2c4fText(
+        targetPage.pageName,
+        targetPage.targetPageName,
+        targetPage.label,
+        targetPage.title,
+        payloadRecord.targetPageName,
+        '目标页面',
+      )}`,
+      targetPageId: a924l2c4fText(targetPage.pageId, targetPage.targetPageId, targetPage.id, payloadRecord.targetPageId),
+      targetPageKey: a924l2c4fText(targetPage.pageKey, targetPage.targetPageKey, targetPage.key, payloadRecord.targetPageKey),
+      targetPageName: a924l2c4fText(targetPage.pageName, targetPage.targetPageName, targetPage.label, targetPage.title, payloadRecord.targetPageName),
+      route: a924l2c4fText(targetPage.route, targetPage.routePath, targetPage.targetRoute, payloadRecord.route),
+    }
+  }
+
+  // Last fallback: send the payload upward. Parent handlers that can resolve by targetPageId/targetPageKey
+  // still get the chance to switch.
+  emit('navigatePage', {
+    ...payloadRecord,
+    pageId: payloadRecord.targetPageId || payloadRecord.pageId,
+    pageKey: payloadRecord.targetPageKey || payloadRecord.pageKey,
+    pageName: payloadRecord.targetPageName || payloadRecord.pageName || payloadRecord.label,
+    route: payloadRecord.route || payloadRecord.targetRoute,
+    label: payloadRecord.targetPageName || payloadRecord.label || '目标页面',
+  })
+
+  return {
+    ok: true,
+    code: 'SUCCESS',
+    message: `已提交页面切换：${a924l2c4fText(payloadRecord.targetPageName, payloadRecord.label, '目标页面')}`,
+    targetPageId: payloadRecord.targetPageId || null,
+    targetPageKey: payloadRecord.targetPageKey || null,
+    targetPageName: payloadRecord.targetPageName || null,
+    route: payloadRecord.route || null,
+  }
+}
+
+const runtimeNavigateRequest = computed<((payload: any) => Promise<RuntimeNavigateResult> | RuntimeNavigateResult)>(() => {
+  return handleRuntimeNavigateRequest
 })
 
 const runtimeKey = computed(() => {
@@ -859,19 +1101,17 @@ function pageNavigatorKind(page: Record<string, any>): string {
     page.title,
     page.routePath,
     page.route,
-  ].map((item) => String(item || '')).join(' ').toUpperCase()
+  ].map((item) => String(item || '')).join(' ')
 
-  if (/APPROVAL|AUDIT|REVIEW|审批|审核|复核/.test(text)) return 'APPROVAL'
-  if (/DETAIL|PROFILE|详情|档案/.test(text)) return 'DETAIL'
-  if (/CREATE|NEW|ADD|EDIT|FORM|WIZARD|创建|新建|新增|编辑|修改|表单/.test(text)) return 'FORM'
-  if (/DASHBOARD|REPORT|ANALYTICS|看板|统计|报表|分析/.test(text)) return 'DASHBOARD'
-  if (/CONFIG|SETTING|设置|配置/.test(text)) return 'CONFIG'
-  if (/PORTAL|HOME|门户|首页/.test(text)) return 'PORTAL'
-  return 'LIST'
+  return inferSurface(text)
 }
 
+
 function pageNavigatorKindLabel(page: Record<string, any>): string {
-  const kind = pageNavigatorKind(page)
+  const kind = pageNavigatorKind(page) === 'UPLOAD' || pageNavigatorKind(page) === 'WIZARD' ? 'FORM'
+  : pageNavigatorKind(page) === 'SEARCH_LIST' ? 'LIST'
+  : pageNavigatorKind(page) === 'CUSTOM' ? 'LIST'
+  : pageNavigatorKind(page)
   if (kind === 'APPROVAL') return '审核页'
   if (kind === 'DETAIL') return '详情页'
   if (kind === 'FORM') return '表单页'
@@ -882,7 +1122,10 @@ function pageNavigatorKindLabel(page: Record<string, any>): string {
 }
 
 function pageNavigatorThumbnailBlocks(page: Record<string, any>): string[] {
-  const kind = pageNavigatorKind(page)
+  const kind = pageNavigatorKind(page) === 'UPLOAD' || pageNavigatorKind(page) === 'WIZARD' ? 'FORM'
+  : pageNavigatorKind(page) === 'SEARCH_LIST' ? 'LIST'
+  : pageNavigatorKind(page) === 'CUSTOM' ? 'LIST'
+  : pageNavigatorKind(page)
   if (kind === 'FORM') {
     return ['header', 'field-a', 'field-b', 'field-c', 'field-d', 'actions']
   }
@@ -1471,13 +1714,34 @@ void pageNavigatorThumbnailBlocks
   grid-template-columns: 230px minmax(0, 1fr);
 }
 
-.module-app-shell.layout-top-nav {
+.module-app-shell.layout-sidebar-topbar {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  grid-template-rows: 72px minmax(0, 1fr);
+}
+
+.module-app-shell.layout-sidebar-topbar .module-app-shell-topbar {
+  grid-column: 1 / -1;
+}
+
+.module-app-shell.layout-sidebar-topbar .module-app-shell-sidebar {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.module-app-shell.layout-sidebar-topbar .module-app-shell-page {
+  grid-column: 2;
+  grid-row: 2;
+  height: 828px;
+}
+
+.module-app-shell.layout-topbar {
   display: grid;
   grid-template-rows: 72px minmax(0, 1fr);
 }
 
 .module-app-shell.layout-action-hub,
-.module-app-shell.layout-no-nav {
+.module-app-shell.layout-none {
   display: block;
 }
 
@@ -1644,13 +1908,15 @@ void pageNavigatorThumbnailBlocks
   scrollbar-gutter: stable;
 }
 
-.layout-top-nav .module-app-shell-page,
+.layout-topbar .module-app-shell-page,
+.layout-sidebar-topbar .module-app-shell-page,
 .layout-action-hub .module-app-shell-page,
-.layout-no-nav .module-app-shell-page {
+.layout-none .module-app-shell-page {
   height: 100%;
 }
 
-.layout-top-nav .module-app-shell-page {
+.layout-topbar .module-app-shell-page,
+.layout-sidebar-topbar .module-app-shell-page {
   height: 828px;
 }
 

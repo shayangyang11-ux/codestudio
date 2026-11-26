@@ -362,6 +362,16 @@ public class AssistantAssetEditProposalService {
             agentRecommendedSteps = buildRecommendedSteps(targetArtifactType, downstream);
         }
 
+        Map<String, Object> impactTrace = buildPreciseRequirementImpactTrace(
+                project.projectId(),
+                module == null ? null : module.getId(),
+                targetArtifactType,
+                currentArtifact,
+                requirementChangeProposal,
+                agentResult,
+                downstream
+        );
+
         Map<String, Object> targetNode = new LinkedHashMap<>();
         targetNode.put("nodeId", module == null ? null : module.getId().toString());
         targetNode.put("nodeName", module == null ? "当前项目" : module.getModuleName());
@@ -417,6 +427,15 @@ public class AssistantAssetEditProposalService {
         proposal.put("proposedPatchSummary", proposedPatchSummary);
         proposal.put("affectedArtifacts", stringList(requirementChangeProposal.get("affectedArtifacts")));
         proposal.put("downstreamArtifacts", downstream);
+        proposal.put("impactTrace", impactTrace);
+        proposal.put("affectedRequirementIds", objectStringList(impactTrace.get("affectedRequirementIds")));
+        proposal.put("affectedRequirementKeys", objectStringList(impactTrace.get("affectedRequirementKeys")));
+        proposal.put("affectedFeatureNodeIds", objectStringList(impactTrace.get("affectedFeatureNodeIds")));
+        proposal.put("affectedPageNodeIds", objectStringList(impactTrace.get("affectedPageNodeIds")));
+        proposal.put("affectedPageSpecs", objectList(impactTrace.get("affectedPageSpecs")));
+        proposal.put("affectedUiContracts", objectList(impactTrace.get("affectedUiContracts")));
+        proposal.put("impactReason", impactTrace.get("impactReason"));
+        proposal.put("syncAction", impactTrace.get("syncAction"));
         proposal.put("riskNotes", agentRiskNotes);
         proposal.put("recommendedSteps", agentRecommendedSteps);
         proposal.put("requiresUserConfirmation", true);
@@ -1487,6 +1506,13 @@ public class AssistantAssetEditProposalService {
         edit.put("confirmationNote", confirmationNote);
         edit.put("originalInstruction", proposal.get("originalInstruction"));
         edit.put("summary", proposal.get("summary"));
+        edit.put("impactTrace", proposal.get("impactTrace"));
+        edit.put("affectedRequirementIds", proposal.get("affectedRequirementIds"));
+        edit.put("affectedRequirementKeys", proposal.get("affectedRequirementKeys"));
+        edit.put("affectedFeatureNodeIds", proposal.get("affectedFeatureNodeIds"));
+        edit.put("affectedPageNodeIds", proposal.get("affectedPageNodeIds"));
+        edit.put("affectedPageSpecs", proposal.get("affectedPageSpecs"));
+        edit.put("affectedUiContracts", proposal.get("affectedUiContracts"));
         edit.put("previousArtifactId", previous.getId().toString());
         edit.put("previousVersionNo", previous.getVersionNo());
         edit.put("previousChecksum", previous.getChecksum());
@@ -1515,6 +1541,710 @@ public class AssistantAssetEditProposalService {
         content.put("assistantEditHistory", history);
         content.put("lastAssistantEdit", edit);
     }
+
+
+    // A9.10.14.4.3.15.4.15.3.3_PRECISE_IMPACT_TRACE
+    private Map<String, Object> buildPreciseRequirementImpactTrace(
+            UUID projectId,
+            UUID moduleId,
+            String targetArtifactType,
+            ArtifactVersionEntity currentArtifact,
+            Map<String, Object> requirementChangeProposal,
+            Map<String, Object> agentResult,
+            List<String> downstreamArtifacts
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("source", "PRD_FEATURE_PAGE_TRACE_IMPACT_ANALYZER");
+        result.put("targetArtifactType", targetArtifactType);
+        result.put("moduleId", moduleId == null ? null : moduleId.toString());
+
+        Map<String, Object> targetArtifactContent = currentArtifact == null
+                ? Map.of()
+                : copyContent(currentArtifact.getContent());
+
+        ArtifactVersionEntity modulePrdArtifact = loadCurrentModuleArtifactIfPresent(
+                projectId,
+                moduleId,
+                "MODULE_PRD"
+        );
+
+        Map<String, Object> modulePrdContent = modulePrdArtifact == null
+                ? ("MODULE_PRD".equals(targetArtifactType) ? targetArtifactContent : Map.of())
+                : copyContent(modulePrdArtifact.getContent());
+
+        List<Map<String, Object>> structuredRequirements = objectMapList(firstNonNull(
+                modulePrdContent.get("structured_requirements"),
+                modulePrdContent.get("structuredRequirements"),
+                targetArtifactContent.get("structured_requirements"),
+                targetArtifactContent.get("structuredRequirements")
+        ));
+
+        List<Map<String, Object>> changedRequirements = resolveChangedStructuredRequirements(
+                structuredRequirements,
+                requirementChangeProposal,
+                agentResult,
+                targetArtifactContent,
+                targetArtifactType
+        );
+
+        Map<String, Map<String, Object>> changedIndex = buildChangedRequirementIndex(changedRequirements);
+
+        List<ProjectModuleEntity> moduleTree = projectId == null
+                ? List.of()
+                : projectModuleRepository.findByProjectIdOrderByLevelNoAscSortOrderAsc(projectId);
+
+        Map<String, Object> targetNodeTrace = resolveTargetNodeTrace(moduleTree, moduleId);
+        if (changedIndex.isEmpty() && !targetNodeTrace.isEmpty()) {
+            Map<String, Object> synthetic = new LinkedHashMap<>();
+            synthetic.put("requirementId", targetNodeTrace.get("sourceRequirementId"));
+            synthetic.put("requirementKey", targetNodeTrace.get("sourceRequirementKey"));
+            synthetic.put("title", targetNodeTrace.get("sourceRequirementTitle"));
+            synthetic.put("sourceSection", targetNodeTrace.get("sourceSection"));
+            synthetic.put("sourceType", targetNodeTrace.get("sourceType"));
+            synthetic.put("confirmationStatus", targetNodeTrace.get("confirmationStatus"));
+            changedRequirements.add(synthetic);
+            changedIndex = buildChangedRequirementIndex(changedRequirements);
+        }
+
+        List<Map<String, Object>> affectedTreeNodes = findAffectedTreeNodesByRequirementTrace(
+                moduleTree,
+                moduleId,
+                changedIndex
+        );
+
+        List<Map<String, Object>> affectedFeatures = filterAffectedNodesByType(affectedTreeNodes, "FEATURE");
+        List<Map<String, Object>> affectedPages = filterAffectedNodesByType(affectedTreeNodes, "PAGE");
+        List<Map<String, Object>> affectedPageSpecs = loadAffectedCurrentArtifacts(
+                projectId,
+                affectedPages,
+                "PAGE_SPEC"
+        );
+        List<Map<String, Object>> affectedUiContracts = loadAffectedCurrentArtifacts(
+                projectId,
+                affectedPages,
+                "UI_CONTRACT"
+        );
+        List<Map<String, Object>> affectedCurrentModuleArtifacts = loadAffectedModuleArtifacts(
+                projectId,
+                moduleId,
+                downstreamArtifacts
+        );
+
+        result.put("changedRequirements", changedRequirements);
+        result.put("affectedRequirementIds", extractUniqueTexts(changedRequirements, "requirementId", "sourceRequirementId"));
+        result.put("affectedRequirementKeys", extractUniqueTexts(changedRequirements, "requirementKey", "sourceRequirementKey"));
+        result.put("targetNodeTrace", targetNodeTrace);
+        result.put("affectedTreeNodes", affectedTreeNodes);
+        result.put("affectedFeatureNodes", affectedFeatures);
+        result.put("affectedPageNodes", affectedPages);
+        result.put("affectedFeatureNodeIds", extractUniqueTexts(affectedFeatures, "nodeId"));
+        result.put("affectedPageNodeIds", extractUniqueTexts(affectedPages, "nodeId"));
+        result.put("affectedPageSpecs", affectedPageSpecs);
+        result.put("affectedUiContracts", affectedUiContracts);
+        result.put("affectedCurrentModuleArtifacts", affectedCurrentModuleArtifacts);
+        result.put("downstreamArtifacts", downstreamArtifacts == null ? List.of() : downstreamArtifacts);
+        result.put("impactReason", buildImpactReason(targetArtifactType, changedRequirements, affectedFeatures, affectedPages));
+        result.put("syncAction", buildSyncAction(targetArtifactType, affectedPages, affectedPageSpecs, affectedUiContracts));
+        result.put("tracePolicy", "MATCH_BY_SOURCE_REQUIREMENT_ID_OR_KEY_THEN_MARK_DOWNSTREAM_NEEDS_REVIEW");
+        result.put("requiresUserConfirmation", true);
+        return result;
+    }
+
+    private ArtifactVersionEntity loadCurrentModuleArtifactIfPresent(
+            UUID projectId,
+            UUID moduleId,
+            String artifactType
+    ) {
+        if (projectId == null || moduleId == null || artifactType == null || artifactType.isBlank()) {
+            return null;
+        }
+
+        return artifactVersionRepository
+                .findFirstByProjectIdAndModuleIdAndArtifactTypeAndCurrentTrueOrderByVersionNoDesc(
+                        projectId,
+                        moduleId,
+                        artifactType
+                )
+                .orElse(null);
+    }
+
+    private List<Map<String, Object>> resolveChangedStructuredRequirements(
+            List<Map<String, Object>> structuredRequirements,
+            Map<String, Object> requirementChangeProposal,
+            Map<String, Object> agentResult,
+            Map<String, Object> targetArtifactContent,
+            String targetArtifactType
+    ) {
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        Set<String> explicitIds = new LinkedHashSet<>();
+        Set<String> explicitKeys = new LinkedHashSet<>();
+        Set<String> searchTexts = new LinkedHashSet<>();
+
+        collectExplicitRequirementRefs(explicitIds, explicitKeys, searchTexts, requirementChangeProposal);
+        collectExplicitRequirementRefs(explicitIds, explicitKeys, searchTexts, agentResult);
+
+        for (String text : objectStringList(firstNonNull(
+                requirementChangeProposal == null ? null : requirementChangeProposal.get("selectedDiffItemIds"),
+                agentResult == null ? null : agentResult.get("selectedDiffItemIds")
+        ))) {
+            searchTexts.add(text);
+        }
+
+        for (Map<String, Object> item : objectMapList(requirementChangeProposal == null ? null : requirementChangeProposal.get("selectedDiffItems"))) {
+            searchTexts.add(textValue(item.get("title")));
+            searchTexts.add(textValue(item.get("summary")));
+            searchTexts.add(textValue(item.get("attachmentExcerpt")));
+            searchTexts.add(textValue(item.get("currentExcerpt")));
+            searchTexts.add(textValue(item.get("diffType")));
+        }
+
+        for (Object value : objectList(agentResult == null ? null : agentResult.get("changedSections"))) {
+            searchTexts.add(textValue(value));
+        }
+
+        searchTexts.add(textValue(requirementChangeProposal == null ? null : requirementChangeProposal.get("summary")));
+        searchTexts.add(textValue(requirementChangeProposal == null ? null : requirementChangeProposal.get("originalInstruction")));
+        searchTexts.add(textValue(agentResult == null ? null : agentResult.get("summary")));
+
+        for (Map<String, Object> requirement : structuredRequirements) {
+            String requirementId = firstNonBlank(
+                    textValue(requirement.get("requirementId")),
+                    textValue(requirement.get("requirement_id")),
+                    textValue(requirement.get("sourceRequirementId"))
+            );
+            String requirementKey = firstNonBlank(
+                    textValue(requirement.get("requirementKey")),
+                    textValue(requirement.get("requirement_key")),
+                    textValue(requirement.get("sourceRequirementKey"))
+            );
+
+            if ((!requirementId.isBlank() && explicitIds.contains(normalizeTraceText(requirementId)))
+                    || (!requirementKey.isBlank() && explicitKeys.contains(normalizeTraceText(requirementKey)))
+                    || matchesRequirementByText(requirement, searchTexts)) {
+                result.add(normalizeChangedRequirement(requirement));
+            }
+        }
+
+        if (result.isEmpty() && "MODULE_PRD".equals(targetArtifactType)) {
+            for (Map<String, Object> requirement : structuredRequirements) {
+                String sourceSection = textValue(firstNonNull(
+                        requirement.get("sourceSection"),
+                        requirement.get("source_section")
+                ));
+                if ("functional_requirements".equals(sourceSection)
+                        || "page_requirements".equals(sourceSection)) {
+                    result.add(normalizeChangedRequirement(requirement));
+                }
+            }
+        }
+
+        return dedupeRequirementMaps(result);
+    }
+
+    private void collectExplicitRequirementRefs(
+            Set<String> ids,
+            Set<String> keys,
+            Set<String> searchTexts,
+            Map<String, Object> source
+    ) {
+        if (source == null || source.isEmpty()) {
+            return;
+        }
+
+        for (String key : List.of("requirementId", "requirement_id", "sourceRequirementId", "changedRequirementId")) {
+            String value = textValue(source.get(key));
+            if (!value.isBlank()) {
+                ids.add(normalizeTraceText(value));
+            }
+        }
+
+        for (String key : List.of("requirementKey", "requirement_key", "sourceRequirementKey", "changedRequirementKey")) {
+            String value = textValue(source.get(key));
+            if (!value.isBlank()) {
+                keys.add(normalizeTraceText(value));
+            }
+        }
+
+        for (String key : List.of("affectedRequirementIds", "changedRequirementIds")) {
+            for (String value : objectStringList(source.get(key))) {
+                ids.add(normalizeTraceText(value));
+            }
+        }
+
+        for (String key : List.of("affectedRequirementKeys", "changedRequirementKeys")) {
+            for (String value : objectStringList(source.get(key))) {
+                keys.add(normalizeTraceText(value));
+            }
+        }
+
+        for (String key : List.of("summary", "originalInstruction", "instruction", "impactReason")) {
+            String value = textValue(source.get(key));
+            if (!value.isBlank()) {
+                searchTexts.add(value);
+            }
+        }
+
+        for (String listKey : List.of("selectedDiffItems", "diffItems", "changedRequirements")) {
+            for (Map<String, Object> item : objectMapList(source.get(listKey))) {
+                collectExplicitRequirementRefs(ids, keys, searchTexts, item);
+                searchTexts.add(textValue(item.get("title")));
+                searchTexts.add(textValue(item.get("summary")));
+                searchTexts.add(textValue(item.get("description")));
+                searchTexts.add(textValue(item.get("attachmentExcerpt")));
+                searchTexts.add(textValue(item.get("currentExcerpt")));
+            }
+        }
+    }
+
+    private boolean matchesRequirementByText(
+            Map<String, Object> requirement,
+            Set<String> searchTexts
+    ) {
+        if (requirement == null || requirement.isEmpty() || searchTexts == null || searchTexts.isEmpty()) {
+            return false;
+        }
+
+        String haystack = normalizeTraceText(String.join(" ",
+                textValue(requirement.get("requirementId")),
+                textValue(requirement.get("requirementKey")),
+                textValue(requirement.get("title")),
+                textValue(requirement.get("description")),
+                textValue(requirement.get("sourceSection")),
+                safeJson(requirement.get("extra"))
+        ));
+
+        if (haystack.isBlank()) {
+            return false;
+        }
+
+        for (String candidate : searchTexts) {
+            String needle = normalizeTraceText(candidate);
+            if (needle.length() < 2) {
+                continue;
+            }
+
+            if (haystack.contains(needle) || needle.contains(haystack)) {
+                return true;
+            }
+
+            for (String token : needle.split("_+")) {
+                if (token.length() >= 2 && haystack.contains(token)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private Map<String, Object> normalizeChangedRequirement(
+            Map<String, Object> requirement
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        String requirementId = firstNonBlank(
+                textValue(requirement.get("requirementId")),
+                textValue(requirement.get("requirement_id")),
+                textValue(requirement.get("sourceRequirementId"))
+        );
+        String requirementKey = firstNonBlank(
+                textValue(requirement.get("requirementKey")),
+                textValue(requirement.get("requirement_key")),
+                textValue(requirement.get("sourceRequirementKey"))
+        );
+        result.put("requirementId", requirementId);
+        result.put("requirementKey", requirementKey);
+        result.put("title", firstNonBlank(
+                textValue(requirement.get("title")),
+                textValue(requirement.get("sourceRequirementTitle")),
+                requirementKey,
+                requirementId
+        ));
+        result.put("type", firstNonBlank(
+                textValue(requirement.get("type")),
+                textValue(requirement.get("requirementType")),
+                textValue(requirement.get("sourceSection"))
+        ));
+        result.put("sourceSection", firstNonBlank(
+                textValue(requirement.get("sourceSection")),
+                textValue(requirement.get("source_section"))
+        ));
+        result.put("sourceType", firstNonBlank(
+                textValue(requirement.get("sourceType")),
+                textValue(requirement.get("source_type"))
+        ));
+        result.put("confirmationStatus", firstNonBlank(
+                textValue(requirement.get("confirmationStatus")),
+                textValue(requirement.get("confirmation_status"))
+        ));
+        result.put("description", trimForSummary(textValue(requirement.get("description")), 280));
+        return result;
+    }
+
+    private Map<String, Map<String, Object>> buildChangedRequirementIndex(
+            List<Map<String, Object>> changedRequirements
+    ) {
+        Map<String, Map<String, Object>> index = new LinkedHashMap<>();
+        for (Map<String, Object> requirement : changedRequirements) {
+            indexRequirementTrace(index, requirement, "requirementId");
+            indexRequirementTrace(index, requirement, "requirementKey");
+            indexRequirementTrace(index, requirement, "sourceRequirementId");
+            indexRequirementTrace(index, requirement, "sourceRequirementKey");
+        }
+        return index;
+    }
+
+    private void indexRequirementTrace(
+            Map<String, Map<String, Object>> index,
+            Map<String, Object> requirement,
+            String field
+    ) {
+        String value = textValue(requirement.get(field));
+        String normalized = normalizeTraceText(value);
+        if (!normalized.isBlank()) {
+            index.putIfAbsent(normalized, requirement);
+        }
+    }
+
+    private Map<String, Object> resolveTargetNodeTrace(
+            List<ProjectModuleEntity> moduleTree,
+            UUID moduleId
+    ) {
+        if (moduleId == null || moduleTree == null || moduleTree.isEmpty()) {
+            return Map.of();
+        }
+
+        for (ProjectModuleEntity node : moduleTree) {
+            if (node == null || !moduleId.equals(node.getId())) {
+                continue;
+            }
+
+            Map<String, Object> extra = safeModuleExtra(node);
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("nodeId", node.getId() == null ? null : node.getId().toString());
+            result.put("nodeName", node.getModuleName());
+            result.put("nodeType", node.getModuleType());
+            result.put("nodeKey", node.getModuleKey());
+            result.put("sourceRequirementId", firstNonBlank(
+                    textValue(extra.get("sourceRequirementId")),
+                    textValue(deepGet(extra, "prdTrace", "sourceRequirementId")),
+                    textValue(deepGet(extra, "pagePrototypeContext", "sourceRequirementId")),
+                    textValue(deepGet(extra, "functionContext", "sourceRequirementId"))
+            ));
+            result.put("sourceRequirementKey", firstNonBlank(
+                    textValue(extra.get("sourceRequirementKey")),
+                    textValue(deepGet(extra, "prdTrace", "sourceRequirementKey")),
+                    textValue(deepGet(extra, "pagePrototypeContext", "sourceRequirementKey")),
+                    textValue(deepGet(extra, "functionContext", "sourceRequirementKey"))
+            ));
+            result.put("sourceRequirementTitle", firstNonBlank(
+                    textValue(extra.get("sourceRequirementTitle")),
+                    textValue(deepGet(extra, "prdTrace", "sourceRequirementTitle")),
+                    textValue(deepGet(extra, "pagePrototypeContext", "sourceRequirementTitle")),
+                    textValue(deepGet(extra, "functionContext", "sourceRequirementTitle"))
+            ));
+            result.put("sourceSection", firstNonBlank(
+                    textValue(extra.get("sourcePrdSection")),
+                    textValue(deepGet(extra, "prdTrace", "sourceSection"))
+            ));
+            result.put("sourceType", firstNonBlank(
+                    textValue(extra.get("sourceType")),
+                    textValue(deepGet(extra, "prdTrace", "sourceType"))
+            ));
+            result.put("confirmationStatus", firstNonBlank(
+                    textValue(extra.get("confirmationStatus")),
+                    textValue(deepGet(extra, "prdTrace", "confirmationStatus"))
+            ));
+            return result;
+        }
+
+        return Map.of();
+    }
+
+    private List<Map<String, Object>> findAffectedTreeNodesByRequirementTrace(
+            List<ProjectModuleEntity> moduleTree,
+            UUID moduleId,
+            Map<String, Map<String, Object>> changedIndex
+    ) {
+        if (moduleTree == null || moduleTree.isEmpty()) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        Set<UUID> scopedNodeIds = collectSubtreeNodeIds(moduleTree, moduleId);
+
+        for (ProjectModuleEntity node : moduleTree) {
+            if (node == null || node.getId() == null) {
+                continue;
+            }
+
+            if (!scopedNodeIds.isEmpty() && !scopedNodeIds.contains(node.getId())) {
+                continue;
+            }
+
+            Map<String, Object> trace = resolveTargetNodeTrace(moduleTree, node.getId());
+            String requirementId = normalizeTraceText(textValue(trace.get("sourceRequirementId")));
+            String requirementKey = normalizeTraceText(textValue(trace.get("sourceRequirementKey")));
+
+            boolean matched = false;
+            if (!changedIndex.isEmpty()) {
+                matched = (!requirementId.isBlank() && changedIndex.containsKey(requirementId))
+                        || (!requirementKey.isBlank() && changedIndex.containsKey(requirementKey));
+            } else {
+                matched = !requirementId.isBlank() || !requirementKey.isBlank();
+            }
+
+            if (!matched) {
+                continue;
+            }
+
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("nodeId", node.getId().toString());
+            item.put("nodeName", node.getModuleName());
+            item.put("nodeType", node.getModuleType());
+            item.put("nodeKey", node.getModuleKey());
+            item.put("parentId", node.getParentId() == null ? null : node.getParentId().toString());
+            item.put("sourceRequirementId", trace.get("sourceRequirementId"));
+            item.put("sourceRequirementKey", trace.get("sourceRequirementKey"));
+            item.put("sourceRequirementTitle", trace.get("sourceRequirementTitle"));
+            item.put("sourceSection", trace.get("sourceSection"));
+            item.put("sourceType", trace.get("sourceType"));
+            item.put("confirmationStatus", trace.get("confirmationStatus"));
+            item.put("impactReason", "模块树节点 extra.prdTrace 与变更 requirement 命中。");
+            result.add(item);
+        }
+
+        return result;
+    }
+
+    private Set<UUID> collectSubtreeNodeIds(
+            List<ProjectModuleEntity> moduleTree,
+            UUID rootId
+    ) {
+        Set<UUID> result = new LinkedHashSet<>();
+        if (rootId == null || moduleTree == null || moduleTree.isEmpty()) {
+            return result;
+        }
+
+        result.add(rootId);
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (ProjectModuleEntity node : moduleTree) {
+                if (node == null || node.getId() == null || node.getParentId() == null) {
+                    continue;
+                }
+                if (result.contains(node.getParentId()) && result.add(node.getId())) {
+                    changed = true;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private List<Map<String, Object>> filterAffectedNodesByType(
+            List<Map<String, Object>> nodes,
+            String nodeType
+    ) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> node : nodes) {
+            if (nodeType.equalsIgnoreCase(textValue(node.get("nodeType")))) {
+                result.add(node);
+            }
+        }
+        return result;
+    }
+
+    private List<Map<String, Object>> loadAffectedCurrentArtifacts(
+            UUID projectId,
+            List<Map<String, Object>> nodes,
+            String artifactType
+    ) {
+        if (projectId == null || nodes == null || nodes.isEmpty()) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Map<String, Object> node : nodes) {
+            UUID nodeId = parseUuid(textValue(node.get("nodeId")));
+            if (nodeId == null) {
+                continue;
+            }
+
+            artifactVersionRepository
+                    .findFirstByProjectIdAndModuleIdAndArtifactTypeAndCurrentTrueOrderByVersionNoDesc(
+                            projectId,
+                            nodeId,
+                            artifactType
+                    )
+                    .ifPresent(artifact -> result.add(toArtifactTraceItem(artifact, node)));
+        }
+
+        return result;
+    }
+
+    private List<Map<String, Object>> loadAffectedModuleArtifacts(
+            UUID projectId,
+            UUID moduleId,
+            List<String> downstreamArtifacts
+    ) {
+        if (projectId == null || moduleId == null || downstreamArtifacts == null || downstreamArtifacts.isEmpty()) {
+            return List.of();
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (String artifactType : downstreamArtifacts) {
+            String normalized = normalizeArtifactType(artifactType);
+            if (normalized.isBlank()) {
+                continue;
+            }
+
+            artifactVersionRepository
+                    .findFirstByProjectIdAndModuleIdAndArtifactTypeAndCurrentTrueOrderByVersionNoDesc(
+                            projectId,
+                            moduleId,
+                            normalized
+                    )
+                    .ifPresent(artifact -> result.add(toArtifactTraceItem(artifact, Map.of())));
+        }
+
+        return result;
+    }
+
+    private Map<String, Object> toArtifactTraceItem(
+            ArtifactVersionEntity artifact,
+            Map<String, Object> node
+    ) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("artifactId", artifact.getId() == null ? null : artifact.getId().toString());
+        item.put("artifactType", artifact.getArtifactType());
+        item.put("title", artifact.getTitle());
+        item.put("versionNo", artifact.getVersionNo());
+        item.put("status", artifact.getStatus());
+        item.put("moduleId", artifact.getModuleId() == null ? null : artifact.getModuleId().toString());
+        item.put("nodeId", node == null ? null : node.get("nodeId"));
+        item.put("nodeName", node == null ? null : node.get("nodeName"));
+        item.put("sourceRequirementId", node == null ? null : node.get("sourceRequirementId"));
+        item.put("sourceRequirementKey", node == null ? null : node.get("sourceRequirementKey"));
+        return item;
+    }
+
+    private List<String> extractUniqueTexts(
+            List<Map<String, Object>> items,
+            String... keys
+    ) {
+        List<String> result = new ArrayList<>();
+        if (items == null || keys == null) {
+            return result;
+        }
+
+        for (Map<String, Object> item : items) {
+            for (String key : keys) {
+                String value = textValue(item.get(key));
+                if (!value.isBlank() && !result.contains(value)) {
+                    result.add(value);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private List<Map<String, Object>> dedupeRequirementMaps(
+            List<Map<String, Object>> items
+    ) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (Map<String, Object> item : items) {
+            String key = firstNonBlank(
+                    textValue(item.get("requirementId")),
+                    textValue(item.get("requirementKey")),
+                    safeJson(item)
+            );
+            if (seen.add(key)) {
+                result.add(item);
+            }
+        }
+        return result;
+    }
+
+    private String buildImpactReason(
+            String targetArtifactType,
+            List<Map<String, Object>> changedRequirements,
+            List<Map<String, Object>> affectedFeatures,
+            List<Map<String, Object>> affectedPages
+    ) {
+        if ("MODULE_PRD".equals(targetArtifactType)) {
+            return "MODULE_PRD 变更会通过 structured_requirements 精准影响其投影出的 FEATURE/PAGE，并进一步影响 PAGE_SPEC/UI_CONTRACT。";
+        }
+        if (!changedRequirements.isEmpty()) {
+            return "当前资产变更已通过 sourceRequirementId/sourceRequirementKey 回溯到 MODULE_PRD 结构化需求。";
+        }
+        if (!affectedFeatures.isEmpty() || !affectedPages.isEmpty()) {
+            return "当前选中节点已携带 PRD trace，可定位到关联 FEATURE/PAGE。";
+        }
+        return "未命中精确 requirement trace，保留原有下游资产级影响标记。";
+    }
+
+    private String buildSyncAction(
+            String targetArtifactType,
+            List<Map<String, Object>> affectedPages,
+            List<Map<String, Object>> affectedPageSpecs,
+            List<Map<String, Object>> affectedUiContracts
+    ) {
+        if ("MODULE_PRD".equals(targetArtifactType)) {
+            if (!affectedPages.isEmpty()) {
+                return "MARK_AFFECTED_FEATURE_PAGE_AND_REVIEW_PAGE_SPEC_UI_CONTRACT";
+            }
+            return "MARK_MODULE_DOWNSTREAM_ARTIFACTS_NEEDS_REVIEW";
+        }
+
+        if ("PAGE_SPEC".equals(targetArtifactType)) {
+            return "REVIEW_OR_REGENERATE_UI_CONTRACT_FOR_AFFECTED_PAGE";
+        }
+
+        if (!affectedPageSpecs.isEmpty() || !affectedUiContracts.isEmpty()) {
+            return "REVIEW_TRACE_MATCHED_DOWNSTREAM_ARTIFACTS";
+        }
+
+        return "REVIEW_DECLARED_DOWNSTREAM_ARTIFACTS";
+    }
+
+    private Map<String, Object> safeModuleExtra(
+            ProjectModuleEntity node
+    ) {
+        if (node == null || node.getExtra() == null) {
+            return new LinkedHashMap<>();
+        }
+        return new LinkedHashMap<>(node.getExtra());
+    }
+
+    private String normalizeTraceText(
+            String value
+    ) {
+        String text = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        text = text.replaceAll("[^0-9a-zA-Z\\u4e00-\\u9fff_\\-]+", "_");
+        text = text.replaceAll("_+", "_").replaceAll("^_+|_+$", "");
+        return text;
+    }
+
+    private Object firstNonNull(
+            Object... values
+    ) {
+        if (values == null) {
+            return null;
+        }
+
+        for (Object value : values) {
+            if (value != null) {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
 
     private UUID resolveModuleId(
             UUID selectedNodeId,

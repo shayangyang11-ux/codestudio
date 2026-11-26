@@ -96,9 +96,9 @@
           </label>
         </template>
 
-        <template v-if="form.moduleType === 'FEATURE'">
+        <template v-if="false && form.moduleType === 'FEATURE'">
           <label class="form-item">
-            <span>功能点角色</span>
+            <span>页面角色</span>
             <select v-model="form.featureRole">
               <option value="query">查询</option>
               <option value="create">新增</option>
@@ -300,7 +300,19 @@ watch(
 )
 
 function resolveDefaultCreateType(): RequirementNodeType {
+  const parentType = resolveRequirementNodeType(props.parentNode)
+
+  if (
+    props.mode === 'create-child' &&
+    (parentType === 'MODULE' || parentType === 'SUBMODULE' || parentType === 'FEATURE')
+  ) {
+    return 'PAGE'
+  }
+
   const options = typeOptions.value
+  if (options.some((option) => option.value === 'PAGE')) {
+    return 'PAGE'
+  }
 
   if (options.length > 0) {
     return options[0].value as RequirementNodeType
@@ -309,14 +321,58 @@ function resolveDefaultCreateType(): RequirementNodeType {
   return 'MODULE'
 }
 
+
+
 function labelForNodeType(nodeType: RequirementNodeType): string {
-  if (nodeType === 'FEATURE') return '业务能力'
+  if (nodeType === 'FEATURE') return '页面' // A9.10.14.4.3.15.6.24L0A_FEATURE_LAYER_RETIRE_TO_CAPABILITY
   if (nodeType === 'PAGE') return '页面'
   if (nodeType === 'MODULE' || nodeType === 'DOMAIN' || nodeType === 'SUBMODULE') return '模块'
   return getRequirementNodeTypeLabel(nodeType)
 }
 
+
+// A9.10.14.4.3.15.6.24L0B_NO_VISIBLE_FEATURE_ON_CREATE_OR_PRD_COMPLETION
+// Legacy editor defaults may still select FEATURE for MODULE children.
+// Since FEATURE has retired to MODULE_PRD capability metadata, coerce it to PAGE
+// before the user sees/saves the form.
+watch(
+  () => [
+    props.visible,
+    props.mode,
+    props.parentNode?.id || null,
+    form.moduleType,
+  ],
+  () => {
+    const parentType = resolveRequirementNodeType(props.parentNode)
+    if (
+      props.visible &&
+      props.mode === 'create-child' &&
+      form.moduleType === 'FEATURE' &&
+      (parentType === 'MODULE' || parentType === 'SUBMODULE')
+    ) {
+      form.moduleType = 'PAGE'
+      if (!form.moduleName.trim() || form.moduleName.trim() === '新页面') {
+        form.moduleName = '新页面'
+      }
+    }
+  },
+  { immediate: true },
+)
+
 function handleSubmit() {
+
+  // A9.10.14.4.3.15.6.24L0B_FIX_DIALOG_DUP_PARENT_TYPE
+  const submitParentType = resolveRequirementNodeType(props.parentNode)
+  if (
+    props.mode === 'create-child' &&
+    (submitParentType === 'MODULE' ||
+      submitParentType === 'SUBMODULE' ||
+      submitParentType === 'FEATURE') &&
+    (!form.moduleType || form.moduleType === 'UNKNOWN' || form.moduleType === 'FEATURE')
+  ) {
+    form.moduleType = 'PAGE'
+  }
+
   if (!form.moduleName.trim()) {
     window.alert('节点名称不能为空。')
     return
@@ -362,7 +418,7 @@ function defaultNameForType(moduleType: RequirementNodeType): string {
   if (moduleType === 'MODULE') return '新模块'
   if (moduleType === 'SUBMODULE') return '新模块'
   if (moduleType === 'PAGE') return '新页面'
-  if (moduleType === 'FEATURE') return '新业务能力'
+  if (moduleType === 'FEATURE') return '新页面'
 
   return '新节点'
 }
@@ -504,5 +560,16 @@ function defaultLayoutType(pageKind: string): string {
   border-color: #2563eb;
   color: #2563eb;
 }
+
+/* A9.10.14.4.3.15.6.24L0A_FEATURE_LAYER_RETIRE_TO_CAPABILITY
+   FEATURE is legacy capability metadata, not a visible tree level to create. */
+.a9-node-editor-feature-section {
+  display: none !important;
+}
+
 </style>
 
+
+<!-- A9.10.14.4.3.15.6.24L0B_FIX_CREATE_PAGE_POLICY_BACKEND_DIALOG: node editor creates PAGE instead of visible FEATURE. -->
+
+<!-- A9.10.14.4.3.15.6.24L0B_FINAL_CREATE_PAGE_POLICY_FIX: dialog creates PAGE instead of visible FEATURE. -->

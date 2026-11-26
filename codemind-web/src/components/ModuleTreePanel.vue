@@ -2,8 +2,8 @@
   <aside class="module-tree-panel">
     <div class="panel-title">
       <div class="panel-title-text">
-        <h2>需求骨架</h2>
-        <p>按模块、功能点和页面组织需求结构</p>
+        <h2>模块树</h2>
+        <p>按模块、业务能力和页面组织需求结构</p>
       </div>
 
       <button class="add-root-button" title="新增根模块" @click="$emit('create-root')">
@@ -12,7 +12,7 @@
     </div>
 
     <div v-if="modules.length === 0" class="empty-tree">
-      暂无需求骨架。请先输入需求生成模块与功能点，或点击右上角新增根模块。
+      暂无模块树。请先输入需求生成模块与功能点，或点击右上角新增根模块。
     </div>
 
     <div v-else class="tree-list">

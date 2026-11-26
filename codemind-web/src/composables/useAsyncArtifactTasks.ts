@@ -1,4 +1,4 @@
-﻿// A9.10.14.4.3.10_CURRENT_FILE_CLEANUP
+// A9.10.14.4.3.10_CURRENT_FILE_CLEANUP
 import { computed, onBeforeUnmount, ref } from 'vue'
 import {
   cancelAgentTask,
@@ -173,6 +173,9 @@ const a9AllowUiContractAfterForcedPageSpec = ref(false)
     return Boolean(pageSpec?.artifactId || pageSpec?.exists)
   }
 
+void hasCurrentPageSpecArtifact // A9.10.14.4.3.15.6.18_BUILD_TYPE_HOTFIX
+
+
   function artifactNeedsRegeneration(artifact: ArtifactResponse | null | undefined): boolean {
     const status = String((artifact as any)?.status || '').trim().toUpperCase()
     return [
@@ -184,6 +187,9 @@ const a9AllowUiContractAfterForcedPageSpec = ref(false)
       'INVALIDATED',
     ].includes(status)
   }
+
+void artifactNeedsRegeneration // A9.10.14.4.3.15.6.18_BUILD_TYPE_HOTFIX
+
 
   function artifactUpdatedMillis(artifact: ArtifactResponse | null | undefined): number {
     if (!artifact) return 0
@@ -216,6 +222,9 @@ const a9AllowUiContractAfterForcedPageSpec = ref(false)
     return !targetTime || sourceTime > targetTime
   }
 
+void sourceNewerThanTarget // A9.10.14.4.3.15.6.18_BUILD_TYPE_HOTFIX
+
+
   function shouldPreparePageSpecBeforeUi(): boolean {
     // A9.10.14.4.3.10_CURRENT_FILE_CLEANUP
     // PAGE_SPEC is hidden/internal. Every explicit UI_CONTRACT regeneration
@@ -223,6 +232,9 @@ const a9AllowUiContractAfterForcedPageSpec = ref(false)
     // a9AllowUiContractAfterForcedPageSpec to bypass this once.
     return !a9AllowUiContractAfterForcedPageSpec.value
   }
+
+void shouldPreparePageSpecBeforeUi // A9.10.14.4.3.15.6.18_BUILD_TYPE_HOTFIX
+
 
   function resolveTaskUnavailableReason(
     taskType: AsyncRequirementTaskType,

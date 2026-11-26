@@ -9,7 +9,7 @@ import type {
   ConfirmAssistantAssetEditProposalResponse,
   RequirementChangeProposal,
 } from '../types/codemind'
-import { authFetch } from './httpClient'
+import { authBlobFetch, authFetch } from './httpClient'
 
 export async function fetchAssistantMessages(
   workspaceId: string,
@@ -69,6 +69,27 @@ export async function sendAssistantMessage(
   )
 }
 
+
+// A9.10.14.4.3.15.6.24J2_PROTOTYPE_EDIT_PLANNER_V1
+export async function planPrototypeEdit(
+  workspaceId: string,
+  projectCode: string,
+  payload: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  return authFetch<Record<string, unknown>>(
+    `/api/agent-runtime/prototype-edit/plan`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workspaceId,
+        projectCode,
+        ...payload,
+      }),
+    },
+  )
+}
+
 export async function createAssistantTaskNotification(
   workspaceId: string,
   projectCode: string,
@@ -104,6 +125,36 @@ export async function uploadAssistantAttachment(
     },
   )
 }
+
+
+export function buildAssistantAttachmentContentUrl(
+  workspaceId: string,
+  projectCode: string,
+  attachmentId: string,
+): string {
+  return (
+    `/api/workspaces/${encodeURIComponent(workspaceId)}` +
+    `/projects/${encodeURIComponent(projectCode)}` +
+    `/assistant/attachments/${encodeURIComponent(attachmentId)}/content`
+  )
+}
+
+export async function fetchAssistantAttachmentObjectUrl(
+  workspaceId: string,
+  projectCode: string,
+  attachmentId: string,
+): Promise<string> {
+  const response = await authBlobFetch(
+    buildAssistantAttachmentContentUrl(
+      workspaceId,
+      projectCode,
+      attachmentId,
+    ),
+  )
+  const blob = await response.blob()
+  return window.URL.createObjectURL(blob)
+}
+
 
 export async function proposeAssistantAssetEdit(
   workspaceId: string,

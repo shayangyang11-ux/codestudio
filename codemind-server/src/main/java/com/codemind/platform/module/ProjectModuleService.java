@@ -76,15 +76,21 @@ public class ProjectModuleService {
                 request == null ? null : request.getModuleName()
         );
 
-        String moduleType = normalizeModuleType(
-                request == null ? null : request.getModuleType()
+        String requestedModuleType = request == null ? null : request.getModuleType();
+        String moduleType = normalizeModuleType(requestedModuleType);
+        moduleType = normalizeCreateNodeTypeForRetiredFeatureLayer(
+                requestedModuleType,
+                moduleType,
+                moduleName,
+                parent,
+                request == null ? null : request.getExtra()
         );
 
         assertAllowedChildType(parent, moduleType);
 
         if (parent != null
                 && "MODULE".equals(normalizeModuleType(parent.getModuleType()))
-                && "FEATURE".equals(moduleType)) {
+                && ("FEATURE".equals(moduleType) || "PAGE".equals(moduleType))) {
             markParentAsRequirementModule(parent, currentUser.username());
         }
 
@@ -286,7 +292,7 @@ public class ProjectModuleService {
 
         if (newParent != null
                 && "MODULE".equals(normalizeModuleType(newParent.getModuleType()))
-                && "FEATURE".equals(normalizeModuleType(entity.getModuleType()))) {
+                && Set.of("FEATURE", "PAGE").contains(normalizeModuleType(entity.getModuleType()))) {
             markParentAsRequirementModule(newParent, currentUser.username());
         }
 
@@ -524,11 +530,11 @@ public class ProjectModuleService {
             extra.put("finalRequirementModule", finalRequirementModule);
             extra.put(
                     "allowedChildTypes",
-                    finalRequirementModule ? List.of("FEATURE") : List.of("MODULE", "FEATURE")
+                    finalRequirementModule ? List.of("PAGE") : List.of("MODULE", "PAGE")
             );
             extra.put(
                     "allowedChildCreateLabel",
-                    finalRequirementModule ? "新增业务能力" : "新增子模块"
+                    finalRequirementModule ? "新增页面" : "新增下级节点"
             );
         } else if ("FEATURE".equals(normalizedType)) {
             extra.put("allowedChildTypes", List.of("PAGE"));
@@ -725,6 +731,7 @@ public class ProjectModuleService {
     }
 
     @Transactional
+        // A9.10.14.4.3.15.6.24L0B_NO_VISIBLE_FEATURE_ON_CREATE_OR_PRD_COMPLETION
     public Map<String, Object> completeRequirementModuleChildrenFromModulePrd(
             UUID projectId,
             UUID moduleId,
@@ -732,15 +739,13 @@ public class ProjectModuleService {
             String username
     ) {
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("source", "A9.10.14.4.3.15.4.10.4.4_PRD_TREE_MANUAL_COMPLETION");
+        result.put("source", "A9.10.14.4.3.15.6.24L0B_PAGE_DIRECT_COMPLETION");
         result.put("projectId", projectId == null ? "" : projectId.toString());
         result.put("moduleId", moduleId == null ? "" : moduleId.toString());
         result.put("createdFeatureCount", 0);
-        result.put("createdPageCount", 0);
         result.put("updatedFeatureCount", 0);
+        result.put("createdPageCount", 0);
         result.put("updatedPageCount", 0);
-        result.put("skipped", false);
-        result.put("reason", "");
 
         if (projectId == null || moduleId == null) {
             result.put("skipped", true);
@@ -763,17 +768,38 @@ public class ProjectModuleService {
         List<Map<String, Object>> pageRequirements = asMapList(
                 firstValue(modulePrdContent, "page_requirements", "pageRequirements")
         );
+        List<Map<String, Object>> structuredRequirements = asMapList(
+                firstValue(modulePrdContent, "structured_requirements", "structuredRequirements")
+        );
 
-        if (functionalRequirements.isEmpty() && pageRequirements.isEmpty()) {
+        Map<String, Map<String, Object>> prdTraceIndex = buildPrdRequirementTraceIndex(
+                structuredRequirements,
+                functionalRequirements,
+                pageRequirements
+        );
+
+        if (pageRequirements.isEmpty()) {
             result.put("skipped", true);
-            result.put("reason", "MODULE_PRD_HAS_NO_FUNCTIONAL_OR_PAGE_REQUIREMENTS");
+            result.put("reason", functionalRequirements.isEmpty()
+                    ? "MODULE_PRD_HAS_NO_FUNCTIONAL_OR_PAGE_REQUIREMENTS"
+                    : "MODULE_PRD_FUNCTIONAL_REQUIREMENTS_HAVE_NO_PAGE_REQUIREMENTS_TO_MATERIALIZE");
+            result.put("capabilityCount", functionalRequirements.size());
+            result.put("featureCount", 0);
+            result.put("pageCount", 0);
             return result;
         }
 
         List<ProjectModuleEntity> active = new ArrayList<>(activeModules(projectId));
+
+        Map<UUID, ProjectModuleEntity> activeById = new LinkedHashMap<>();
+        for (ProjectModuleEntity item : active) {
+            if (item != null && item.getId() != null) {
+                activeById.put(item.getId(), item);
+            }
+        }
+
         boolean hasChildModule = active.stream().anyMatch(item ->
                 moduleId.equals(item.getParentId())
-                        && ACTIVE.equals(item.getStatus())
                         && "MODULE".equals(normalizeModuleType(item.getModuleType()))
         );
 
@@ -783,208 +809,144 @@ public class ProjectModuleService {
             return result;
         }
 
-        CurrentUser currentUser = currentUserProvider.getCurrentUser();
-        String operator = hasText(username) ? username : currentUser.username();
-
-        markParentAsRequirementModule(module, operator);
-
-        Map<String, Integer> usedKeys = loadUsedModuleKeys(projectId);
-        Map<String, ProjectModuleEntity> featureIndex = new LinkedHashMap<>();
-
+        // A9.10.14.4.3.15.6.24L0B_FIX_USED_KEYS_MAP
+        // createMaterializedNode / normalizeModuleKey expects key usage counts,
+        // not a Set. Keep the original Map<String, Integer> contract.
+        Map<String, Integer> usedKeys = new LinkedHashMap<>();
         for (ProjectModuleEntity item : active) {
-            if (!moduleId.equals(item.getParentId())) {
+            if (item == null || item.getModuleKey() == null) {
                 continue;
             }
 
-            if (!"FEATURE".equals(normalizeModuleType(item.getModuleType()))) {
+            String key = item.getModuleKey().trim();
+            if (key.isBlank()) {
                 continue;
             }
 
-            indexNode(featureIndex, item);
-        }
-
-        int createdFeatures = 0;
-        int createdPages = 0;
-        int updatedFeatures = 0;
-        int updatedPages = 0;
-
-        int nextFeatureSortOrder = nextSortOrder(projectId, moduleId);
-
-        for (Map<String, Object> requirement : functionalRequirements) {
-            String featureName = text(
-                    requirement.get("title"),
-                    requirement.get("requirement_name"),
-                    requirement.get("requirementName"),
-                    requirement.get("feature_name"),
-                    requirement.get("featureName"),
-                    requirement.get("name")
-            );
-
-            if (!hasText(featureName)) {
-                continue;
-            }
-
-            String featureKeySeed = text(
-                    requirement.get("requirement_key"),
-                    requirement.get("requirementKey"),
-                    requirement.get("feature_key"),
-                    requirement.get("featureKey"),
-                    requirement.get("key"),
-                    featureName
-            );
-
-            String featureKey = semanticModuleKey(featureKeySeed, "feature");
-            ProjectModuleEntity existing = findIndexedNode(featureIndex, featureKey, featureName);
-
-            if (existing == null) {
-                ProjectModuleEntity created = createMaterializedNode(
-                        projectId,
-                        moduleId,
-                        module.getModulePath(),
-                        module.getLevelNo() + 1,
-                        featureName,
-                        featureKey,
-                        "FEATURE",
-                        nextFeatureSortOrder++,
-                        buildFeatureExtra(requirement, featureKey, featureName),
-                        usedKeys,
-                        operator
-                );
-                createdFeatures++;
-                active.add(created);
-                indexNode(featureIndex, created);
-                projectModuleImpactService.markImpactedArtifactsAfterCreate(projectId, created);
-            } else {
-                mergeNodeExtra(existing, buildFeatureExtra(requirement, featureKey, featureName), operator);
-                projectModuleRepository.save(existing);
-                updatedFeatures++;
-                indexNode(featureIndex, existing);
-            }
-        }
-
-        if (featureIndex.isEmpty() && !pageRequirements.isEmpty()) {
-            for (Map<String, Object> page : pageRequirements) {
-                String featureName = inferFeatureNameFromPage(page, module.getModuleName());
-                String featureKey = semanticModuleKey(
-                        text(page.get("parent_feature_key"), page.get("parentFeatureKey"), featureName),
-                        "feature"
-                );
-
-                ProjectModuleEntity existing = findIndexedNode(featureIndex, featureKey, featureName);
-                if (existing != null) {
-                    continue;
-                }
-
-                ProjectModuleEntity created = createMaterializedNode(
-                        projectId,
-                        moduleId,
-                        module.getModulePath(),
-                        module.getLevelNo() + 1,
-                        featureName,
-                        featureKey,
-                        "FEATURE",
-                        nextFeatureSortOrder++,
-                        buildFeatureExtra(page, featureKey, featureName),
-                        usedKeys,
-                        operator
-                );
-                createdFeatures++;
-                active.add(created);
-                indexNode(featureIndex, created);
-                projectModuleImpactService.markImpactedArtifactsAfterCreate(projectId, created);
-            }
+            usedKeys.merge(key, 1, Integer::sum);
         }
 
         Map<String, ProjectModuleEntity> pageIndex = new LinkedHashMap<>();
+
         for (ProjectModuleEntity item : active) {
-            if (!"PAGE".equals(normalizeModuleType(item.getModuleType()))) {
+            if (item == null || !"PAGE".equals(normalizeModuleType(item.getModuleType()))) {
                 continue;
             }
 
-            ProjectModuleEntity parent = findById(active, item.getParentId());
-            if (parent == null || !moduleId.equals(parent.getParentId())) {
-                continue;
+            boolean directPage = moduleId.equals(item.getParentId());
+            boolean legacyFeaturePage = false;
+
+            ProjectModuleEntity parent = activeById.get(item.getParentId());
+            if (parent != null
+                    && "FEATURE".equals(normalizeModuleType(parent.getModuleType()))
+                    && moduleId.equals(parent.getParentId())) {
+                legacyFeaturePage = true;
             }
 
-            indexNode(pageIndex, item);
+            if (directPage || legacyFeaturePage) {
+                indexNode(pageIndex, item);
+            }
         }
 
+        int createdPages = 0;
+        int updatedPages = 0;
+
         for (Map<String, Object> page : pageRequirements) {
-            String pageName = text(
+            if (page == null || page.isEmpty()) {
+                continue;
+            }
+
+            String rawPageName = text(
                     page.get("page_name"),
                     page.get("pageName"),
                     page.get("name"),
                     page.get("title")
             );
 
-            if (!hasText(pageName)) {
-                continue;
-            }
-
-            String pageKey = semanticModuleKey(
-                    text(page.get("page_key"), page.get("pageKey"), page.get("key"), pageName),
-                    "page"
+            String capabilityName = text(
+                    page.get("parent_feature_name"),
+                    page.get("parentFeatureName"),
+                    page.get("feature_name"),
+                    page.get("featureName"),
+                    inferFeatureNameFromPage(page, module.getModuleName())
             );
 
-            ProjectModuleEntity feature = resolveFeatureForPage(page, featureIndex);
-            if (feature == null) {
-                String featureName = inferFeatureNameFromPage(page, module.getModuleName());
-                String featureKey = semanticModuleKey(
-                        text(page.get("parent_feature_key"), page.get("parentFeatureKey"), featureName),
-                        "feature"
-                );
+            String pageName = hasText(rawPageName)
+                    ? rawPageName
+                    : (hasText(capabilityName) ? capabilityName + "页" : "页面");
 
-                feature = findIndexedNode(featureIndex, featureKey, featureName);
-                if (feature == null) {
-                    feature = createMaterializedNode(
-                            projectId,
-                            moduleId,
-                            module.getModulePath(),
-                            module.getLevelNo() + 1,
-                            featureName,
-                            featureKey,
-                            "FEATURE",
-                            nextFeatureSortOrder++,
-                            buildFeatureExtra(page, featureKey, featureName),
-                            usedKeys,
-                            operator
-                    );
-                    createdFeatures++;
-                    active.add(feature);
-                    indexNode(featureIndex, feature);
-                    projectModuleImpactService.markImpactedArtifactsAfterCreate(projectId, feature);
-                }
+            String pageKeySeed = text(page.get("page_key"), page.get("pageKey"), page.get("key"));
+            if (!hasText(pageKeySeed)) {
+                pageKeySeed = pageName;
             }
 
+            String pageKey = semanticModuleKey(pageKeySeed, "page");
+
+            String capabilityKey = semanticModuleKey(
+                    text(
+                            page.get("parent_feature_key"),
+                            page.get("parentFeatureKey"),
+                            page.get("feature_key"),
+                            page.get("featureKey"),
+                            capabilityName
+                    ),
+                    "feature"
+            );
+
             ProjectModuleEntity existingPage = findIndexedNode(pageIndex, pageKey, pageName);
+
+            Map<String, Object> requirementTrace = resolvePrdRequirementTrace(
+                    prdTraceIndex,
+                    "page_requirements",
+                    page,
+                    pageKey
+            );
+
             Map<String, Object> pageExtra = buildPageExtra(
                     page,
                     pageKey,
                     pageName,
-                    feature.getModuleKey(),
-                    feature.getModuleName()
+                    capabilityKey,
+                    capabilityName,
+                    requirementTrace
             );
+
+            Map<String, Object> capabilityBinding = new LinkedHashMap<>();
+            capabilityBinding.put("source", "MODULE_PRD_FUNCTIONAL_REQUIREMENT");
+            capabilityBinding.put("featureKey", capabilityKey);
+            capabilityBinding.put("featureName", capabilityName);
+            capabilityBinding.put("featureLayerHiddenFromUser", true);
+
+            pageExtra.put("featureLayerHiddenFromUser", true);
+            pageExtra.put("capabilityBindings", List.of(capabilityBinding));
+            pageExtra.put("relatedFeatureKeys", List.of(capabilityKey));
+            pageExtra.put("parentFeatureKey", capabilityKey);
+            pageExtra.put("parentFeatureName", capabilityName);
+            pageExtra.put("ownerModuleId", moduleId.toString());
+            pageExtra.put("ownerModuleKey", module.getModuleKey());
+            pageExtra.put("ownerModuleName", module.getModuleName());
 
             if (existingPage == null) {
                 ProjectModuleEntity createdPage = createMaterializedNode(
                         projectId,
-                        feature.getId(),
-                        feature.getModulePath(),
-                        feature.getLevelNo() + 1,
+                        moduleId,
+                        module.getModulePath(),
+                        module.getLevelNo() + 1,
                         pageName,
                         pageKey,
                         "PAGE",
-                        nextSortOrder(projectId, feature.getId()),
+                        nextSortOrder(projectId, moduleId),
                         pageExtra,
                         usedKeys,
-                        operator
+                        username
                 );
                 createdPages++;
                 active.add(createdPage);
+                activeById.put(createdPage.getId(), createdPage);
                 indexNode(pageIndex, createdPage);
                 projectModuleImpactService.markImpactedArtifactsAfterCreate(projectId, createdPage);
             } else {
-                mergeNodeExtra(existingPage, pageExtra, operator);
+                mergeNodeExtra(existingPage, pageExtra, username);
                 projectModuleRepository.save(existingPage);
                 updatedPages++;
                 indexNode(pageIndex, existingPage);
@@ -994,32 +956,320 @@ public class ProjectModuleService {
         Map<String, Object> moduleExtra = module.getExtra() == null
                 ? new LinkedHashMap<>()
                 : new LinkedHashMap<>(module.getExtra());
+
         moduleExtra.put("requirementMode", "REQUIREMENT_MODULE");
-        moduleExtra.put("moduleMaterializedBy", "MODULE_PRD_MANUAL_COMPLETION");
+        moduleExtra.put("moduleMaterializedBy", "MODULE_PRD_MANUAL_COMPLETION_PAGE_DIRECT");
         moduleExtra.put("modulePrdTreeCompletionAt", LocalDateTime.now().toString());
-        moduleExtra.put("modulePrdTreeCompletionSource", "A9.10.14.4.3.15.4.10.4.4_PRD_TREE_MANUAL_COMPLETION");
+        moduleExtra.put("modulePrdTreeCompletionSource", "A9.10.14.4.3.15.6.24L0B_NO_FEATURE_TREE_LAYER");
+        moduleExtra.put("featureLayerMode", "MODULE_PRD_CAPABILITY_ONLY");
         moduleExtra.put("modulePrdTreeCompletion", Map.of(
-                "createdFeatureCount", createdFeatures,
+                "createdFeatureCount", 0,
                 "createdPageCount", createdPages,
-                "updatedFeatureCount", updatedFeatures,
-                "updatedPageCount", updatedPages
+                "updatedFeatureCount", 0,
+                "updatedPageCount", updatedPages,
+                "capabilityCount", functionalRequirements.size()
         ));
+
         module.setExtra(moduleExtra);
-        module.setUpdatedBy(operator);
+        module.setUpdatedBy(username);
         module.setUpdatedAt(LocalDateTime.now());
         projectModuleRepository.save(module);
 
         projectModuleRepository.flush();
 
-        result.put("createdFeatureCount", createdFeatures);
+        result.put("createdFeatureCount", 0);
         result.put("createdPageCount", createdPages);
-        result.put("updatedFeatureCount", updatedFeatures);
+        result.put("updatedFeatureCount", 0);
         result.put("updatedPageCount", updatedPages);
-        result.put("featureCount", featureIndex.size());
+        result.put("capabilityCount", functionalRequirements.size());
+        result.put("featureCount", 0);
         result.put("pageCount", pageIndex.size());
-        result.put("reason", "COMPLETED_FROM_REVIEWED_MODULE_PRD_BY_USER_ACTION");
+        result.put("traceEnhanced", true);
+        result.put("traceSource", "MODULE_PRD_STRUCTURED_REQUIREMENTS");
+        result.put("projectionQualityGate", "A9.10.14.4.3.15.6.24L0B");
+        result.put("reason", "COMPLETED_FROM_REVIEWED_MODULE_PRD_BY_USER_ACTION_PAGE_DIRECT");
         return result;
     }
+
+
+
+
+
+
+
+
+
+    // A9.10.14.4.3.15.4.15.3.1_PRD_FEATURE_PAGE_TRACE
+    private Map<String, Map<String, Object>> buildPrdRequirementTraceIndex(
+            List<Map<String, Object>> structuredRequirements,
+            List<Map<String, Object>> functionalRequirements,
+            List<Map<String, Object>> pageRequirements
+    ) {
+        Map<String, Map<String, Object>> index = new LinkedHashMap<>();
+
+        for (Map<String, Object> item : structuredRequirements) {
+            if (item == null || item.isEmpty()) {
+                continue;
+            }
+
+            String section = text(item.get("sourceSection"), item.get("source_section"));
+            String requirementKey = text(item.get("requirementKey"), item.get("requirement_key"));
+            String requirementId = text(item.get("requirementId"), item.get("requirement_id"));
+            String type = text(item.get("type"), item.get("requirementType"), item.get("requirement_type"));
+
+            indexPrdTraceCandidate(index, section, requirementKey, item);
+            indexPrdTraceCandidate(index, section, requirementId, item);
+
+            if ("FEATURE".equalsIgnoreCase(type) || "FUNCTIONAL_REQUIREMENT".equalsIgnoreCase(type)) {
+                indexPrdTraceCandidate(index, "functional_requirements", requirementKey, item);
+                indexPrdTraceCandidate(index, "functional_requirements", requirementId, item);
+            }
+
+            if ("PAGE".equalsIgnoreCase(type) || "PAGE_REQUIREMENT".equalsIgnoreCase(type)) {
+                indexPrdTraceCandidate(index, "page_requirements", requirementKey, item);
+                indexPrdTraceCandidate(index, "page_requirements", requirementId, item);
+
+                Object relatedPageKeys = firstValue(item, "relatedPageKeys", "related_page_keys");
+                if (relatedPageKeys instanceof Iterable<?>) {
+                    for (Object relatedPageKey : (Iterable<?>) relatedPageKeys) {
+                        indexPrdTraceCandidate(index, "page_requirements", text(relatedPageKey), item);
+                    }
+                }
+            }
+        }
+
+        for (Map<String, Object> item : functionalRequirements) {
+            String key = text(
+                    item.get("requirement_key"),
+                    item.get("requirementKey"),
+                    item.get("feature_key"),
+                    item.get("featureKey"),
+                    item.get("key"),
+                    item.get("title"),
+                    item.get("name")
+            );
+            indexPrdTraceCandidate(
+                    index,
+                    "functional_requirements",
+                    key,
+                    buildSyntheticPrdRequirementTrace("functional_requirements", item, key)
+            );
+        }
+
+        for (Map<String, Object> item : pageRequirements) {
+            String key = text(
+                    item.get("page_key"),
+                    item.get("pageKey"),
+                    item.get("key"),
+                    item.get("page_id"),
+                    item.get("pageId"),
+                    item.get("page_name"),
+                    item.get("pageName"),
+                    item.get("name"),
+                    item.get("title")
+            );
+            indexPrdTraceCandidate(
+                    index,
+                    "page_requirements",
+                    key,
+                    buildSyntheticPrdRequirementTrace("page_requirements", item, key)
+            );
+        }
+
+        return index;
+    }
+
+    private void indexPrdTraceCandidate(
+            Map<String, Map<String, Object>> index,
+            String section,
+            String key,
+            Map<String, Object> trace
+    ) {
+        String normalizedSection = normalizeTraceKey(section);
+        String normalizedKey = normalizeTraceKey(key);
+
+        if (!hasText(normalizedSection) || !hasText(normalizedKey) || trace == null || trace.isEmpty()) {
+            return;
+        }
+
+        index.putIfAbsent(normalizedSection + "::" + normalizedKey, new LinkedHashMap<>(trace));
+        index.putIfAbsent(normalizedKey, new LinkedHashMap<>(trace));
+    }
+
+    private Map<String, Object> resolvePrdRequirementTrace(
+            Map<String, Map<String, Object>> index,
+            String section,
+            Map<String, Object> source,
+            String fallbackKey
+    ) {
+        if (index == null || index.isEmpty()) {
+            return Map.of();
+        }
+
+        List<String> keys = List.of(
+                text(source.get("requirement_key"), source.get("requirementKey")),
+                text(source.get("feature_key"), source.get("featureKey")),
+                text(source.get("page_key"), source.get("pageKey")),
+                text(source.get("page_id"), source.get("pageId")),
+                text(source.get("key")),
+                text(source.get("title")),
+                text(source.get("page_name"), source.get("pageName"), source.get("name")),
+                text(fallbackKey)
+        );
+
+        String normalizedSection = normalizeTraceKey(section);
+        for (String key : keys) {
+            String normalizedKey = normalizeTraceKey(key);
+            if (!hasText(normalizedKey)) {
+                continue;
+            }
+
+            Map<String, Object> bySection = index.get(normalizedSection + "::" + normalizedKey);
+            if (bySection != null && !bySection.isEmpty()) {
+                return new LinkedHashMap<>(bySection);
+            }
+
+            Map<String, Object> byKey = index.get(normalizedKey);
+            if (byKey != null && !byKey.isEmpty()) {
+                return new LinkedHashMap<>(byKey);
+            }
+        }
+
+        return Map.of();
+    }
+
+    private Map<String, Object> buildSyntheticPrdRequirementTrace(
+            String section,
+            Map<String, Object> source,
+            String key
+    ) {
+        String normalizedKey = hasText(key) ? key : "requirement";
+        String title = text(
+                source.get("title"),
+                source.get("requirement_name"),
+                source.get("requirementName"),
+                source.get("feature_name"),
+                source.get("featureName"),
+                source.get("page_name"),
+                source.get("pageName"),
+                source.get("name"),
+                normalizedKey
+        );
+
+        Map<String, Object> trace = new LinkedHashMap<>();
+        trace.put("requirementId", text(
+                source.get("requirement_id"),
+                source.get("requirementId"),
+                "req_" + normalizeTraceKey(section) + "_" + normalizeTraceKey(normalizedKey)
+        ));
+        trace.put("requirementKey", normalizedKey);
+        trace.put("title", title);
+        trace.put("type", "functional_requirements".equals(section) ? "FUNCTIONAL_REQUIREMENT" : "PAGE_REQUIREMENT");
+        trace.put("sourceSection", section);
+        trace.put("sourceType", text(source.get("sourceType"), source.get("source_type"), "AI_GENERATED_FROM_MODULE_PRD"));
+        trace.put("confirmationStatus", text(source.get("confirmationStatus"), source.get("confirmation_status"), "PENDING_CONFIRMATION"));
+        trace.put("sourceEvidence", Map.of(
+                "artifactType", "MODULE_PRD",
+                "sourceSection", section,
+                "sourceKey", normalizedKey,
+                "title", title
+        ));
+        return trace;
+    }
+
+    private Map<String, Object> buildTreeMaterializationTrace(
+            String section,
+            Map<String, Object> source,
+            String key,
+            Map<String, Object> requirementTrace
+    ) {
+        Map<String, Object> trace = requirementTrace == null
+                ? new LinkedHashMap<>()
+                : new LinkedHashMap<>(requirementTrace);
+
+        if (trace.isEmpty()) {
+            trace = buildSyntheticPrdRequirementTrace(section, source, key);
+        }
+
+        String requirementKey = text(
+                trace.get("requirementKey"),
+                trace.get("requirement_key"),
+                key
+        );
+        String requirementId = text(
+                trace.get("requirementId"),
+                trace.get("requirement_id"),
+                "req_" + normalizeTraceKey(section) + "_" + normalizeTraceKey(requirementKey)
+        );
+        String title = text(
+                trace.get("title"),
+                source.get("title"),
+                source.get("page_name"),
+                source.get("pageName"),
+                source.get("name"),
+                requirementKey
+        );
+        String sourceType = text(
+                trace.get("sourceType"),
+                trace.get("source_type"),
+                source.get("sourceType"),
+                source.get("source_type"),
+                "AI_GENERATED_FROM_MODULE_PRD"
+        );
+        String confirmationStatus = text(
+                trace.get("confirmationStatus"),
+                trace.get("confirmation_status"),
+                source.get("confirmationStatus"),
+                source.get("confirmation_status"),
+                "CONFIRMED_FROM_REVIEWED_MODULE_PRD"
+        );
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("artifactType", "MODULE_PRD");
+        result.put("sourceSection", section);
+        result.put("sourceRequirementId", requirementId);
+        result.put("sourceRequirementKey", requirementKey);
+        result.put("sourceRequirementTitle", title);
+        result.put("sourceType", sourceType);
+        result.put("confirmationStatus", confirmationStatus);
+        result.put("sourceEvidence", firstValue(trace, "sourceEvidence", "source_evidence"));
+
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("requirementId", requirementId);
+        snapshot.put("requirementKey", requirementKey);
+        snapshot.put("title", title);
+        snapshot.put("sourceSection", section);
+        snapshot.put("sourceType", sourceType);
+        snapshot.put("confirmationStatus", confirmationStatus);
+        result.put("structuredRequirementSnapshot", snapshot);
+
+        return result;
+    }
+
+    private void applyPrdTraceToTreeExtra(
+            Map<String, Object> extra,
+            Map<String, Object> prdTrace
+    ) {
+        if (extra == null || prdTrace == null || prdTrace.isEmpty()) {
+            return;
+        }
+
+        extra.put("sourceRequirementId", prdTrace.get("sourceRequirementId"));
+        extra.put("sourceRequirementKey", prdTrace.get("sourceRequirementKey"));
+        extra.put("sourceRequirementTitle", prdTrace.get("sourceRequirementTitle"));
+        extra.put("sourceType", prdTrace.get("sourceType"));
+        extra.put("confirmationStatus", prdTrace.get("confirmationStatus"));
+        extra.put("sourceEvidence", prdTrace.get("sourceEvidence"));
+        extra.put("prdTrace", prdTrace);
+    }
+
+    private String normalizeTraceKey(String value) {
+        String normalized = String.valueOf(value == null ? "" : value).trim().toLowerCase(java.util.Locale.ROOT);
+        normalized = normalized.replaceAll("[^0-9a-zA-Z\\u4e00-\\u9fff_\\-]+", "_");
+        normalized = normalized.replaceAll("_+", "_").replaceAll("^_+|_+$", "");
+        return normalized;
+    }
+
 
     private ProjectModuleEntity createMaterializedNode(
             UUID projectId,
@@ -1075,7 +1325,8 @@ public class ProjectModuleService {
     private Map<String, Object> buildFeatureExtra(
             Map<String, Object> source,
             String featureKey,
-            String featureName
+            String featureName,
+            Map<String, Object> requirementTrace
     ) {
         Map<String, Object> extra = new LinkedHashMap<>();
         String description = text(
@@ -1094,11 +1345,24 @@ public class ProjectModuleService {
         functionContext.put("summary", hasText(description) ? description : "承载 " + featureName + " 的业务能力。");
         functionContext.put("hiddenFromUser", true);
 
+        Map<String, Object> prdTrace = buildTreeMaterializationTrace(
+                "functional_requirements",
+                source,
+                featureKey,
+                requirementTrace
+        );
+        functionContext.put("sourceRequirementId", prdTrace.get("sourceRequirementId"));
+        functionContext.put("sourceRequirementKey", prdTrace.get("sourceRequirementKey"));
+        functionContext.put("sourceRequirementTitle", prdTrace.get("sourceRequirementTitle"));
+        functionContext.put("sourceType", prdTrace.get("sourceType"));
+        functionContext.put("confirmationStatus", prdTrace.get("confirmationStatus"));
+
         extra.put("requirementMode", "FUNCTION_POINT");
         extra.put("featureRole", "prd_functional_requirement");
         extra.put("source", "MODULE_PRD_TO_TREE_COMPLETION");
         extra.put("sourcePrdSection", "functional_requirements");
         extra.put("functionContext", functionContext);
+        applyPrdTraceToTreeExtra(extra, prdTrace);
         return extra;
     }
 
@@ -1107,7 +1371,8 @@ public class ProjectModuleService {
             String pageKey,
             String pageName,
             String parentFeatureKey,
-            String parentFeatureName
+            String parentFeatureName,
+            Map<String, Object> requirementTrace
     ) {
         String pageKind = normalizePageKind(text(
                 source.get("page_kind"),
@@ -1159,6 +1424,18 @@ public class ProjectModuleService {
         ));
         pagePrototypeContext.put("hiddenFromUser", true);
 
+        Map<String, Object> prdTrace = buildTreeMaterializationTrace(
+                "page_requirements",
+                source,
+                pageKey,
+                requirementTrace
+        );
+        pagePrototypeContext.put("sourceRequirementId", prdTrace.get("sourceRequirementId"));
+        pagePrototypeContext.put("sourceRequirementKey", prdTrace.get("sourceRequirementKey"));
+        pagePrototypeContext.put("sourceRequirementTitle", prdTrace.get("sourceRequirementTitle"));
+        pagePrototypeContext.put("sourceType", prdTrace.get("sourceType"));
+        pagePrototypeContext.put("confirmationStatus", prdTrace.get("confirmationStatus"));
+
         Map<String, Object> extra = new LinkedHashMap<>();
         extra.put("requirementMode", "PAGE_CONTRACT");
         extra.put("source", "MODULE_PRD_TO_TREE_COMPLETION");
@@ -1171,8 +1448,383 @@ public class ProjectModuleService {
         extra.put("parentFeatureKey", parentFeatureKey);
         extra.put("parentFeatureName", parentFeatureName);
         extra.put("pagePrototypeContext", pagePrototypeContext);
+        applyPrdTraceToTreeExtra(extra, prdTrace);
         return extra;
     }
+
+
+    // A9.10.14.4.3.15.4.15.5.4.3_PRD_PROJECTION_QUALITY_GATE
+    private int a915543EnsureFeaturePageCoverage(
+            UUID projectId,
+            ProjectModuleEntity module,
+            Map<String, ProjectModuleEntity> featureIndex,
+            Map<String, ProjectModuleEntity> pageIndex,
+            List<ProjectModuleEntity> active,
+            Map<String, Integer> usedKeys,
+            String operator
+    ) {
+        if (projectId == null || module == null || featureIndex == null || featureIndex.isEmpty()) {
+            return 0;
+        }
+
+        Map<UUID, ProjectModuleEntity> uniqueFeatures = new LinkedHashMap<>();
+        for (ProjectModuleEntity feature : featureIndex.values()) {
+            if (feature == null || feature.getId() == null) {
+                continue;
+            }
+
+            if (!module.getId().equals(feature.getParentId())) {
+                continue;
+            }
+
+            if (!"FEATURE".equals(normalizeModuleType(feature.getModuleType()))) {
+                continue;
+            }
+
+            uniqueFeatures.putIfAbsent(feature.getId(), feature);
+        }
+
+        int createdPages = 0;
+        for (ProjectModuleEntity feature : uniqueFeatures.values()) {
+            if (a915543FeatureHasPage(active, feature.getId())) {
+                continue;
+            }
+
+            String pageName = a915543FallbackPageName(feature.getModuleName(), module.getModuleName());
+            String pageKey = semanticModuleKey(pageName, "page");
+
+            ProjectModuleEntity existingPage = findIndexedNode(pageIndex, pageKey, pageName);
+            if (existingPage != null) {
+                continue;
+            }
+
+            Map<String, Object> fallbackPage = new LinkedHashMap<>();
+            fallbackPage.put("page_name", pageName);
+            fallbackPage.put("title", pageName);
+            fallbackPage.put("name", pageName);
+            fallbackPage.put("page_key", pageKey);
+            fallbackPage.put("page_type", a915543FallbackPageKind(feature.getModuleName(), pageName));
+            fallbackPage.put("parent_feature_key", feature.getModuleKey());
+            fallbackPage.put("parent_feature_name", feature.getModuleName());
+            fallbackPage.put("primary_entity", a915543BusinessObjectName(module.getModuleName(), feature.getModuleName()));
+            fallbackPage.put("description", pageName + "用于承载“" + feature.getModuleName() + "”功能点，避免功能点缺少页面或交互承载。");
+            fallbackPage.put("sourceType", "AI_COMPLETED");
+            fallbackPage.put("confirmationStatus", "PENDING_CONFIRMATION");
+            fallbackPage.put("qualityGateGenerated", true);
+            fallbackPage.put("qualityGateReason", "FEATURE_WITHOUT_PAGE_CARRIER");
+
+            Map<String, Object> featureTrace = a915543ExtractPrdTrace(feature);
+            Map<String, Object> pageExtra = buildPageExtra(
+                    fallbackPage,
+                    pageKey,
+                    pageName,
+                    feature.getModuleKey(),
+                    feature.getModuleName(),
+                    featureTrace
+            );
+
+            pageExtra.put("sourcePrdSection", "functional_requirements");
+            pageExtra.put("qualityGateGenerated", true);
+            pageExtra.put("qualityGateReason", "FEATURE_WITHOUT_PAGE_CARRIER");
+            pageExtra.put("projectionQualityGateVersion", "A9.10.14.4.3.15.4.15.5.4.3");
+            pageExtra.put("derivedFromFeatureKey", feature.getModuleKey());
+            pageExtra.put("derivedFromFeatureName", feature.getModuleName());
+
+            ProjectModuleEntity createdPage = createMaterializedNode(
+                    projectId,
+                    feature.getId(),
+                    feature.getModulePath(),
+                    feature.getLevelNo() + 1,
+                    pageName,
+                    pageKey,
+                    "PAGE",
+                    nextSortOrder(projectId, feature.getId()),
+                    pageExtra,
+                    usedKeys,
+                    operator
+            );
+
+            active.add(createdPage);
+            indexNode(pageIndex, createdPage);
+            projectModuleImpactService.markImpactedArtifactsAfterCreate(projectId, createdPage);
+            createdPages++;
+        }
+
+        return createdPages;
+    }
+
+    private boolean a915543FeatureHasPage(
+            List<ProjectModuleEntity> active,
+            UUID featureId
+    ) {
+        if (active == null || active.isEmpty() || featureId == null) {
+            return false;
+        }
+
+        for (ProjectModuleEntity item : active) {
+            if (item == null) {
+                continue;
+            }
+
+            if (!featureId.equals(item.getParentId())) {
+                continue;
+            }
+
+            if ("PAGE".equals(normalizeModuleType(item.getModuleType()))
+                    && ACTIVE.equals(item.getStatus())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private Map<String, Object> a915543ExtractPrdTrace(ProjectModuleEntity feature) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (feature == null || feature.getExtra() == null) {
+            return result;
+        }
+
+        Map<String, Object> extra = feature.getExtra();
+        Object trace = extra.get("prdTrace");
+        if (trace instanceof Map<?, ?> sourceTrace) {
+            for (Map.Entry<?, ?> entry : sourceTrace.entrySet()) {
+                if (entry.getKey() != null) {
+                    result.put(String.valueOf(entry.getKey()), entry.getValue());
+                }
+            }
+        }
+
+        if (result.isEmpty()) {
+            a915543CopyIfPresent(result, extra, "sourceRequirementId");
+            a915543CopyIfPresent(result, extra, "sourceRequirementKey");
+            a915543CopyIfPresent(result, extra, "sourceRequirementTitle");
+            a915543CopyIfPresent(result, extra, "sourceType");
+            a915543CopyIfPresent(result, extra, "confirmationStatus");
+            a915543CopyIfPresent(result, extra, "sourceEvidence");
+        }
+
+        return result;
+    }
+
+    private void a915543CopyIfPresent(
+            Map<String, Object> target,
+            Map<String, Object> source,
+            String key
+    ) {
+        if (target == null || source == null || !source.containsKey(key)) {
+            return;
+        }
+        target.put(key, source.get(key));
+    }
+
+    private String a915543QualityPageName(
+            String rawPageName,
+            String featureName,
+            String moduleName
+    ) {
+        String name = text(rawPageName);
+        if (!hasText(name)) {
+            return a915543FallbackPageName(featureName, moduleName);
+        }
+
+        if (!a915543IsGenericPageName(name)) {
+            return name;
+        }
+
+        String suffix = "页";
+        if (name.endsWith("弹窗")) {
+            suffix = "弹窗";
+        } else if (name.endsWith("抽屉")) {
+            suffix = "抽屉";
+        }
+
+        String action = name
+                .replace("页面", "")
+                .replace("页", "")
+                .replace("弹窗", "")
+                .replace("抽屉", "")
+                .trim();
+
+        if (!hasText(action)) {
+            action = "详情";
+        }
+
+        String prefix = a915543BusinessObjectName(moduleName, featureName);
+        return prefix + action + suffix;
+    }
+
+    private boolean a915543IsGenericPageName(String value) {
+        String name = text(value)
+                .replace("页面", "页")
+                .replace(" ", "")
+                .trim();
+
+        if (!hasText(name)) {
+            return true;
+        }
+
+        return List.of(
+                "新建页",
+                "新增页",
+                "创建页",
+                "编辑页",
+                "修改页",
+                "列表页",
+                "查询页",
+                "搜索页",
+                "详情页",
+                "明细页",
+                "查看页",
+                "维护页",
+                "设置页",
+                "确认页",
+                "提交页",
+                "弹窗"
+        ).contains(name);
+    }
+
+    private String a915543FallbackPageName(
+            String featureName,
+            String moduleName
+    ) {
+        String feature = text(featureName);
+        String module = text(moduleName);
+        String prefix = a915543BusinessObjectName(module, feature);
+
+        if (!hasText(feature)) {
+            return prefix + "详情页";
+        }
+
+        if (feature.contains("弹窗") || feature.contains("抽屉") || feature.endsWith("页")) {
+            return feature;
+        }
+
+        if (feature.contains("提交")
+                || feature.contains("确认")
+                || feature.contains("状态更新")
+                || feature.contains("异常记录")
+                || feature.contains("异常处理")
+                || feature.contains("记录")) {
+            return prefix + feature + "弹窗";
+        }
+
+        if (feature.contains("看板")
+                || feature.contains("报表")
+                || feature.contains("统计")
+                || feature.contains("分析")
+                || feature.contains("指标")
+                || feature.contains("筛选")
+                || feature.contains("钻取")) {
+            return feature + "页";
+        }
+
+        if (feature.contains("日志")) {
+            return prefix + feature + "页";
+        }
+
+        if (a915543IsGenericFeatureName(feature)) {
+            String action = feature
+                    .replace("新增", "新建")
+                    .replace("创建", "新建")
+                    .trim();
+            return prefix + action + "页";
+        }
+
+        return feature + "页";
+    }
+
+    private String a915543FallbackPageKind(
+            String featureName,
+            String pageName
+    ) {
+        String text = text(featureName) + " " + text(pageName);
+
+        if (text.contains("列表") || text.contains("查询") || text.contains("搜索")) {
+            return "LIST_PAGE";
+        }
+
+        if (text.contains("详情") || text.contains("明细") || text.contains("查看") || text.contains("日志")) {
+            return "DETAIL_PAGE";
+        }
+
+        if (text.contains("看板") || text.contains("报表") || text.contains("统计") || text.contains("分析") || text.contains("指标")) {
+            return "DASHBOARD_PAGE";
+        }
+
+        if (text.contains("配置") || text.contains("设置") || text.contains("权限")) {
+            return "SETTINGS_PAGE";
+        }
+
+        return "FORM_PAGE";
+    }
+
+    private boolean a915543IsGenericFeatureName(String value) {
+        String name = text(value).replace(" ", "").trim();
+        return List.of(
+                "新建",
+                "新增",
+                "创建",
+                "编辑",
+                "修改",
+                "列表",
+                "查询",
+                "搜索",
+                "详情",
+                "明细",
+                "查看",
+                "维护",
+                "设置"
+        ).contains(name);
+    }
+
+    private String a915543BusinessObjectName(
+            String moduleName,
+            String featureName
+    ) {
+        String feature = text(featureName).trim();
+        if (hasText(feature) && !a915543IsGenericFeatureName(feature)) {
+            String cleanedFeature = feature
+                    .replace("提交确认", "")
+                    .replace("状态更新", "")
+                    .replace("异常记录", "")
+                    .replace("异常处理", "")
+                    .replace("操作日志", "")
+                    .replace("列表查询", "")
+                    .replace("列表", "")
+                    .replace("查询", "")
+                    .replace("新建", "")
+                    .replace("新增", "")
+                    .replace("创建", "")
+                    .replace("编辑", "")
+                    .replace("修改", "")
+                    .replace("详情", "")
+                    .replace("查看", "")
+                    .replace("维护", "")
+                    .trim();
+
+            if (hasText(cleanedFeature) && cleanedFeature.length() >= 2) {
+                return cleanedFeature;
+            }
+        }
+
+        String module = text(moduleName)
+                .replace("模块", "")
+                .replace("管理", "")
+                .replace("维护", "")
+                .trim();
+
+        if (hasText(module)) {
+            return module;
+        }
+
+        if (hasText(feature)) {
+            return feature;
+        }
+
+        return "业务";
+    }
+
 
     private String normalizePageKind(String value) {
         String text = String.valueOf(value == null ? "" : value).toUpperCase(Locale.ROOT);
@@ -1530,6 +2182,76 @@ public class ProjectModuleService {
                 .replaceAll("[^0-9a-z\\u4e00-\\u9fff]+", "");
     }
 
+
+    // A9.10.14.4.3.15.6.24L0B_FIX_CREATE_PAGE_UNDER_FINAL_MODULE
+    private String normalizeCreateNodeTypeForRetiredFeatureLayer(
+            String requestedType,
+            String normalizedType,
+            String moduleName,
+            ProjectModuleEntity parent,
+            Map<String, Object> extra
+    ) {
+        String parentType = parent == null ? null : normalizeModuleType(parent.getModuleType());
+
+        if (!"MODULE".equals(parentType)) {
+            return normalizedType;
+        }
+
+        if ("PAGE".equals(normalizedType)) {
+            return "PAGE";
+        }
+
+        // FEATURE has retired to MODULE_PRD capability metadata. Manual creation
+        // under a MODULE should create a PAGE, not a visible FEATURE node.
+        if ("FEATURE".equals(normalizedType)) {
+            return "PAGE";
+        }
+
+        boolean rawBlank = requestedType == null || requestedType.isBlank();
+        boolean finalRequirementModule = isFinalRequirementModule(parent);
+
+        if ("MODULE".equals(normalizedType)
+                && (finalRequirementModule || rawBlank || looksLikePageCreation(moduleName, extra))) {
+            return "PAGE";
+        }
+
+        return normalizedType;
+    }
+
+    private boolean looksLikePageCreation(
+            String moduleName,
+            Map<String, Object> extra
+    ) {
+        String name = moduleName == null ? "" : moduleName.trim();
+
+        if (name.matches(".*(页|页面|弹窗|弹框|列表|详情|新建|新增|编辑|维护|查看|查询|表单|日志|确认|取消|状态|异常).*")) {
+            return true;
+        }
+
+        if (extra == null || extra.isEmpty()) {
+            return false;
+        }
+
+        String type = text(
+                extra.get("nodeType"),
+                extra.get("moduleType"),
+                extra.get("type"),
+                extra.get("pageKind"),
+                extra.get("pageType"),
+                extra.get("layoutType"),
+                extra.get("routePath"),
+                extra.get("route_path")
+        );
+
+        if (hasText(type) && type.matches(".*(PAGE|LIST|DETAIL|CREATE|EDIT|FORM|DIALOG|ROUTE|页面|页|弹窗).*")) {
+            return true;
+        }
+
+        Object canGenerateUiContract = extra.get("canGenerateUiContract");
+        return Boolean.TRUE.equals(canGenerateUiContract);
+    }
+
+    // A9.10.14.4.3.15.6.24L0B_FINAL_CREATE_PAGE_POLICY_FIX
     private void assertAllowedChildType(
             ProjectModuleEntity parent,
             String childType
@@ -1548,30 +2270,32 @@ public class ProjectModuleService {
         switch (parentType) {
             case "MODULE" -> {
                 if (isFinalRequirementModule(parent)) {
-                    if (!"FEATURE".equals(normalizedChildType)) {
-                        throw new IllegalArgumentException("已有 MODULE_PRD 的最终模块下只能新增业务能力，不能继续新增子模块。");
+                    if (!Set.of("PAGE", "FEATURE").contains(normalizedChildType)) {
+                        throw new IllegalArgumentException("已有 MODULE_PRD 的最终模块下只能新增页面，功能清单保留在 PRD 中。");
                     }
 
                     return;
                 }
 
-                if ("FEATURE".equals(normalizedChildType) && hasActiveChildModule(parent)) {
-                    throw new IllegalArgumentException("当前模块下仍有子模块。请先选择末级模块并生成 MODULE_PRD 后再新增业务能力。");
+                if (Set.of("PAGE", "FEATURE").contains(normalizedChildType) && hasActiveChildModule(parent)) {
+                    throw new IllegalArgumentException("当前模块下仍有子模块。请先选择末级模块后再新增页面。");
                 }
 
-                if (!Set.of("MODULE", "FEATURE").contains(normalizedChildType)) {
-                    throw new IllegalArgumentException("模块下只能新增子模块或业务能力。");
+                if (!Set.of("MODULE", "PAGE", "FEATURE").contains(normalizedChildType)) {
+                    throw new IllegalArgumentException("模块下只能新增子模块或页面。");
                 }
             }
             case "FEATURE" -> {
                 if (!"PAGE".equals(normalizedChildType)) {
-                    throw new IllegalArgumentException("业务能力下只能新增页面。");
+                    throw new IllegalArgumentException("历史能力绑定下只能新增页面。");
                 }
             }
             case "PAGE" -> throw new IllegalArgumentException("页面下不支持继续新增业务节点。");
             default -> throw new IllegalArgumentException("未知父节点类型：" + parentType);
         }
     }
+
+
 
     private String normalizeRequiredName(String value) {
         if (value == null || value.isBlank()) {
@@ -1581,21 +2305,106 @@ public class ProjectModuleService {
         return value.trim();
     }
 
+    // A9.10.14.4.3.15.4.15.6.1_FINAL_MODULE_FEATURE_PAGE_ALIAS
+    // A9.10.14.4.3.15.4.15.6.1_HOTFIX_CHINESE_NODE_TYPE_ALIAS_PROJECT
     private String normalizeModuleType(String rawType) {
         if (rawType == null || rawType.isBlank()) {
             return "MODULE";
         }
 
-        String value = rawType.trim().toUpperCase(Locale.ROOT);
+        String raw = rawType.trim();
+        String compact = raw.replaceAll("\\s+", "");
+        String value = compact.toUpperCase(Locale.ROOT);
 
-        return switch (value) {
-            case "DOMAIN", "DOMAIN_MODULE", "BUSINESS_DOMAIN" -> "MODULE";
-            case "MODULE", "BUSINESS_MODULE", "FEATURE_MODULE", "INTEGRATION_MODULE", "INFRA_MODULE" -> "MODULE";
-            case "SUBMODULE", "SUB_MODULE", "SCENE", "BUSINESS_SCENE" -> "MODULE";
-            case "PAGE", "PAGE_MODULE", "SCREEN", "VIEW" -> "PAGE";
-            case "FEATURE", "FUNCTION", "ACTION", "OPERATION" -> "FEATURE";
-            default -> "MODULE";
-        };
+        if (List.of(
+                "FEATURE",
+                "FUNCTION",
+                "FUNCTION_POINT",
+                "FEATURE_POINT",
+                "BUSINESS_FEATURE",
+                "BUSINESS_FUNCTION",
+                "BUSINESS_CAPABILITY",
+                "BUSINESS_ABILITY",
+                "CAPABILITY",
+                "ABILITY",
+                "FUNCTIONAL_REQUIREMENT",
+                "ACTION",
+                "OPERATION"
+        ).contains(value)
+                || List.of(
+                "功能",
+                "功能点",
+                "业务功能",
+                "业务能力",
+                "能力",
+                "操作",
+                "动作",
+                "功能需求",
+                "业务需求"
+        ).contains(compact)) {
+            return "FEATURE";
+        }
+
+        if (List.of(
+                "PAGE",
+                "PAGE_MODULE",
+                "PAGE_REQUIREMENT",
+                "SCREEN",
+                "VIEW",
+                "DIALOG",
+                "MODAL",
+                "POPUP",
+                "DRAWER",
+                "WINDOW",
+                "FORM_PAGE",
+                "LIST_PAGE",
+                "DETAIL_PAGE",
+                "DASHBOARD_PAGE",
+                "SETTINGS_PAGE"
+        ).contains(value)
+                || List.of(
+                "页面",
+                "页",
+                "页面需求",
+                "弹窗",
+                "弹框",
+                "抽屉",
+                "窗口",
+                "表单页",
+                "列表页",
+                "详情页",
+                "看板页",
+                "设置页"
+        ).contains(compact)) {
+            return "PAGE";
+        }
+
+        if (List.of(
+                "DOMAIN",
+                "DOMAIN_MODULE",
+                "BUSINESS_DOMAIN",
+                "MODULE",
+                "BUSINESS_MODULE",
+                "FEATURE_MODULE",
+                "INTEGRATION_MODULE",
+                "INFRA_MODULE",
+                "SUBMODULE",
+                "SUB_MODULE",
+                "SCENE",
+                "BUSINESS_SCENE"
+        ).contains(value)
+                || List.of(
+                "模块",
+                "子模块",
+                "业务模块",
+                "领域",
+                "业务域",
+                "场景"
+        ).contains(compact)) {
+            return "MODULE";
+        }
+
+        return "MODULE";
     }
 
 
@@ -1678,7 +2487,7 @@ public class ProjectModuleService {
                 : new LinkedHashMap<>(parent.getExtra());
 
         extra.put("requirementMode", "REQUIREMENT_MODULE");
-        extra.put("moduleMaterializedBy", "FEATURE_CHILD");
+        extra.put("moduleMaterializedBy", "PAGE_CHILD_OR_CAPABILITY");
         extra.put("moduleMaterializedAt", LocalDateTime.now().toString());
 
         parent.setExtra(extra);
@@ -1807,6 +2616,302 @@ public class ProjectModuleService {
         return value != null && !value.isBlank();
     }
 
+
+    // A9.10.14.4.3.15.6.24L0C_PHYSICAL_FEATURE_RETIRE_AND_24L1B_DEMO_DATA_LABEL
+    @Transactional
+    public Map<String, Object> retireFeatureLayerPhysical(
+            UUID workspaceId,
+            String projectCode,
+            boolean dryRun
+    ) {
+        UUID projectId = resolveAccessibleProjectByWorkspaceAndProjectCode(
+                workspaceId,
+                projectCode
+        );
+
+        CurrentUser currentUser = currentUserProvider.getCurrentUser();
+        LocalDateTime now = LocalDateTime.now();
+
+        List<ProjectModuleEntity> active = new ArrayList<>(activeModules(projectId));
+
+        Map<UUID, ProjectModuleEntity> byId = new LinkedHashMap<>();
+        Map<UUID, List<ProjectModuleEntity>> childrenByParent = new LinkedHashMap<>();
+
+        for (ProjectModuleEntity item : active) {
+            if (item == null || item.getId() == null) {
+                continue;
+            }
+
+            byId.put(item.getId(), item);
+
+            if (item.getParentId() != null) {
+                childrenByParent
+                        .computeIfAbsent(item.getParentId(), ignored -> new ArrayList<>())
+                        .add(item);
+            }
+        }
+
+        List<Map<String, Object>> plannedMoves = new ArrayList<>();
+        List<Map<String, Object>> skippedFeatures = new ArrayList<>();
+        List<ProjectModuleEntity> pagesToRefresh = new ArrayList<>();
+
+        int featureCount = 0;
+        int movedPageCount = 0;
+        int retiredFeatureCount = 0;
+
+        for (ProjectModuleEntity feature : active) {
+            if (feature == null || !"FEATURE".equals(normalizeModuleType(feature.getModuleType()))) {
+                continue;
+            }
+
+            featureCount++;
+
+            ProjectModuleEntity ownerModule = nearestVisibleModuleForFeature(feature, byId);
+
+            if (ownerModule == null) {
+                Map<String, Object> skipped = new LinkedHashMap<>();
+                skipped.put("featureId", feature.getId().toString());
+                skipped.put("featureName", feature.getModuleName());
+                skipped.put("reason", "NO_VISIBLE_MODULE_ANCESTOR");
+                skippedFeatures.add(skipped);
+                continue;
+            }
+
+            List<ProjectModuleEntity> children = childrenByParent.getOrDefault(
+                    feature.getId(),
+                    List.of()
+            );
+
+            List<ProjectModuleEntity> pageChildren = children.stream()
+                    .filter(item -> "PAGE".equals(normalizeModuleType(item.getModuleType())))
+                    .toList();
+
+            List<ProjectModuleEntity> nonPageChildren = children.stream()
+                    .filter(item -> !"PAGE".equals(normalizeModuleType(item.getModuleType())))
+                    .toList();
+
+            if (!nonPageChildren.isEmpty()) {
+                Map<String, Object> skipped = new LinkedHashMap<>();
+                skipped.put("featureId", feature.getId().toString());
+                skipped.put("featureName", feature.getModuleName());
+                skipped.put("reason", "FEATURE_HAS_NON_PAGE_CHILDREN");
+                skipped.put("nonPageChildCount", nonPageChildren.size());
+                skippedFeatures.add(skipped);
+                continue;
+            }
+
+            if (pageChildren.isEmpty()) {
+                Map<String, Object> planned = new LinkedHashMap<>();
+                planned.put("featureId", feature.getId().toString());
+                planned.put("featureName", feature.getModuleName());
+                planned.put("targetModuleId", ownerModule.getId().toString());
+                planned.put("targetModuleName", ownerModule.getModuleName());
+                planned.put("pageCount", 0);
+                planned.put("action", dryRun ? "DRY_RUN_RETIRE_EMPTY_FEATURE" : "RETIRE_EMPTY_FEATURE");
+                plannedMoves.add(planned);
+
+                if (!dryRun) {
+                    retireFeatureNode(feature, ownerModule, currentUser.username(), now, List.of());
+                    retiredFeatureCount++;
+                }
+
+                continue;
+            }
+
+            List<String> movedPageIds = new ArrayList<>();
+            int baseSortOrder = nextSortOrder(projectId, ownerModule.getId());
+            int offset = 0;
+
+            for (ProjectModuleEntity page : pageChildren) {
+                Map<String, Object> planned = new LinkedHashMap<>();
+                planned.put("pageId", page.getId().toString());
+                planned.put("pageName", page.getModuleName());
+                planned.put("fromFeatureId", feature.getId().toString());
+                planned.put("fromFeatureName", feature.getModuleName());
+                planned.put("toModuleId", ownerModule.getId().toString());
+                planned.put("toModuleName", ownerModule.getModuleName());
+                plannedMoves.add(planned);
+
+                movedPageIds.add(page.getId().toString());
+
+                if (!dryRun) {
+                    Map<String, Object> extra = page.getExtra() == null
+                            ? new LinkedHashMap<>()
+                            : new LinkedHashMap<>(page.getExtra());
+
+                    List<Object> bindings = new ArrayList<>();
+                    Object oldBindings = extra.get("capabilityBindings");
+                    if (oldBindings instanceof List<?> list) {
+                        bindings.addAll(list);
+                    }
+
+                    Map<String, Object> binding = new LinkedHashMap<>();
+                    binding.put("source", "PHYSICAL_FEATURE_LAYER_RETIRE");
+                    binding.put("featureNodeId", feature.getId().toString());
+                    binding.put("featureKey", feature.getModuleKey());
+                    binding.put("featureName", feature.getModuleName());
+                    binding.put("originalParentId", feature.getId().toString());
+                    binding.put("retiredAt", now.toString());
+                    bindings.add(binding);
+
+                    extra.put("capabilityBindings", dedupeCapabilityBindings(bindings));
+                    extra.put("legacyParentFeature", binding);
+                    extra.put("legacyParentFeatureId", feature.getId().toString());
+                    extra.put("legacyParentFeatureName", feature.getModuleName());
+                    extra.put("featureLayerPhysicalMigration", Map.of(
+                            "source", "A9.10.14.4.3.15.6.24L0C",
+                            "migratedAt", now.toString(),
+                            "migratedBy", currentUser.username(),
+                            "targetModuleId", ownerModule.getId().toString(),
+                            "targetModuleName", ownerModule.getModuleName()
+                    ));
+
+                    page.setParentId(ownerModule.getId());
+                    page.setLevelNo(ownerModule.getLevelNo() + 1);
+                    page.setSortOrder(baseSortOrder + offset);
+                    page.setModulePath(joinModulePath(ownerModule, page.getModuleName()));
+                    page.setExtra(extra);
+                    page.setUpdatedBy(currentUser.username());
+                    page.setUpdatedAt(now);
+
+                    projectModuleRepository.save(page);
+                    pagesToRefresh.add(page);
+                    movedPageCount++;
+                }
+
+                offset++;
+            }
+
+            if (!dryRun) {
+                retireFeatureNode(feature, ownerModule, currentUser.username(), now, movedPageIds);
+                retiredFeatureCount++;
+            }
+        }
+
+        if (!dryRun) {
+            for (ProjectModuleEntity page : pagesToRefresh) {
+                refreshDescendantPaths(projectId, page);
+            }
+
+            projectModuleRepository.flush();
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("source", "A9.10.14.4.3.15.6.24L0C_PHYSICAL_FEATURE_RETIRE");
+        result.put("dryRun", dryRun);
+        result.put("projectCode", projectCode);
+        result.put("featureCount", featureCount);
+        result.put("plannedMoveCount", plannedMoves.size());
+        result.put("movedPageCount", movedPageCount);
+        result.put("retiredFeatureCount", retiredFeatureCount);
+        result.put("skippedFeatureCount", skippedFeatures.size());
+        result.put("plannedMoves", plannedMoves);
+        result.put("skippedFeatures", skippedFeatures);
+
+        if (!dryRun) {
+            result.put("tree", buildModuleTree(projectId));
+        }
+
+        return result;
+    }
+
+    private ProjectModuleEntity nearestVisibleModuleForFeature(
+            ProjectModuleEntity feature,
+            Map<UUID, ProjectModuleEntity> byId
+    ) {
+        ProjectModuleEntity cursor = feature == null || feature.getParentId() == null
+                ? null
+                : byId.get(feature.getParentId());
+
+        while (cursor != null) {
+            String type = normalizeModuleType(cursor.getModuleType());
+
+            if ("MODULE".equals(type) || "SUBMODULE".equals(type) || "DOMAIN".equals(type)) {
+                return cursor;
+            }
+
+            UUID parentId = cursor.getParentId();
+            cursor = parentId == null ? null : byId.get(parentId);
+        }
+
+        return null;
+    }
+
+    private void retireFeatureNode(
+            ProjectModuleEntity feature,
+            ProjectModuleEntity ownerModule,
+            String username,
+            LocalDateTime now,
+            List<String> movedPageIds
+    ) {
+        Map<String, Object> extra = feature.getExtra() == null
+                ? new LinkedHashMap<>()
+                : new LinkedHashMap<>(feature.getExtra());
+
+        extra.put("featureLayerRetired", true);
+        extra.put("featureLayerRetiredAt", now.toString());
+        extra.put("featureLayerRetiredBy", username);
+        extra.put("featureLayerRetiredSource", "A9.10.14.4.3.15.6.24L0C");
+        extra.put("retiredToModuleId", ownerModule == null ? "" : ownerModule.getId().toString());
+        extra.put("retiredToModuleName", ownerModule == null ? "" : ownerModule.getModuleName());
+        extra.put("movedPageIds", movedPageIds);
+
+        feature.setStatus(DELETED);
+        feature.setModuleKey(buildDeletedModuleKey(feature));
+        feature.setExtra(extra);
+        feature.setUpdatedBy(username);
+        feature.setUpdatedAt(now);
+
+        projectModuleRepository.save(feature);
+    }
+
+    private List<Object> dedupeCapabilityBindings(List<Object> bindings) {
+        List<Object> result = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+
+        for (Object item : bindings) {
+            if (!(item instanceof Map<?, ?> map)) {
+                continue;
+            }
+
+            Object featureNodeId = map.get("featureNodeId");
+            Object featureKey = map.get("featureKey");
+            Object featureName = map.get("featureName");
+
+            String key = String.valueOf(featureNodeId == null ? "" : featureNodeId)
+                    + "|" + String.valueOf(featureKey == null ? "" : featureKey)
+                    + "|" + String.valueOf(featureName == null ? "" : featureName);
+
+            if (key.isBlank() || seen.contains(key)) {
+                continue;
+            }
+
+            seen.add(key);
+            result.add(item);
+        }
+
+        return result;
+    }
+
+    private String joinModulePath(
+            ProjectModuleEntity parent,
+            String childName
+    ) {
+        String parentPath = parent == null ? "" : String.valueOf(parent.getModulePath() == null ? "" : parent.getModulePath()).trim();
+        String name = String.valueOf(childName == null ? "" : childName).trim();
+
+        if (parentPath.isBlank()) {
+            return name;
+        }
+
+        if (name.isBlank()) {
+            return parentPath;
+        }
+
+        return parentPath + "/" + name;
+    }
+
+
     public static class ModuleTreeNode {
 
         private UUID id;
@@ -1910,3 +3015,6 @@ public class ProjectModuleService {
         }
     }
 }
+// A9.10.14.4.3.15.6.24L0A_CONTINUE_AGENT_BACKEND: backend policy allows MODULE -> PAGE; FEATURE remains legacy capability metadata.
+
+// A9.10.14.4.3.15.6.24L0B_FINAL_CREATE_PAGE_POLICY_FIX: final MODULE create policy exposes PAGE, not visible FEATURE.

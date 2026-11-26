@@ -49,27 +49,36 @@
     </article>
 
     <article class="contract-card">
-      <p class="eyebrow">Component Tree</p>
-      <h3>组件树</h3>
-
-      <ul class="component-tree">
-        <UiContractComponentTreeItem
-          v-for="component in contract.page.componentTree"
-          :key="component.componentId"
-          :component="component"
-        />
-      </ul>
+      <p class="eyebrow">Requirement Trace</p>
+      <h3>需求来源追踪</h3>
+      <div class="summary-grid">
+        <div>
+          <strong>{{ requirementSemanticLinkCount }}</strong>
+          <span>语义关联</span>
+        </div>
+        <div>
+          <strong>{{ requirementSemanticItemCount }}</strong>
+          <span>页面语义项</span>
+        </div>
+        <div>
+          <strong>{{ prototypeModuleLayoutMode }}</strong>
+          <span>页面意图</span>
+        </div>
+        <div>
+          <strong>{{ prototypeModuleSyncStatus }}</strong>
+          <span>同步状态</span>
+        </div>
+      </div>
+      <p class="analysis">
+        {{ prototypeModuleTraceSummary }}
+      </p>
     </article>
 
     <article class="contract-card">
       <p class="eyebrow">Interactions</p>
       <h3>交互动作</h3>
 
-      <div
-        v-for="action in contract.interactions"
-        :key="action.actionId"
-        class="interaction-row"
-      >
+      <div v-for="action in contract.interactions" :key="action.actionId" class="interaction-row">
         <div>
           <strong>{{ action.label || action.actionId }}</strong>
           <span>{{ action.actionId }}</span>
@@ -78,9 +87,9 @@
         <em>
           {{
             action.targetPageId ||
-              action.targetId ||
-              action.dataBindingKey ||
-              '-'
+            action.targetId ||
+            action.dataBindingKey ||
+            '-'
           }}
         </em>
       </div>
@@ -94,11 +103,7 @@
       <p class="eyebrow">Feature Coverage</p>
       <h3>功能点覆盖</h3>
 
-      <div
-        v-for="coverage in contract.featureCoverage"
-        :key="coverage.featureId"
-        class="coverage-card"
-      >
+      <div v-for="coverage in contract.featureCoverage" :key="coverage.featureId" class="coverage-card">
         <header>
           <div>
             <strong>{{ coverage.featureName }}</strong>
@@ -117,10 +122,7 @@
         </p>
 
         <ul v-if="coverage.notes?.length">
-          <li
-            v-for="note in coverage.notes"
-            :key="note"
-          >
+          <li v-for="note in coverage.notes" :key="note">
             {{ note }}
           </li>
         </ul>
@@ -134,11 +136,7 @@
       <div class="two-column">
         <section>
           <h4>页面状态</h4>
-          <div
-            v-for="state in contract.pageStates"
-            :key="state.stateKey"
-            class="mini-card"
-          >
+          <div v-for="state in contract.pageStates" :key="state.stateKey" class="mini-card">
             <strong>{{ state.title || state.stateKey }}</strong>
             <span>{{ state.type }}</span>
             <p>{{ state.message || '-' }}</p>
@@ -147,11 +145,7 @@
 
         <section>
           <h4>Mock 场景</h4>
-          <div
-            v-for="scenario in contract.mockScenarios"
-            :key="scenario.scenarioKey"
-            class="mini-card"
-          >
+          <div v-for="scenario in contract.mockScenarios" :key="scenario.scenarioKey" class="mini-card">
             <strong>{{ scenario.scenarioKey }}</strong>
             <span>{{ scenario.outcome }}</span>
             <p>{{ scenario.message || '-' }}</p>
@@ -164,11 +158,7 @@
       <p class="eyebrow">API Bindings</p>
       <h3>接口绑定</h3>
 
-      <div
-        v-for="binding in contract.apiBindings"
-        :key="binding.bindingKey"
-        class="api-row"
-      >
+      <div v-for="binding in contract.apiBindings" :key="binding.bindingKey" class="api-row">
         <strong>{{ binding.method }} {{ binding.path }}</strong>
         <span>{{ binding.bindingKey }}</span>
         <em>{{ binding.status || 'MOCK' }}</em>
@@ -203,10 +193,7 @@
       </div>
 
       <ul v-if="contract.qualitySummary.warnings?.length" class="warning-list">
-        <li
-          v-for="warning in contract.qualitySummary.warnings"
-          :key="warning"
-        >
+        <li v-for="warning in contract.qualitySummary.warnings" :key="warning">
           {{ warning }}
         </li>
       </ul>
@@ -217,10 +204,7 @@
       <h3>开发一致性规则</h3>
 
       <dl class="rule-grid">
-        <template
-          v-for="(value, key) in contract.developmentRules"
-          :key="String(key)"
-        >
+        <template v-for="(value, key) in contract.developmentRules" :key="String(key)">
           <dt>{{ key }}</dt>
           <dd>{{ formatValue(value) }}</dd>
         </template>
@@ -243,6 +227,62 @@ const props = defineProps<{
 
 const componentCount = computed(() => {
   return countComponents(props.contract.page.componentTree)
+})
+
+const prototypeModuleSemantics = computed(() => {
+  const metadata = (props.contract as any).metadata
+
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return {}
+  }
+
+  const semantics = metadata.prototypeModuleSemantics
+
+  return semantics && typeof semantics === 'object' && !Array.isArray(semantics)
+    ? semantics as Record<string, any>
+    : {}
+})
+
+const requirementSemanticLinkCount = computed(() => {
+  const metadata = (props.contract as any).metadata
+
+  return Array.isArray(metadata?.requirementSemanticLinks)
+    ? metadata.requirementSemanticLinks.length
+    : 0
+})
+
+const requirementSemanticItemCount = computed(() => {
+  return Array.isArray(prototypeModuleSemantics.value.semanticItems)
+    ? prototypeModuleSemantics.value.semanticItems.length
+    : 0
+})
+
+const prototypeModuleLayoutMode = computed(() => {
+  const uiIntent = prototypeModuleSemantics.value.uiIntent
+
+  return uiIntent && typeof uiIntent === 'object'
+    ? String((uiIntent as Record<string, unknown>).layoutMode || '-')
+    : '-'
+})
+
+const prototypeModuleSyncStatus = computed(() => {
+  const prototypeBinding = prototypeModuleSemantics.value.prototypeBinding
+
+  return prototypeBinding && typeof prototypeBinding === 'object'
+    ? String((prototypeBinding as Record<string, unknown>).syncStatus || '-')
+    : '-'
+})
+
+const prototypeModuleTraceSummary = computed(() => {
+  const pageName =
+    prototypeModuleSemantics.value.pageName ||
+    props.contract.identity.pageName
+
+  const count = requirementSemanticItemCount.value
+
+  return count
+    ? `${pageName} 已记录 ${count} 个 PRD 页面语义项，后续同步会优先按这些语义项增量更新原型。`
+    : '当前原型还没有记录 PRD 页面语义项。'
 })
 
 function countComponents(
@@ -535,6 +575,7 @@ function formatValue(
 }
 
 @media (max-width: 760px) {
+
   .summary-grid,
   .quality-grid,
   .two-column {

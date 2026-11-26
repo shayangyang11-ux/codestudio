@@ -1,5 +1,5 @@
 <template>
-  <button v-if="collapsed" class="assistant-float-button" @click="$emit('update:collapsed', false)">
+  <button type="button" v-if="collapsed" class="assistant-float-button" @click="$emit('update:collapsed', false)">
     AI
   </button>
 
@@ -19,12 +19,12 @@
       </div>
 
       <div class="assistant-header-actions">
-        <button class="clear-conversation-button" title="清空当前对话视图" :disabled="isBusy"
+        <button type="button" class="clear-conversation-button" title="清空当前对话视图" :disabled="isBusy"
           @click="$emit('clear-conversation')">
           清空对话
         </button>
 
-        <button class="collapse-button" title="收起" @click="$emit('update:collapsed', true)">
+        <button type="button" class="collapse-button" title="收起" @click="$emit('update:collapsed', true)">
           ×
         </button>
       </div>
@@ -121,14 +121,19 @@
               </ul>
             </div>
 
-            <footer class="proposal-actions">
-              <button class="secondary-button" :disabled="isApplyingTreePatch" @click="clearProposal(message)">
+            <div v-if="isHandledTreePatchProposalCard(message)" class="proposal-section handled-proposal-state">
+              <h4>{{ formatHandledTreePatchProposalTitle(message) }}</h4>
+              <p>{{ formatHandledTreePatchProposalText(message) }}</p>
+            </div>
+
+            <footer v-else class="proposal-actions">
+              <button type="button" class="secondary-button" :disabled="isApplyingTreePatch" @click="clearProposal(message)">
                 放弃提案
               </button>
 
-              <button class="primary-button"
+              <button type="button" class="primary-button"
                 :disabled="isApplyingTreePatch || !canApplyProposalFromTreePatchCard(message.proposal)"
-                @click="handleApplyProposal(message.proposal)">
+                @click.stop.prevent="handleApplyProposal(message)">
                 {{ isApplyingTreePatch ? '应用中...' : formatTreePatchApplyButtonLabel(message.proposal) }}
               </button>
             </footer>
@@ -203,12 +208,12 @@
             </div>
 
             <footer class="proposal-actions">
-              <button class="secondary-button" :disabled="isBusy" title="放弃当前草案。对不满意的部分，可以直接在输入框继续说明，AI 会基于上下文重新生成方案。"
+              <button type="button" class="secondary-button" :disabled="isBusy" title="放弃当前草案。对不满意的部分，可以直接在输入框继续说明，AI 会基于上下文重新生成方案。"
                 @click="clearRequirementChangeProposal(message)">
                 放弃并继续说明
               </button>
 
-              <button class="primary-button" :disabled="isBusy" title="确认该需求变更草案，并交给当前阶段可用的执行链路处理。"
+              <button type="button" class="primary-button" :disabled="isBusy" title="确认该需求变更草案，并交给当前阶段可用的执行链路处理。"
                 @click="handleConfirmRequirementChange(message.requirementChangeProposal)">
                 确认执行
               </button>
@@ -279,6 +284,72 @@
               </ul>
             </div>
 
+            <!-- A9.10.14.4.3.15.4.15.3.3.2_ASSET_EDIT_IMPACT_TRACE_UI -->
+            <div v-if="hasAssetEditImpactTrace(message.assetEditProposal)" class="proposal-section impact-trace-section">
+              <h4>精准影响范围</h4>
+
+              <p v-if="formatAssetEditImpactReason(message.assetEditProposal)" class="section-tip">
+                {{ formatAssetEditImpactReason(message.assetEditProposal) }}
+              </p>
+
+              <ul class="impact-trace-list">
+                <li v-if="getAssetEditImpactLabels(message.assetEditProposal, 'affectedRequirementKeys', 'affectedRequirementIds').length">
+                  命中 PRD 需求：
+                  <span class="operation-main">
+                    {{ getAssetEditImpactLabels(message.assetEditProposal, 'affectedRequirementKeys', 'affectedRequirementIds').join('、') }}
+                  </span>
+                </li>
+
+                <li v-if="getAssetEditImpactLabels(message.assetEditProposal, 'affectedFeatureNodeIds').length">
+                  受影响业务能力：
+                  <span class="operation-main">
+                    {{ getAssetEditImpactLabels(message.assetEditProposal, 'affectedFeatureNodeIds').length }} 个
+                  </span>
+                </li>
+
+                <li v-if="getAssetEditImpactLabels(message.assetEditProposal, 'affectedPageNodeIds').length">
+                  受影响页面：
+                  <span class="operation-main">
+                    {{ getAssetEditImpactLabels(message.assetEditProposal, 'affectedPageNodeIds').length }} 个
+                  </span>
+                </li>
+
+                <li v-if="getAssetEditImpactLabels(message.assetEditProposal, 'affectedPageSpecs').length">
+                  受影响页面准备信息：
+                  <span class="operation-main">
+                    {{ getAssetEditImpactLabels(message.assetEditProposal, 'affectedPageSpecs').join('、') }}
+                  </span>
+                </li>
+
+                <li v-if="getAssetEditImpactLabels(message.assetEditProposal, 'affectedUiContracts').length">
+                  受影响交互原型：
+                  <span class="operation-main">
+                    {{ getAssetEditImpactLabels(message.assetEditProposal, 'affectedUiContracts').join('、') }}
+                  </span>
+                </li>
+
+                <li v-if="formatAssetEditSyncAction(message.assetEditProposal)">
+                  建议同步动作：
+                  <span class="operation-main">
+                    {{ formatAssetEditSyncAction(message.assetEditProposal) }}
+                  </span>
+                </li>
+              </ul>
+
+              <div
+                v-if="getAssetEditChangedRequirements(message.assetEditProposal).length"
+                class="impact-trace-requirements"
+              >
+                <span
+                  v-for="(item, index) in getAssetEditChangedRequirements(message.assetEditProposal)"
+                  :key="formatAssetEditChangedRequirementKey(item, index)"
+                  class="impact-trace-pill"
+                >
+                  {{ formatAssetEditChangedRequirementTitle(item, index) }}
+                </span>
+              </div>
+            </div>
+
             <div v-if="message.assetEditProposal.riskNotes?.length" class="proposal-section warning">
               <h4>风险提示</h4>
               <ul>
@@ -289,11 +360,11 @@
             </div>
 
             <footer class="proposal-actions">
-              <button class="secondary-button" :disabled="isBusy" @click="clearAssetEditProposal(message)">
+              <button type="button" class="secondary-button" :disabled="isBusy" @click="clearAssetEditProposal(message)">
                 放弃并继续说明
               </button>
 
-              <button class="primary-button" :disabled="isBusy || !message.assetEditProposal.proposedContentMarkdown"
+              <button type="button" class="primary-button" :disabled="isBusy || !message.assetEditProposal.proposedContentMarkdown"
                 title="确认本次局部修订，并保存为新的待确认版本。旧版本保留。" @click="handleConfirmAssetEditProposal(message.assetEditProposal)">
                 确认并保存局部修订版本
               </button>
@@ -365,7 +436,7 @@
             </div>
 
             <footer class="proposal-actions attachment-actions">
-              <button v-for="action in getAttachmentChangeCandidateActions(message.attachmentDrivenChangeProposal)"
+              <button type="button" v-for="action in getAttachmentChangeCandidateActions(message.attachmentDrivenChangeProposal)"
                 :key="String(action.type || action.label)" class="primary-button"
                 :class="{ 'secondary-button': normalizeAttachmentActionType(action) === 'ANALYSIS_ONLY' }"
                 :disabled="isBusy" :title="action.description || ''"
@@ -373,7 +444,7 @@
                 {{ formatAttachmentChangeActionLabel(action) }}
               </button>
 
-              <button class="secondary-button" :disabled="isBusy" @click="clearAttachmentDrivenChangeProposal(message)">
+              <button type="button" class="secondary-button" :disabled="isBusy" @click="clearAttachmentDrivenChangeProposal(message)">
                 稍后处理
               </button>
             </footer>
@@ -591,7 +662,7 @@
             </div>
 
             <footer class="proposal-actions attachment-actions">
-              <button
+              <button type="button"
                 v-for="action in getAttachmentDiffCandidateActions(message.attachmentArtifactDiffProposal)"
                 :key="String(action.type || action.label)"
                 class="primary-button"
@@ -607,7 +678,7 @@
                 {{ formatAttachmentDiffActionLabel(action) }}
               </button>
 
-              <button
+              <button type="button"
                 class="secondary-button"
                 :disabled="isBusy"
                 @click="clearAttachmentArtifactDiffProposal(message)"
@@ -651,7 +722,7 @@
           :title="attachment.errorMessage || formatAttachmentTitle(attachment)">
           {{ attachment.fileName }}
           <em>{{ attachmentParseLabel(attachment) }}</em>
-          <button title="移除" @click="removeAttachment(attachment.localId)">
+          <button type="button" title="移除" @click="removeAttachment(attachment.localId)">
             ×
           </button>
         </span>
@@ -661,7 +732,7 @@
         @keydown="handleInputKeydown" />
 
       <div class="assistant-input-footer">
-        <button class="upload-button" :disabled="isBusy" title="上传 Word、PDF、Excel、图片等附件" @click="handleUploadClick">
+        <button type="button" class="upload-button" :disabled="isBusy" title="上传 Word、PDF、Excel、图片等附件" @click="handleUploadClick">
           ＋ 附件
         </button>
 
@@ -672,7 +743,7 @@
           Enter 发送，Ctrl + Enter 换行
         </span>
 
-        <button class="send-button" :disabled="submitDisabled" @click="submit">
+        <button type="button" class="send-button" :disabled="submitDisabled" @click="submit">
           {{ buttonText }}
         </button>
       </div>
@@ -748,6 +819,9 @@ interface AssistantMessage {
   assetEditProposal?: AssetEditProposal | null
   attachmentDrivenChangeProposal?: AttachmentDrivenChangeProposal | null
   attachmentArtifactDiffProposal?: AttachmentArtifactDiffProposal | null
+  treePatchProposalKey?: string
+  treePatchProposalStatus?: 'SUBMITTED' | 'APPLIED' | 'DISCARDED'
+  treePatchProposalStatusText?: string
 }
 
 const props = defineProps<{
@@ -796,6 +870,24 @@ const attachmentDiffSelections = ref<Record<string, string[]>>({})
 
 const messages = ref<AssistantMessage[]>(createDefaultMessages())
 
+// A9.10.14.4.3.15.6.10_TREE_PATCH_CHAT_STATE_FINAL
+// 模块树提案的“已提交/已应用/已放弃”是 UI 会话状态，不能只存在内存里。
+// 否则刷新页面后，后端历史里的旧 TREE_PATCH_PROPOSAL 会重新变成可点击卡片。
+interface A915610TreePatchProposalUiState {
+  status: 'SUBMITTED' | 'APPLIED' | 'DISCARDED'
+  text: string
+  updatedAt: number
+}
+
+const a915610TreePatchProposalUiStates = ref<Record<string, A915610TreePatchProposalUiState>>(
+  a915610LoadTreePatchProposalUiStates(),
+)
+
+const a915610LastSubmittedTreePatchProposalKey = ref<string>(
+  a915610LoadLastSubmittedTreePatchProposalKey(),
+)
+
+
 watch(
   messages,
   (items) => {
@@ -815,7 +907,49 @@ watch(
 )
 
 
-const visibleMessages = computed(() => messages.value)
+// A9.10.14.4.3.15.4.15.6.4_HIDE_STALE_PATCH_APPLIED_MESSAGES
+// 历史任务反馈不作为当前对话消息展示，避免“还没点应用提案就显示已应用”的错觉。
+const visibleMessages = computed(() =>
+  messages.value.filter((message) => !isStaleTaskFeedbackMessage(message)),
+)
+
+function isStaleTaskFeedbackMessage(message: AssistantMessage): boolean {
+  if (!message || message.role !== 'assistant') {
+    return false
+  }
+
+  const id = String(message.id || '')
+
+  // A9.10.14.4.3.15.6.11_STABLE_CHAT_AFTER_REFRESH
+  // 历史/本地里的独立 apply 成功气泡会导致刷新前后消息不一致。
+  // 成功状态统一落回对应提案卡片的 TEXT 状态里展示。
+  if (
+    id.startsWith('tree_patch_apply_success_') ||
+    id.startsWith('module_tree_patch_applied_')
+  ) {
+    return true
+  }
+
+  const bodyText = String(
+    message.text ||
+    (message as any).content ||
+    (message as any).reply ||
+    '',
+  )
+
+  if (
+    bodyText.includes('模块树已经发生变化') ||
+    bodyText.includes('moduleTreeHash') ||
+    bodyText.includes('moduleTreeNodeCount')
+  ) {
+    return true
+  }
+
+
+  return (
+    id.startsWith('module_tree_generated_')
+  )
+}
 
 const isBusy = computed(() => {
   return props.isGeneratingTree ||
@@ -846,7 +980,7 @@ function sanitizeAssistantVisibleText(value: string): string {
 
 const inputPlaceholder = computed(() => {
   if (!props.moduleTreeExists) {
-    return '例如：我要做一个电商系统，包含用户、订单、支付、库存、后台管理、权限控制等模块。'
+    return '请输入项目背景、业务目标、用户角色、业务模块或重点测试模块，AI 将生成结构化模块树。'
   }
 
   return '例如：给用户中心增加一个密码找回页，放在登录注册子模块下面。'
@@ -854,7 +988,7 @@ const inputPlaceholder = computed(() => {
 
 const buttonText = computed(() => {
   if (!props.moduleTreeExists) {
-    return props.isGeneratingTree ? '生成中...' : '生成需求骨架'
+    return props.isGeneratingTree ? '生成中...' : '生成模块树'
   }
 
   if (props.isSendingMessage) {
@@ -904,7 +1038,7 @@ const submitDisabled = computed(() => {
 
 const pendingText = computed(() => {
   if (props.isGeneratingTree) {
-    return '正在根据业务需求生成需求骨架，请稍候。'
+    return '正在根据业务需求生成模块树，请稍候。'
   }
 
   if (props.isSendingMessage) {
@@ -943,6 +1077,13 @@ watch(
 
     if (response.intent === 'CONFIRM_ASSET_EDIT') {
       markAssetEditProposalsAsSaved()
+    }
+
+    // A9.10.14.4.3.15.6.11_STABLE_CHAT_AFTER_REFRESH
+    // 模块树变更 apply 成功后，只更新原提案消息为“已成功应用”，不要再追加一个刷新后会消失的临时 success 气泡。
+    if (a915610HandleTreePatchApplyAssistantResponse(response)) {
+      scrollToBottom()
+      return
     }
 
     upsertAssistantMessage(
@@ -1152,17 +1293,281 @@ function mergeHistoryMessagesWithLocalOperationMessages(
   historyBasedMessages: AssistantMessage[],
   currentMessages: AssistantMessage[],
 ): AssistantMessage[] {
-  const historyIds = new Set(historyBasedMessages.map((message) => message.id))
+  // A9.10.14.4.3.15.6.10_TREE_PATCH_CHAT_STATE_FINAL_MERGE
+  const normalizedHistoryMessages = historyBasedMessages.map((message) =>
+    a915610NormalizeHistoryTreePatchProposalMessage(message),
+  )
+
+  const localHandledPatchMessages = new Map<string, AssistantMessage>()
+
+  for (const message of currentMessages) {
+    if (isHandledTreePatchProposalMessage(message)) {
+      localHandledPatchMessages.set(String(message.id || ''), message)
+    }
+  }
+
+  const mergedHistoryMessages = normalizedHistoryMessages.map((message) => {
+    const localHandled = localHandledPatchMessages.get(String(message.id || ''))
+    return localHandled || message
+  })
+
+  const historyIds = new Set(mergedHistoryMessages.map((message) => message.id))
   const localOperationMessages = currentMessages.filter((message) =>
     !historyIds.has(message.id) &&
-    isLocalOperationMessage(message)
+    (
+      isLocalOperationMessage(message) ||
+      isHandledTreePatchProposalMessage(message)
+    )
   )
 
   return [
-    ...historyBasedMessages,
+    ...mergedHistoryMessages,
     ...localOperationMessages,
   ]
 }
+
+
+function a915610TreePatchProposalStorageKey(): string {
+  const path = typeof window === 'undefined'
+    ? 'server'
+    : window.location.pathname
+
+  return `codemind:tree-patch-proposal-ui-state:${path}`
+}
+
+
+function a915610LastSubmittedTreePatchProposalStorageKey(): string {
+  const path = typeof window === 'undefined'
+    ? 'server'
+    : window.location.pathname
+
+  return `codemind:last-submitted-tree-patch-proposal:${path}`
+}
+
+
+function a915610LoadTreePatchProposalUiStates(): Record<string, A915610TreePatchProposalUiState> {
+  if (typeof window === 'undefined') {
+    return {}
+  }
+
+  try {
+    const raw = window.localStorage.getItem(a915610TreePatchProposalStorageKey())
+    if (!raw) {
+      return {}
+    }
+
+    const parsed = JSON.parse(raw)
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {}
+    }
+
+    return parsed as Record<string, A915610TreePatchProposalUiState>
+  } catch {
+    return {}
+  }
+}
+
+
+function a915610PersistTreePatchProposalUiStates() {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(
+      a915610TreePatchProposalStorageKey(),
+      JSON.stringify(a915610TreePatchProposalUiStates.value),
+    )
+  } catch {
+    // localStorage 不可用时只影响刷新后的 UI 状态，不影响业务 apply。
+  }
+}
+
+
+function a915610LoadLastSubmittedTreePatchProposalKey(): string {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  try {
+    return window.localStorage.getItem(
+      a915610LastSubmittedTreePatchProposalStorageKey(),
+    ) || ''
+  } catch {
+    return ''
+  }
+}
+
+
+function a915610PersistLastSubmittedTreePatchProposalKey(key: string) {
+  a915610LastSubmittedTreePatchProposalKey.value = key
+
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    if (key) {
+      window.localStorage.setItem(
+        a915610LastSubmittedTreePatchProposalStorageKey(),
+        key,
+      )
+    } else {
+      window.localStorage.removeItem(
+        a915610LastSubmittedTreePatchProposalStorageKey(),
+      )
+    }
+  } catch {
+    // ignore
+  }
+}
+
+
+function a915610RecordTreePatchProposalUiState(
+  proposalKey: string,
+  status: A915610TreePatchProposalUiState['status'],
+  text: string,
+) {
+  if (!proposalKey) {
+    return
+  }
+
+  a915610TreePatchProposalUiStates.value = {
+    ...a915610TreePatchProposalUiStates.value,
+    [proposalKey]: {
+      status,
+      text,
+      updatedAt: Date.now(),
+    },
+  }
+
+  a915610PersistTreePatchProposalUiStates()
+}
+
+
+function a915610ResolveTreePatchProposalUiState(
+  proposal: ModuleTreePatchProposalResponse | null | undefined,
+): A915610TreePatchProposalUiState | null {
+  if (!proposal) {
+    return null
+  }
+
+  const key = a91568TreePatchProposalKey(proposal)
+  return a915610TreePatchProposalUiStates.value[key] || null
+}
+
+
+function a915610NormalizeHistoryTreePatchProposalMessage(
+  message: AssistantMessage,
+): AssistantMessage {
+  if (message.type !== 'TREE_PATCH_PROPOSAL' || !message.proposal) {
+    return message
+  }
+
+  const key = a91568TreePatchProposalKey(message.proposal)
+  const state = a915610ResolveTreePatchProposalUiState(message.proposal)
+
+  if (!state) {
+    return message
+  }
+
+  return {
+    ...message,
+    type: 'TREE_PATCH_PROPOSAL',
+    proposal: message.proposal,
+    treePatchProposalKey: key,
+    treePatchProposalStatus: state.status,
+    treePatchProposalStatusText: state.text,
+    quickReplies: undefined,
+    text: state.text || '该模块树变更提案已处理。',
+  }
+}
+
+
+function a915610HandleTreePatchApplyAssistantResponse(
+  response: AssistantMessageResponse,
+): boolean {
+  const messageId = String(response.messageId || '')
+  const reply = String(response.reply || '').trim()
+
+  const isApplySuccess =
+    messageId.startsWith('tree_patch_apply_success_') ||
+    messageId.startsWith('module_tree_patch_applied_') ||
+    (
+      !response.proposal &&
+      (
+        reply.includes('模块树变更已应用') ||
+        reply.includes('模块树变更提案已应用') ||
+        reply.includes('已应用模块树变更') ||
+        reply.includes('成功应用') ||
+        (
+          reply.includes('新增节点') &&
+          reply.includes('模块树')
+        )
+      )
+    )
+
+  if (!isApplySuccess) {
+    return false
+  }
+
+  const key = a915610LastSubmittedTreePatchProposalKey.value
+
+  if (!key) {
+    // 旧历史成功气泡不再单独显示，但也不要误伤其他普通消息。
+    return messageId.startsWith('tree_patch_apply_success_') ||
+      messageId.startsWith('module_tree_patch_applied_')
+  }
+
+  const text =
+    reply ||
+    '模块树变更提案已成功应用，模块树和相关需求资产已刷新。'
+
+  a915610RecordTreePatchProposalUiState(
+    key,
+    'APPLIED',
+    text,
+  )
+
+  a91568CloseSameTreePatchProposalCards(key, text)
+  a915610PersistLastSubmittedTreePatchProposalKey('')
+
+  return true
+}
+
+
+function isHandledTreePatchProposalMessage(
+  message: AssistantMessage,
+): boolean {
+  if (!message || message.role !== 'assistant') {
+    return false
+  }
+
+  if (message.type === 'TREE_PATCH_PROPOSAL' && message.proposal) {
+    return Boolean(resolveHandledTreePatchProposalStateFromMessage(message))
+  }
+
+  if (message.treePatchProposalKey && message.type === 'TEXT') {
+    return true
+  }
+
+  const text = String(message.text || '')
+
+  return (
+    text.includes('模块树变更提案') &&
+    (
+      text.includes('已提交应用') ||
+      text.includes('已经提交过') ||
+      text.includes('请勿重复应用') ||
+      text.includes('已成功应用') ||
+      text.includes('已应用') ||
+      text.includes('已放弃') ||
+      text.includes('已挂起')
+    )
+  )
+}
+
 
 function isLocalOperationMessage(
   message: AssistantMessage,
@@ -1171,11 +1576,20 @@ function isLocalOperationMessage(
     return false
   }
 
+  if (isHandledTreePatchProposalMessage(message)) {
+    return true
+  }
+
   const id = String(message.id || '')
 
+  if (id.startsWith('module_tree_generated_')) {
+    return false
+  }
+
   return (
-    id.startsWith('module_tree_generated_') ||
     id.startsWith('assistant_error_') ||
+    id.startsWith('tree_patch_apply_success_') ||
+    id.startsWith('tree_patch_apply_submitted_') ||
     id.startsWith('module_tree_patch_applied_') ||
     id.startsWith('dev_handoff_package_') ||
     id.startsWith('asset_edit_saved_') ||
@@ -1206,6 +1620,35 @@ function submit() {
     parsedTextExcerpt: attachment.parsedTextExcerpt || null,
     metadata: attachment.metadata || {},
   }))
+
+  // A9.10.14.4.3.15.4.15.6.1_HOTFIX_PREVENT_STALE_PROPOSAL_AUTO_APPLY
+  // 用户继续输入新的说明时，历史 TREE_PATCH_PROPOSAL 不应该继续保持可点击状态。
+  // 否则输入框 Enter / 焦点残留可能误触发旧“应用提案”，造成还没点击就调用 apply。
+  messages.value = messages.value.map((message) => {
+    if (message.type === 'TREE_PATCH_PROPOSAL' && message.proposal) {
+      return {
+        ...message,
+        type: 'TEXT',
+        proposal: null,
+        text:
+          message.text ||
+          '上一条模块树变更提案已挂起。你已继续补充新的说明，请以后续最新提案为准。',
+      }
+    }
+
+    if (message.type === 'REQUIREMENT_CHANGE_PROPOSAL' && message.requirementChangeProposal) {
+      return {
+        ...message,
+        type: 'TEXT',
+        requirementChangeProposal: null,
+        text:
+          message.text ||
+          '上一条需求变更草案已挂起。你已继续补充新的说明，请以后续最新提案为准。',
+      }
+    }
+
+    return message
+  })
 
   messages.value.push({
     ...createMessage('user', 'TEXT', text),
@@ -1239,9 +1682,28 @@ function handleInputKeydown(event: KeyboardEvent) {
 }
 
 function clearProposal(message: AssistantMessage) {
-  message.type = 'TEXT'
-  message.proposal = null
-  message.text = '该模块树变更提案已放弃。你可以继续描述新的修改要求。'
+  const proposal = message.proposal
+  const proposalKey = proposal
+    ? a91568TreePatchProposalKey(proposal)
+    : String(message.treePatchProposalKey || '')
+
+  const text = '该模块树变更提案已放弃。你可以继续描述新的修改要求。'
+
+  if (proposalKey) {
+    a915610RecordTreePatchProposalUiState(
+      proposalKey,
+      'DISCARDED',
+      text,
+    )
+  }
+
+  message.type = proposal ? 'TREE_PATCH_PROPOSAL' : 'TEXT'
+  message.proposal = proposal || null
+  message.treePatchProposalKey = proposalKey
+  message.treePatchProposalStatus = 'DISCARDED'
+  message.treePatchProposalStatusText = text
+  message.quickReplies = undefined
+  message.text = text
 
   emit('clear-proposal')
   scrollToBottom()
@@ -2154,6 +2616,206 @@ function formatArtifactTypeLabel(
   return labels[artifactType] || value || '资产'
 }
 
+
+// A9.10.14.4.3.15.4.15.3.3.2_ASSET_EDIT_IMPACT_TRACE_UI
+function getAssetEditPlainRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+
+  return {}
+}
+
+function getAssetEditImpactTraceRecord(
+  proposal: AssetEditProposal | null | undefined,
+): Record<string, unknown> {
+  const proposalRecord = getAssetEditPlainRecord(proposal)
+  return getAssetEditPlainRecord(
+    proposalRecord['impactTrace'] ||
+    proposalRecord['impact_trace'],
+  )
+}
+
+function hasAssetEditImpactTrace(
+  proposal: AssetEditProposal | null | undefined,
+): boolean {
+  if (!proposal) {
+    return false
+  }
+
+  return Boolean(
+    formatAssetEditImpactReason(proposal) ||
+    formatAssetEditSyncAction(proposal) ||
+    getAssetEditImpactLabels(proposal, 'affectedRequirementKeys', 'affectedRequirementIds').length ||
+    getAssetEditImpactLabels(proposal, 'affectedFeatureNodeIds').length ||
+    getAssetEditImpactLabels(proposal, 'affectedPageNodeIds').length ||
+    getAssetEditImpactLabels(proposal, 'affectedPageSpecs').length ||
+    getAssetEditImpactLabels(proposal, 'affectedUiContracts').length ||
+    getAssetEditChangedRequirements(proposal).length,
+  )
+}
+
+function getAssetEditImpactValue(
+  proposal: AssetEditProposal | null | undefined,
+  key: string,
+): unknown {
+  const proposalRecord = getAssetEditPlainRecord(proposal)
+  const traceRecord = getAssetEditImpactTraceRecord(proposal)
+
+  return proposalRecord[key] ??
+    traceRecord[key] ??
+    traceRecord[toSnakeCaseKey(key)] ??
+    proposalRecord[toSnakeCaseKey(key)]
+}
+
+function getAssetEditImpactLabels(
+  proposal: AssetEditProposal | null | undefined,
+  ...keys: string[]
+): string[] {
+  const result: string[] = []
+  const seen = new Set<string>()
+
+  for (const key of keys) {
+    for (const label of normalizeAssetEditImpactLabels(getAssetEditImpactValue(proposal, key))) {
+      const normalized = label.trim()
+      if (normalized && !seen.has(normalized)) {
+        seen.add(normalized)
+        result.push(normalized)
+      }
+    }
+  }
+
+  return result
+}
+
+function normalizeAssetEditImpactLabels(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map(formatAssetEditImpactValue)
+      .filter(Boolean)
+  }
+
+  const single = formatAssetEditImpactValue(value)
+  return single ? [single] : []
+}
+
+function formatAssetEditImpactValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return ''
+  }
+
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value).trim()
+  }
+
+  const record = getAssetEditPlainRecord(value)
+
+  return String(
+    record['nodeName'] ||
+    record['title'] ||
+    record['sourceRequirementTitle'] ||
+    record['requirementKey'] ||
+    record['sourceRequirementKey'] ||
+    record['artifactType'] ||
+    record['artifactId'] ||
+    record['nodeId'] ||
+    '',
+  ).trim()
+}
+
+function getAssetEditChangedRequirements(
+  proposal: AssetEditProposal | null | undefined,
+): Record<string, unknown>[] {
+  const value = getAssetEditImpactValue(proposal, 'changedRequirements')
+
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .map(getAssetEditPlainRecord)
+    .filter((item) => Object.keys(item).length > 0)
+}
+
+function formatAssetEditChangedRequirementKey(
+  item: Record<string, unknown>,
+  index: number,
+): string {
+  return String(
+    item['requirementId'] ||
+    item['requirementKey'] ||
+    item['sourceRequirementId'] ||
+    item['sourceRequirementKey'] ||
+    `changed-requirement-${index}`,
+  )
+}
+
+function formatAssetEditChangedRequirementTitle(
+  item: Record<string, unknown>,
+  index: number,
+): string {
+  const title = String(
+    item['title'] ||
+    item['sourceRequirementTitle'] ||
+    item['requirementKey'] ||
+    item['requirementId'] ||
+    `需求 ${index + 1}`,
+  ).trim()
+
+  const sourceType = String(item['sourceType'] || '').trim()
+  const status = String(item['confirmationStatus'] || '').trim()
+
+  return [
+    title,
+    sourceType ? `来源：${formatAssetEditTraceStatus(sourceType)}` : '',
+    status ? `状态：${formatAssetEditTraceStatus(status)}` : '',
+  ].filter(Boolean).join(' / ')
+}
+
+function formatAssetEditImpactReason(
+  proposal: AssetEditProposal | null | undefined,
+): string {
+  const value = getAssetEditImpactValue(proposal, 'impactReason')
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function formatAssetEditSyncAction(
+  proposal: AssetEditProposal | null | undefined,
+): string {
+  const raw = String(getAssetEditImpactValue(proposal, 'syncAction') || '').trim()
+
+  if (!raw) {
+    return ''
+  }
+
+  const labels: Record<string, string> = {
+    MARK_AFFECTED_FEATURE_PAGE_AND_REVIEW_PAGE_SPEC_UI_CONTRACT:
+      '标记受影响功能/页面，并复核页面准备信息和交互原型',
+    MARK_MODULE_DOWNSTREAM_ARTIFACTS_NEEDS_REVIEW:
+      '标记模块下游资产待复核',
+    REVIEW_OR_REGENERATE_UI_CONTRACT_FOR_AFFECTED_PAGE:
+      '复核或重新生成受影响页面的交互原型',
+    REVIEW_TRACE_MATCHED_DOWNSTREAM_ARTIFACTS:
+      '复核已命中 trace 的下游资产',
+    REVIEW_DECLARED_DOWNSTREAM_ARTIFACTS:
+      '复核声明的下游资产',
+  }
+
+  return labels[raw] || formatAssetEditTraceStatus(raw)
+}
+
+function formatAssetEditTraceStatus(value: string): string {
+  return value
+    .replaceAll('_', ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function toSnakeCaseKey(value: string): string {
+  return value.replace(/[A-Z]/g, (match) => `_${match.toLowerCase()}`)
+}
+
+
 function formatAssetEditMode(
   value?: string | null,
 ): string {
@@ -2386,14 +3048,211 @@ function isLegacyPrdMigrationProposalFromTreePatchCard(
   )
 }
 
-function handleApplyProposal(
-  proposal: ModuleTreePatchProposalResponse | null | undefined,
+// A9.10.14.4.3.15.4.15.6.7_PROPOSAL_APPLY_UI_STATE_CLOSURE
+
+// A9.10.14.4.3.15.4.15.6.8_TREE_PATCH_APPLY_IDEMPOTENT_UI
+const a91568SubmittedTreePatchProposalKeys = ref<Set<string>>(new Set())
+
+function a91568TreePatchProposalKey(proposal: any): string {
+  const body = proposal?.proposal || proposal || {}
+  const operations = body.operations || proposal?.operations || []
+  const baseHash =
+    body.baseModuleTreeHash ||
+    proposal?.baseModuleTreeHash ||
+    ''
+
+  const baseCount =
+    body.baseModuleTreeNodeCount ||
+    proposal?.baseModuleTreeNodeCount ||
+    ''
+
+  return JSON.stringify({
+    baseHash,
+    baseCount,
+    operations: Array.isArray(operations)
+      ? operations.map((operation: any) => ({
+          op: operation?.op || '',
+          nodeId: operation?.nodeId || '',
+          parentId: operation?.parentId || '',
+          moduleName: operation?.moduleName || '',
+          moduleType: operation?.moduleType || '',
+        }))
+      : [],
+  })
+}
+
+function a91568CloseSameTreePatchProposalCards(
+  proposalKey: string,
+  text: string,
 ) {
-  if (!proposal) {
+  // A9.10.14.4.3.15.6.14_KEEP_PROPOSAL_CARD_AFTER_APPLY
+  // 保留提案卡片主体，只隐藏按钮并显示处理状态。
+  messages.value = messages.value.map((message) => {
+    const proposal = message.proposal || null
+    const existingKey = String(message.treePatchProposalKey || '').trim()
+    const key = existingKey || (
+      proposal
+        ? a91568TreePatchProposalKey(proposal)
+        : ''
+    )
+
+    if (!key || key !== proposalKey) {
+      return message
+    }
+
+    const state = a915610TreePatchProposalUiStates.value[proposalKey]
+    const status = state?.status || message.treePatchProposalStatus || 'SUBMITTED'
+
+    return {
+      ...message,
+      type: proposal ? 'TREE_PATCH_PROPOSAL' : message.type,
+      proposal,
+      treePatchProposalKey: proposalKey,
+      treePatchProposalStatus: status,
+      treePatchProposalStatusText: text,
+      quickReplies: undefined,
+      text,
+    }
+  })
+}
+
+
+function resolveHandledTreePatchProposalStateFromMessage(
+  message: AssistantMessage | null | undefined,
+): A915610TreePatchProposalUiState | null {
+  if (!message) {
+    return null
+  }
+
+  const proposalKey = String(
+    message.treePatchProposalKey ||
+    (
+      message.proposal
+        ? a91568TreePatchProposalKey(message.proposal)
+        : ''
+    ),
+  ).trim()
+
+  if (!proposalKey) {
+    return null
+  }
+
+  const persistedState = a915610TreePatchProposalUiStates.value[proposalKey]
+
+  if (persistedState) {
+    return persistedState
+  }
+
+  if (message.treePatchProposalStatus) {
+    return {
+      status: message.treePatchProposalStatus,
+      text: message.treePatchProposalStatusText || message.text || '该模块树变更提案已处理。',
+      updatedAt: Date.now(),
+    }
+  }
+
+  return null
+}
+
+
+function isHandledTreePatchProposalCard(
+  message: AssistantMessage | null | undefined,
+): boolean {
+  if (!message || message.type !== 'TREE_PATCH_PROPOSAL' || !message.proposal) {
+    return false
+  }
+
+  return Boolean(resolveHandledTreePatchProposalStateFromMessage(message))
+}
+
+
+function formatHandledTreePatchProposalTitle(
+  message: AssistantMessage,
+): string {
+  const state = resolveHandledTreePatchProposalStateFromMessage(message)
+
+  if (state?.status === 'APPLIED') {
+    return '提案已成功应用'
+  }
+
+  if (state?.status === 'DISCARDED') {
+    return '提案已放弃'
+  }
+
+  return '提案已提交应用'
+}
+
+
+function formatHandledTreePatchProposalText(
+  message: AssistantMessage,
+): string {
+  const state = resolveHandledTreePatchProposalStateFromMessage(message)
+
+  return state?.text ||
+    message.treePatchProposalStatusText ||
+    message.text ||
+    '该模块树变更提案已处理。'
+}
+
+
+function handleApplyProposal(
+  message: AssistantMessage | null | undefined,
+) {
+  if (!message || message.type !== 'TREE_PATCH_PROPOSAL' || !message.proposal) {
     return
   }
 
+  const proposal = message.proposal
+  const proposalKey = a91568TreePatchProposalKey(proposal)
+
+  if (
+    a91568SubmittedTreePatchProposalKeys.value.has(proposalKey) ||
+    a915610TreePatchProposalUiStates.value[proposalKey]
+  ) {
+    const text = '这条模块树变更提案已经提交过或已经处理完成。请勿重复应用同一提案。'
+
+    a915610RecordTreePatchProposalUiState(
+      proposalKey,
+      'SUBMITTED',
+      text,
+    )
+
+    a91568CloseSameTreePatchProposalCards(
+      proposalKey,
+      text,
+    )
+    scrollToBottom()
+    return
+  }
+
+  a91568SubmittedTreePatchProposalKeys.value.add(proposalKey)
+  a915610PersistLastSubmittedTreePatchProposalKey(proposalKey)
+
+  const operations =
+    proposal.proposal?.operations ||
+    (proposal as any).operations ||
+    []
+
+  const operationSummary = Array.isArray(operations) && operations.length
+    ? `，共 ${operations.length} 个操作`
+    : ''
+
+  const submittedText =
+    `模块树变更提案已提交应用${operationSummary}。正在刷新模块树和同步 PRD，请稍候。`
+
+  a915610RecordTreePatchProposalUiState(
+    proposalKey,
+    'SUBMITTED',
+    submittedText,
+  )
+
+  a91568CloseSameTreePatchProposalCards(
+    proposalKey,
+    submittedText,
+  )
+
   emit('apply-proposal', proposal)
+  scrollToBottom()
 }
 
 function createDefaultMessages(): AssistantMessage[] {
@@ -2411,15 +3270,15 @@ function buildAssistantWelcomeText(): string {
   if (!props.moduleTreeExists) {
     return [
       '你好，我是 CodeMind Studio 的 AI Assistant。',
-      '当前项目还没有需求骨架。你可以直接描述要建设的系统，或上传需求材料。',
-      '如果描述比较粗，我会先让你选择“先生成模块骨架”还是“生成完整项目蓝图”。',
-      '示例：我要做一个智能仓储管理系统，包含入库、出库、库存预警、供应商和仓库管理。',
+      '当前项目还没有模块树。请直接描述项目背景、业务目标、用户角色、业务模块或上传需求材料。',
+      '我会先生成结构化模块树；生成后可选择最终模块继续生成模块需求、页面规范和交互原型。',
+      '示例：我要做一个外贸订单履约管理平台，包含客户、询盘、报价、订单、出运、单证和收款管理。',
     ].join('\n')
   }
 
   return [
     '你好，我是 CodeMind Studio 的 AI Assistant。',
-    '当前项目已经有需求骨架。你可以让我继续拆分模块、调整结构、补充功能点、生成页面原型，或解释当前节点下一步应该做什么。',
+    '当前项目已经有模块树。你可以让我继续拆分模块、调整结构、补充功能点、生成页面规范、交互原型，或解释当前节点下一步应该做什么。',
   ].join('\n')
 }
 
@@ -3017,6 +3876,34 @@ onBeforeUnmount(() => {
   background: linear-gradient(180deg, #f5f3ff 0%, #ffffff 100%);
 }
 
+
+.impact-trace-section {
+  border-left: 3px solid rgba(59, 130, 246, 0.35);
+}
+
+.impact-trace-list {
+  display: grid;
+  gap: 6px;
+}
+
+.impact-trace-requirements {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.impact-trace-pill {
+  border: 1px solid rgba(59, 130, 246, 0.24);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(59, 130, 246, 0.08);
+  color: #1e3a8a;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+
 .asset-edit-card {
   border-color: #bbf7d0;
   background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%);
@@ -3472,5 +4359,74 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
   opacity: 0.55;
 }
+
+
+
+/* A9.10.14.4.3.15.4.15.6.2_HOTFIX_TREE_PATCH_CARD_LAYOUT */
+.proposal-card {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+}
+
+.proposal-card * {
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+}
+
+.proposal-title-row {
+  min-width: 0;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.proposal-title-row > div {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.proposal-title-row strong,
+.proposal-title-row p,
+.proposal-section,
+.proposal-section h4,
+.proposal-section li,
+.proposal-section p,
+.operation-main {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.proposal-title-row > span {
+  flex: 0 0 auto;
+  max-width: 120px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.proposal-section ul {
+  padding-left: 18px;
+}
+
+.proposal-section li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.operation-op {
+  flex: 0 0 auto;
+}
+
+.operation-main {
+  flex: 1 1 120px;
+}
+
 
 </style>

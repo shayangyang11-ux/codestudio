@@ -1,0 +1,199 @@
+{
+  "schema": "codemind_generated_nodejs_fullstack_schema",
+  "resources": [
+    {
+      "resourceKey": "inbound_order_create_page",
+      "apiSegment": "inbound-orders",
+      "title": "入库单创建页",
+      "fields": [
+        {
+          "key": "id",
+          "label": "ID",
+          "type": "TEXT",
+          "required": false
+        },
+        {
+          "key": "order_no",
+          "label": "入库单号",
+          "type": "TEXT",
+          "required": true
+        },
+        {
+          "key": "supplier",
+          "label": "供应商",
+          "type": "SELECT",
+          "required": true
+        },
+        {
+          "key": "warehouse",
+          "label": "仓库",
+          "type": "SELECT",
+          "required": true
+        },
+        {
+          "key": "handler",
+          "label": "经办人",
+          "type": "SELECT",
+          "required": true
+        },
+        {
+          "key": "expected_date",
+          "label": "预计到货日期",
+          "type": "DATE",
+          "required": false
+        },
+        {
+          "key": "remark",
+          "label": "备注",
+          "type": "TEXTAREA",
+          "required": false
+        },
+        {
+          "key": "inboundno",
+          "label": "入库单号",
+          "type": "TEXT",
+          "required": true
+        },
+        {
+          "key": "supplierid",
+          "label": "供应商",
+          "type": "SELECT",
+          "required": true
+        },
+        {
+          "key": "warehouseid",
+          "label": "仓库",
+          "type": "SELECT",
+          "required": true
+        },
+        {
+          "key": "inbounddate",
+          "label": "入库日期",
+          "type": "DATE",
+          "required": true
+        },
+        {
+          "key": "product_code",
+          "label": "商品编码",
+          "type": "TEXT",
+          "required": false
+        },
+        {
+          "key": "product_name",
+          "label": "商品名称",
+          "type": "TEXT",
+          "required": false
+        },
+        {
+          "key": "specification",
+          "label": "规格型号",
+          "type": "TEXT",
+          "required": false
+        },
+        {
+          "key": "unit",
+          "label": "单位",
+          "type": "TEXT",
+          "required": false
+        },
+        {
+          "key": "quantity",
+          "label": "入库数量",
+          "type": "NUMBER",
+          "required": false
+        },
+        {
+          "key": "unit_price",
+          "label": "单价",
+          "type": "NUMBER",
+          "required": false
+        },
+        {
+          "key": "amount",
+          "label": "金额",
+          "type": "NUMBER",
+          "required": false
+        }
+      ]
+    },
+    {
+      "resourceKey": "inbound_order_list_page",
+      "apiSegment": "inbound-orders-2",
+      "title": "入库单列表页",
+      "fields": [
+        {
+          "key": "id",
+          "label": "ID",
+          "type": "TEXT",
+          "required": false
+        },
+        {
+          "key": "inboundno",
+          "label": "入库单号",
+          "type": "TEXT",
+          "required": false
+        },
+        {
+          "key": "supplierid",
+          "label": "供应商",
+          "type": "SELECT",
+          "required": false
+        },
+        {
+          "key": "warehouseid",
+          "label": "仓库",
+          "type": "SELECT",
+          "required": false
+        },
+        {
+          "key": "keyword",
+          "label": "关键字",
+          "type": "TEXT",
+          "required": false
+        },
+        {
+          "key": "status",
+          "label": "入库状态",
+          "type": "TEXT",
+          "required": false
+        },
+        {
+          "key": "operatorid",
+          "label": "经办人",
+          "type": "TEXT",
+          "required": false
+        },
+        {
+          "key": "createdat",
+          "label": "创建时间",
+          "type": "DATE",
+          "required": false
+        },
+        {
+          "key": "inboundqty",
+          "label": "入库数量",
+          "type": "NUMBER",
+          "required": false
+        }
+      ]
+    },
+    {
+      "resourceKey": "inbound_order_detail_page",
+      "apiSegment": "inbound-orders-3",
+      "title": "入库单详情页",
+      "fields": []
+    },
+    {
+      "resourceKey": "inbound_order_quantity_edit_page",
+      "apiSegment": "inbound-orders-4",
+      "title": "入库单数量编辑页",
+      "fields": []
+    },
+    {
+      "resourceKey": "inbound_order_approval_page",
+      "apiSegment": "inbound-orders-5",
+      "title": "入库单审核页",
+      "fields": []
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <section
-      v-if="visible && contract"
+      v-if="visible && runtimeContract"
       class="prototype-studio-mask"
       role="dialog"
       aria-modal="true"
@@ -15,7 +15,7 @@
 
           <div>
             <p>Prototype Studio</p>
-            <h2>{{ pageTitle || contract.page?.title || contract.page?.pageName || '交互原型' }}</h2>
+            <h2>{{ runtimePageTitle || runtimeContract?.page?.title || runtimeContract?.page?.pageName || '交互原型' }}</h2>
             <div class="prototype-studio-lifecycle-line">
               <span>{{ selectedDevice.label }}真实视口 · {{ selectedDevice.width }} × {{ selectedDevice.height }} · 工作台缩放 {{ Math.round(effectiveScale * 100) }}%</span>
             </div>
@@ -82,11 +82,13 @@
               <div class="prototype-studio-runtime-host">
               <UiContractPreviewRuntime
                 :key="runtimeKey"
-                :contract="contract"
+                :contract="runtimeContract"
                 :project-theme-profile="projectThemeProfile || null"
                 :focus-component-id="focusedComponentId || null"
                 :focus-element-selection="focusedElementSelection || null"
                 :inspect-component-mode="inspectMode"
+                :navigate-request="handleRuntimeNavigateRequest"
+                @prototype-navigate="handleRuntimeNavigateRequest"
                 display-mode="artboard"
                 @select-component="handleSelectComponent"
                 @exit-inspect-mode="inspectMode = false"
@@ -172,12 +174,22 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { ProjectThemeProfile } from '../types/themeProfile'
+import type { ModuleTreeNode } from '../types/codemind'
 import type { UiContractContent } from '../types/uiContract'
+import { fetchCurrentModuleArtifact } from '../api/artifactApi'
 import UiContractPreviewRuntime from './UiContractPreviewRuntime.vue'
 
 defineOptions({
   name: 'PrototypeStudioOverlay',
 })
+
+// A9.10.14.4.3.15.6.24L2C4I_BIND_PAGE_LEVEL_RUNTIME_NAV_HANDLER
+
+// A9.10.14.4.3.15.6.24L2C4H_V2_PAGE_LEVEL_PROTOTYPE_NAVIGATE_CLOSURE
+
+// A9.10.14.4.3.15.6.24L2C4H_PAGE_LEVEL_PROTOTYPE_NAVIGATE_CLOSURE
+
+// A9.10.14.4.3.15.6.24L2C4G_PAGE_PROTOTYPE_RUNTIME_NAVIGATE_CLOSURE
 
 type PrototypeElementSelection = {
   componentId: string
@@ -216,6 +228,9 @@ const props = withDefaults(
     visible: boolean
     contract: UiContractContent | null
     pageTitle?: string
+    workspaceId?: string
+    projectCode?: string
+    moduleTree?: ModuleTreeNode[]
     projectThemeProfile?: ProjectThemeProfile | null
     focusedComponentId?: string | null
     focusedComponentLabel?: string
@@ -230,9 +245,13 @@ const props = withDefaults(
     prototypeComponentCount?: number
     saving?: boolean
     startInInspectMode?: boolean
+    navigateRequest?: ((payload: Record<string, any>) => Promise<Record<string, any>> | Record<string, any>) | null
   }>(),
   {
     pageTitle: '',
+    workspaceId: '',
+    projectCode: '',
+    moduleTree: () => [],
     projectThemeProfile: null,
     focusedComponentId: null,
     focusedComponentLabel: '',
@@ -247,6 +266,7 @@ const props = withDefaults(
     prototypeComponentCount: 0,
     saving: false,
     startInInspectMode: false,
+    navigateRequest: null,
   },
 )
 
@@ -377,8 +397,184 @@ const artboardScaleStyle = computed(() => ({
   '--prototype-device-height': `${DESIGN_VIEWPORT.height}px`,
 }))
 
+
+// A9.10.14.4.3.15.6.24L2C4H_PAGE_LEVEL_PROTOTYPE_NAVIGATE_CLOSURE
+const navigatedRuntimeContract = ref<UiContractContent | null>(null)
+const navigatedRuntimeTitle = ref('')
+
+const runtimeContract = computed<UiContractContent | null>(() =>
+  navigatedRuntimeContract.value || props.contract,
+)
+
+const runtimePageTitle = computed(() =>
+  navigatedRuntimeTitle.value || props.pageTitle || runtimeContract.value?.page?.title || runtimeContract.value?.page?.pageName || '交互原型',
+)
+
+function a924l2c4hText(...values: unknown[]): string {
+  for (const value of values) {
+    if (value === null || value === undefined) continue
+    const text = String(value).trim()
+    if (text) return text
+  }
+  return ''
+}
+
+function a924l2c4hNorm(value: unknown): string {
+  return a924l2c4hText(value)
+    .toLowerCase()
+    .replace(/[\s_\-\/]+/g, '')
+    .replace(/[^\da-z\u4e00-\u9fff]+/g, '')
+}
+
+function a924l2c4hAllNodes(nodes: ModuleTreeNode[] = []): ModuleTreeNode[] {
+  const result: ModuleTreeNode[] = []
+
+  const visit = (items: ModuleTreeNode[]) => {
+    items.forEach((item) => {
+      result.push(item)
+      const children = Array.isArray((item as any).children)
+        ? ((item as any).children as ModuleTreeNode[])
+        : []
+      if (children.length) visit(children)
+    })
+  }
+
+  visit(nodes)
+  return result
+}
+
+function a924l2c4hResolveTargetNode(payload: Record<string, any>): ModuleTreeNode | null {
+  const targetId = a924l2c4hNorm(payload.targetPageId || payload.pageId || payload.moduleId || payload.id)
+  const targetKey = a924l2c4hNorm(payload.targetPageKey || payload.pageKey || payload.moduleKey || payload.key)
+  const targetName = a924l2c4hNorm(payload.targetPageName || payload.pageName || payload.moduleName || payload.label || payload.title)
+
+  for (const node of a924l2c4hAllNodes(props.moduleTree || [])) {
+    const nodeId = a924l2c4hNorm((node as any).id)
+    const nodeKey = a924l2c4hNorm((node as any).moduleKey || (node as any).pageKey || (node as any).key)
+    const nodeName = a924l2c4hNorm((node as any).moduleName || (node as any).pageName || (node as any).name || (node as any).title)
+
+    if (targetId && nodeId && targetId === nodeId) return node
+    if (targetKey && nodeKey && targetKey === nodeKey) return node
+    if (targetName && nodeName && targetName === nodeName) return node
+  }
+
+  return null
+}
+
+function a924l2c4hParseContract(value: any): UiContractContent | null {
+  let content = value?.content ?? value?.artifactContent ?? value?.data?.content ?? value?.data?.artifactContent ?? value
+
+  if (typeof content === 'string') {
+    try {
+      content = JSON.parse(content)
+    } catch {
+      return null
+    }
+  }
+
+  if (!content || typeof content !== 'object') {
+    return null
+  }
+
+  if (!(content as any).page || !Array.isArray((content as any).interactions)) {
+    return null
+  }
+
+  return content as UiContractContent
+}
+
+async function handleRuntimeNavigateRequest(payload: any): Promise<Record<string, any>> {
+  const payloadRecord = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? payload as Record<string, any>
+    : {}
+
+  const targetNode = a924l2c4hResolveTargetNode(payloadRecord)
+
+  if (!targetNode?.id || !props.workspaceId || !props.projectCode) {
+    return {
+      ok: false,
+      code: 'TARGET_NOT_FOUND',
+      message: `页面级原型未找到目标页面：${a924l2c4hText(payloadRecord.targetPageName, payloadRecord.targetPageId, '目标页面')}`,
+      targetPageId: payloadRecord.targetPageId || null,
+      targetPageKey: payloadRecord.targetPageKey || null,
+      targetPageName: payloadRecord.targetPageName || null,
+      route: payloadRecord.route || null,
+    }
+  }
+
+  try {
+    const artifact = await fetchCurrentModuleArtifact(
+      props.workspaceId,
+      props.projectCode,
+      String(targetNode.id),
+      'UI_CONTRACT',
+    )
+
+    const normalized = a924l2c4hParseContract(artifact)
+
+    if (!normalized) {
+      return {
+        ok: false,
+        code: 'TARGET_CONTRACT_MISSING',
+        message: `目标页面没有可渲染的 UI_CONTRACT：${a924l2c4hText((targetNode as any).moduleName, payloadRecord.targetPageName)}`,
+        targetPageId: String(targetNode.id),
+        targetPageKey: payloadRecord.targetPageKey || null,
+        targetPageName: a924l2c4hText((targetNode as any).moduleName, payloadRecord.targetPageName),
+        route: payloadRecord.route || null,
+      }
+    }
+
+    navigatedRuntimeContract.value = normalized
+    navigatedRuntimeTitle.value = a924l2c4hText(
+      (targetNode as any).moduleName,
+      payloadRecord.targetPageName,
+      normalized.page?.pageName,
+      normalized.page?.title,
+      '目标页面',
+    )
+
+    return {
+      ok: true,
+      code: 'SUCCESS',
+      message: `已切换到：${navigatedRuntimeTitle.value}`,
+      targetPageId: String(targetNode.id),
+      targetPageKey: a924l2c4hText((targetNode as any).moduleKey, payloadRecord.targetPageKey),
+      targetPageName: navigatedRuntimeTitle.value,
+      route: a924l2c4hText(payloadRecord.route, (targetNode as any).routePath, (targetNode as any).route),
+    }
+  } catch (error) {
+    const message = error instanceof Error && error.message
+      ? error.message
+      : '加载目标页面交互原型失败。'
+
+    return {
+      ok: false,
+      code: 'LOAD_FAILED',
+      message,
+      targetPageId: String(targetNode.id),
+      targetPageKey: payloadRecord.targetPageKey || null,
+      targetPageName: a924l2c4hText((targetNode as any).moduleName, payloadRecord.targetPageName),
+      route: payloadRecord.route || null,
+    }
+  }
+}
+
+watch(
+  () => [
+    props.contract?.identity?.pageId || '',
+    props.contract?.page?.pageId || '',
+    props.contract?.identity?.pageKey || '',
+    props.contract?.page?.pageKey || '',
+  ].join('|'),
+  () => {
+    navigatedRuntimeContract.value = null
+    navigatedRuntimeTitle.value = ''
+  },
+)
+
+
 const runtimeKey = computed(() => {
-  const contract = props.contract
+  const contract = runtimeContract.value
 
   return [
     contract?.identity?.pageId,

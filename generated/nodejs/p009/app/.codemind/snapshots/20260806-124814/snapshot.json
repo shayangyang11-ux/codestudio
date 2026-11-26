@@ -1,0 +1,269 @@
+{
+  "schemaVersion" : "1.0",
+  "packageType" : "CODEMIND_CODEBASE_SNAPSHOT",
+  "snapshotId" : "20260806-124814",
+  "snapshotStatus" : "CREATED",
+  "reason" : "CODE_PROJECT_MATERIALIZE",
+  "projectCode" : "P009",
+  "targetStack" : "NODEJS_FULLSTACK",
+  "codebaseRoot" : "generated/nodejs/p009/app",
+  "snapshotRoot" : "generated/nodejs/p009/app/.codemind/snapshots/20260806-124814",
+  "archivePlatformPath" : "generated/nodejs/p009/app/.codemind/snapshots/20260806-124814/codebase.zip",
+  "archiveAbsolutePath" : "E:\\CodeMind\\codemind-studio\\generated\\nodejs\\p009\\app\\.codemind\\snapshots\\20260806-124814\\codebase.zip",
+  "fileCount" : 50,
+  "totalBytes" : 172663,
+  "checksum" : "83f161639c378fa7c37782c316c24b667be36aa2010c3d61f6f82cc7186de5fe",
+  "createdAt" : "2026-08-06T12:48:14.165545700",
+  "warnings" : [ "快照会排除 node_modules、构建产物、运行日志和历史快照目录。" ],
+  "files" : [ {
+    "filePath" : "README.md",
+    "sha256" : "b8d6a6658b3f74d4a911194c8424225f8d1fe0ad5481dfe222aca9c53ae2031b",
+    "bytes" : 702,
+    "updatedAt" : "2026-08-06T11:26:48.7035965"
+  }, {
+    "filePath" : "backend/package.json",
+    "sha256" : "c6e74c66f6518c64c037831db9d6b94d44c167e928f5d7a0e8f75baedad2e125",
+    "bytes" : 264,
+    "updatedAt" : "2026-08-06T09:53:29.3887831"
+  }, {
+    "filePath" : "backend/server.js",
+    "sha256" : "dfcbcd0d5d6518babe367cb5d0ae11ffdae5e56a6b17189c0dbf910821572dba",
+    "bytes" : 215,
+    "updatedAt" : "2026-08-06T09:53:29.3907825"
+  }, {
+    "filePath" : "backend/src/app.js",
+    "sha256" : "7786ba583924d39c7ed0624a89226c33594b13f928106d92d6944692eec4eef3",
+    "bytes" : 498,
+    "updatedAt" : "2026-08-06T09:53:29.3917829"
+  }, {
+    "filePath" : "backend/src/db/localStore.js",
+    "sha256" : "7981327bd5e174cd1aebb8763a85e76690b94b83ed24b048223470e91a4dfce3",
+    "bytes" : 738,
+    "updatedAt" : "2026-08-06T09:53:29.3968138"
+  }, {
+    "filePath" : "backend/src/db/seedData.js",
+    "sha256" : "bc8058152667d6a0c945396292e17ff4d8fd179c763837b2d36d69c2718a860b",
+    "bytes" : 1726,
+    "updatedAt" : "2026-08-06T11:26:48.7115921"
+  }, {
+    "filePath" : "backend/src/modules/generated/generated-resource.repository.js",
+    "sha256" : "8d88e69d0dc00d830ca682c3d1975082def54afeadcb5d632f717e85eaf98e56",
+    "bytes" : 419,
+    "updatedAt" : "2026-08-06T11:26:48.7216091"
+  }, {
+    "filePath" : "backend/src/modules/generated/generated-resource.routes.js",
+    "sha256" : "89fdb34cde2a36012d372dda99fe456adebeca630feac4bb85bf3001b7de466d",
+    "bytes" : 1495,
+    "updatedAt" : "2026-08-06T11:26:48.718594"
+  }, {
+    "filePath" : "backend/src/modules/generated/generated-resource.service.js",
+    "sha256" : "283baceb9309273204bd965b19665fc062060463350263ceb57cda5a5a119d87",
+    "bytes" : 2647,
+    "updatedAt" : "2026-08-06T11:26:48.7195921"
+  }, {
+    "filePath" : "backend/src/modules/generated/generated-resource.validation.js",
+    "sha256" : "877ee4490587dca33f16e7c299b9f49469f08963b58930036bc33f3fd9c04052",
+    "bytes" : 369,
+    "updatedAt" : "2026-08-06T11:26:48.7235928"
+  }, {
+    "filePath" : "backend/src/modules/generated/generatedResources.js",
+    "sha256" : "41ab3198fb1a10dd4440accbaec7dbfdde2321a5d9ced450685b054f4dc5af24",
+    "bytes" : 4163,
+    "updatedAt" : "2026-08-06T11:26:48.7165986"
+  }, {
+    "filePath" : "backend/src/modules/inbound-order-management/inbound-order-management.routes.js",
+    "sha256" : "12b57a61a4e7783aa259c19ca7966ba9d74719aa0437ab8cea3d42aa68e2f372",
+    "bytes" : 66,
+    "updatedAt" : "2026-08-06T09:53:29.4078247"
+  }, {
+    "filePath" : "backend/src/routes/index.js",
+    "sha256" : "cc56c914abe6bf87988cc21970af36bd31fc775983b1b0d0ee0e4729f5e86912",
+    "bytes" : 1357,
+    "updatedAt" : "2026-08-06T12:21:22.3040142"
+  }, {
+    "filePath" : "backend/src/shared/response.js",
+    "sha256" : "b7f1a853a9d6c6a38cabd719966942771f8e7ecda24b3c1bf0d0d80da5152200",
+    "bytes" : 3542,
+    "updatedAt" : "2026-08-06T12:21:22.3030431"
+  }, {
+    "filePath" : "codemind.generated.json",
+    "sha256" : "216939f5601d398d3c0edf3ce6a2a4b9c785bf7e86973d5367efc20479b80472",
+    "bytes" : 18341,
+    "updatedAt" : "2026-08-06T12:47:15.8068649"
+  }, {
+    "filePath" : "database/schema.json",
+    "sha256" : "7c874f137d8b10b06cc6ca300fd3f152cda92a2fe297385581967eb3f8b25141",
+    "bytes" : 1588,
+    "updatedAt" : "2026-08-06T11:26:48.7125934"
+  }, {
+    "filePath" : "database/seed.json",
+    "sha256" : "e5ef8394218f7b91dea9fe10b0da211193e3eaef574da4842635eccf4bac2a9b",
+    "bytes" : 1702,
+    "updatedAt" : "2026-08-06T11:26:48.7135928"
+  }, {
+    "filePath" : "frontend/index.html",
+    "sha256" : "2b5ae698bb10267eb1d45483240b889ad9ca225973d48350b3bc8aac198bbf3d",
+    "bytes" : 313,
+    "updatedAt" : "2026-08-06T09:53:29.3768132"
+  }, {
+    "filePath" : "frontend/package.json",
+    "sha256" : "7b617d2a01e04635a20e0b4d853a1e6e917f90866316391cc57c4d47a43eed73",
+    "bytes" : 431,
+    "updatedAt" : "2026-08-06T11:01:16.6847907"
+  }, {
+    "filePath" : "frontend/src/App.vue",
+    "sha256" : "357b4bee2c14acc002a2c8186599915ec5f48713c3181e1e31e5cc15074cc6a4",
+    "bytes" : 873,
+    "updatedAt" : "2026-08-06T12:21:22.2970416"
+  }, {
+    "filePath" : "frontend/src/main.js",
+    "sha256" : "600059a2c2655e94118e38b958b64f6f46bddce60e75c533aa3767c80171170e",
+    "bytes" : 1667,
+    "updatedAt" : "2026-08-06T09:53:29.3798123"
+  }, {
+    "filePath" : "frontend/src/modules/generated/pages/GeneratedHomePage.vue",
+    "sha256" : "7f887ce2a3b2c5ed3f825a6b8057183795b146fa0799455fe3480fa10b68d070",
+    "bytes" : 260,
+    "updatedAt" : "2026-08-06T09:53:29.3857826"
+  }, {
+    "filePath" : "frontend/src/modules/generated/pages/InboundOrderApprovalPage.vue",
+    "sha256" : "52675499c68461d36f91f62c15c097b772eea97ce5c644c01b88dc73d37867a5",
+    "bytes" : 3434,
+    "updatedAt" : "2026-08-06T11:26:48.7295976"
+  }, {
+    "filePath" : "frontend/src/modules/generated/pages/InboundOrderCreatePage.vue",
+    "sha256" : "6b59b1631fdfd4283df6f38fe793db86267850d1ba722d9c161521b2445e3ddb",
+    "bytes" : 3430,
+    "updatedAt" : "2026-08-06T11:26:48.7275931"
+  }, {
+    "filePath" : "frontend/src/modules/generated/pages/InboundOrderDetailPage.vue",
+    "sha256" : "2f11118421d454a835f6217314724e03a4fd0baca9c4d42cac55b5e066bf0406",
+    "bytes" : 3430,
+    "updatedAt" : "2026-08-06T11:26:48.7325671"
+  }, {
+    "filePath" : "frontend/src/modules/generated/pages/InboundOrderListPage.vue",
+    "sha256" : "7c116b29bb20121727d190a40a604ff34516918e1f5507c2c2b3daea934dec6b",
+    "bytes" : 3426,
+    "updatedAt" : "2026-08-06T11:26:48.7265925"
+  }, {
+    "filePath" : "frontend/src/modules/generated/pages/InboundOrderQuantityEditPage.vue",
+    "sha256" : "cc8e92a78405d60ee9827a0bb32579b24ac0bfffb84cfe3b55e2b6d43f0e2075",
+    "bytes" : 3450,
+    "updatedAt" : "2026-08-06T11:26:48.7315639"
+  }, {
+    "filePath" : "frontend/src/modules/inbound-order-management/index.js",
+    "sha256" : "46c648b7f34cf8cdb24be0cbccc56d6c26909d1cb1c5e9ea9cce2b1099f126b2",
+    "bytes" : 299,
+    "updatedAt" : "2026-08-06T11:26:48.7245962"
+  }, {
+    "filePath" : "frontend/src/modules/inbound-order-management/pages/InboundOrderApprovePage.vue",
+    "sha256" : "693b92a905a8d753f05b51275e6165b7901fd9a3d62ec3c215e34241e1290bf2",
+    "bytes" : 1708,
+    "updatedAt" : "2026-08-06T11:01:16.7057915"
+  }, {
+    "filePath" : "frontend/src/modules/inbound-order-management/pages/InboundOrderCreatePage.vue",
+    "sha256" : "3ddc6667a54a75c78c8ce7bc18447d4a724215932d0f67cc2113a8b7609b8ac8",
+    "bytes" : 1698,
+    "updatedAt" : "2026-08-06T11:01:16.6987914"
+  }, {
+    "filePath" : "frontend/src/modules/inbound-order-management/pages/InboundOrderDetailPage.vue",
+    "sha256" : "622442de92e70c784d8017144f293318bcab2a2c67772a4ec59a5ae2391a7e51",
+    "bytes" : 1698,
+    "updatedAt" : "2026-08-06T11:01:16.7017673"
+  }, {
+    "filePath" : "frontend/src/modules/inbound-order-management/pages/InboundOrderEditPage.vue",
+    "sha256" : "be4664776e6f7fef8b0c106e6561a1fb5948a558283bff2e63397136cbab2d1c",
+    "bytes" : 1702,
+    "updatedAt" : "2026-08-06T11:01:16.7037927"
+  }, {
+    "filePath" : "frontend/src/modules/inbound-order-management/pages/InboundOrderListPage.vue",
+    "sha256" : "5959d4f76e4aedb17406914250c8f6b329ae8a22f076a15f72f328828a3eb7a4",
+    "bytes" : 1698,
+    "updatedAt" : "2026-08-06T11:01:16.6967624"
+  }, {
+    "filePath" : "frontend/src/modules/inbound-order-management/routes.js",
+    "sha256" : "3f02a37c51e91b36f66966c3490008bb3b5531c719b01379d92e07f17b566c79",
+    "bytes" : 32,
+    "updatedAt" : "2026-08-06T09:53:29.4058078"
+  }, {
+    "filePath" : "frontend/src/modules/inbound-order/pages/InboundOrderApprovalPage.vue",
+    "sha256" : "64db2e104ffc89b6c78a039a503d138106ce59d679595b597f4031b17c0371ef",
+    "bytes" : 1710,
+    "updatedAt" : "2026-08-06T11:01:16.7157954"
+  }, {
+    "filePath" : "frontend/src/modules/inbound-order/pages/InboundOrderCreatePage.vue",
+    "sha256" : "3ddc6667a54a75c78c8ce7bc18447d4a724215932d0f67cc2113a8b7609b8ac8",
+    "bytes" : 1698,
+    "updatedAt" : "2026-08-06T11:01:16.7137917"
+  }, {
+    "filePath" : "frontend/src/modules/inbound-order/pages/InboundOrderDetailPage.vue",
+    "sha256" : "622442de92e70c784d8017144f293318bcab2a2c67772a4ec59a5ae2391a7e51",
+    "bytes" : 1698,
+    "updatedAt" : "2026-08-06T11:01:16.7197904"
+  }, {
+    "filePath" : "frontend/src/modules/inbound-order/pages/InboundOrderListPage.vue",
+    "sha256" : "5959d4f76e4aedb17406914250c8f6b329ae8a22f076a15f72f328828a3eb7a4",
+    "bytes" : 1698,
+    "updatedAt" : "2026-08-06T11:01:16.7108208"
+  }, {
+    "filePath" : "frontend/src/modules/inbound-order/pages/InboundOrderQuantityEditPage.vue",
+    "sha256" : "43cf9716f030e419d2aa726ce8589bf279a6e485eb027d2c9569afa5b4940c0f",
+    "bytes" : 1710,
+    "updatedAt" : "2026-08-06T11:01:16.7177948"
+  }, {
+    "filePath" : "frontend/src/pages/inbound/InboundOrderApprovalPage.vue",
+    "sha256" : "938679b51b898b61e02c5afb3841cfffaa68fa500ed1e67b1bd3ef640520bc88",
+    "bytes" : 1218,
+    "updatedAt" : "2026-08-06T10:58:31.8377628"
+  }, {
+    "filePath" : "frontend/src/pages/inbound/InboundOrderCreatePage.vue",
+    "sha256" : "9dacd2044175977cda3da147368110b4bf2f5b336beabee1fccec39c5af84ab3",
+    "bytes" : 1206,
+    "updatedAt" : "2026-08-06T10:58:31.83976"
+  }, {
+    "filePath" : "frontend/src/pages/inbound/InboundOrderDetailPage.vue",
+    "sha256" : "a97e780369ced6258782a318801d445a795f8ad1125bdd59747d436b905ed208",
+    "bytes" : 1206,
+    "updatedAt" : "2026-08-06T10:58:31.8407917"
+  }, {
+    "filePath" : "frontend/src/pages/inbound/InboundOrderListPage.vue",
+    "sha256" : "03f321cf9e2b816c1d771481b343a044e1143df23555211ffc768fd573244b9e",
+    "bytes" : 1206,
+    "updatedAt" : "2026-08-06T10:58:31.8417917"
+  }, {
+    "filePath" : "frontend/src/pages/inbound/InboundOrderQuantityEditPage.vue",
+    "sha256" : "34de76ee0d427677927266fb282ab9eff2cc59b3a4eea62375efd57ca184359c",
+    "bytes" : 1218,
+    "updatedAt" : "2026-08-06T10:58:31.8437587"
+  }, {
+    "filePath" : "frontend/src/router/routes.js",
+    "sha256" : "29c4129b8733b44352ec63fd0d9c7f639860b09e5a12eb5cf878fd0719b4a8a8",
+    "bytes" : 1536,
+    "updatedAt" : "2026-08-06T11:26:48.7055961"
+  }, {
+    "filePath" : "frontend/src/shared/styles/app.css",
+    "sha256" : "1cc2f5d7c0ccc2a26b7bb926fe489137749840babc4f4ddaeee969d8680c23ce",
+    "bytes" : 1134,
+    "updatedAt" : "2026-08-06T12:21:22.2980409"
+  }, {
+    "filePath" : "frontend/vite.config.js",
+    "sha256" : "c8ee217e05ac778c84ae1d5a2d00b1a176ba9592a83c6736b6bdede3d264665c",
+    "bytes" : 204,
+    "updatedAt" : "2026-08-06T09:53:29.3778108"
+  }, {
+    "filePath" : "package-lock.json",
+    "sha256" : "9cb2bf4647fc6177fe345cbe08724648d5d8fb18cc277144464ac2f078f221be",
+    "bytes" : 83463,
+    "updatedAt" : "2026-08-06T12:48:07.4353456"
+  }, {
+    "filePath" : "package.json",
+    "sha256" : "defe1e06ab1101d5e65dbc07116060b665bbbb42fa92c3b03c64541e47cdad8c",
+    "bytes" : 566,
+    "updatedAt" : "2026-08-06T11:26:48.7026049"
+  }, {
+    "filePath" : "tests/smoke.spec.js",
+    "sha256" : "050e1f37ee1d8bd6225c93c7c74d70cb13bc23f61b973f138db1807295a93beb",
+    "bytes" : 1811,
+    "updatedAt" : "2026-08-06T11:26:48.7145938"
+  } ]
+}

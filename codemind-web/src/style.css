@@ -1446,3 +1446,73 @@ button {
   border-color: #2563eb;
   color: #2563eb;
 }
+
+/* A9.10.14.4.3.15.6.24D2_RUNTIME_VISUAL_RATIO */
+.el-picker__popper,
+.el-select__popper,
+.ep-runtime-select-popper,
+.ep-runtime-picker-popper {
+  z-index: 2147483600 !important;
+}
+
+
+/* A9.10.14.4.3.15.6.24D4_ADMIN_DENSITY_POPPER */
+.el-picker__popper,
+.el-select__popper,
+.ep-runtime-select-popper,
+.ep-runtime-picker-popper {
+  z-index: 2147483600 !important;
+}
+
+
+/* A9.10.14.4.3.15.7.24L3A2_ANTD_SCOPE_AND_CONTRACT_QUALITY_GATE
+   Ant Design Vue is only a prototype runtime design system.
+   Do not let AntD reset/style alter CodeMind workspace, PRD editor, module tree,
+   assistant panel, or artifact workbench typography globally. */
+:root {
+  --codemind-font-family: Inter, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+}
+
+html,
+body,
+#app {
+  font-family: var(--codemind-font-family);
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
+.codemind-app,
+.workspace-shell,
+.project-workspace,
+.requirement-workspace,
+.artifact-workbench,
+.module-prd-view,
+.prd-rich-text-editor,
+.tiptap,
+.tiptap-editor,
+.right-ai-assistant-panel,
+.module-tree,
+.el-dialog,
+.el-drawer,
+.el-message,
+.el-message-box {
+  font-family: var(--codemind-font-family);
+}
+
+/* AntD is intentionally scoped to generated prototype runtime only. */
+.a9-ant-admin-page,
+.a9-ant-admin-page :deep(.ant-btn),
+.a9-ant-admin-page :deep(.ant-input),
+.a9-ant-admin-page :deep(.ant-select),
+.a9-ant-admin-page :deep(.ant-picker),
+.a9-ant-admin-page :deep(.ant-table),
+.a9-ant-admin-page :deep(.ant-form),
+.a9-ant-admin-page :deep(.ant-card) {
+  font-family: var(--codemind-font-family);
+}
+

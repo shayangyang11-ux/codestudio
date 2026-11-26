@@ -17,6 +17,10 @@ import java.util.UUID;
 @Service
 public class ModuleTreePatchProposalService {
 
+    private static final com.fasterxml.jackson.databind.ObjectMapper A9_MODULE_TREE_PATCH_JSON_MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+
     private final ProjectModuleService projectModuleService;
     private final ProjectModuleRepository projectModuleRepository;
     private final ProjectAccessService projectAccessService;
@@ -90,6 +94,15 @@ public class ModuleTreePatchProposalService {
                         workspaceId,
                         projectCode
                 );
+
+        // A9.10.14.4.3.15.4.15.6.3_STRICT_EXPLICIT_TARGET_MODULE_LOCK
+        UUID a91563StrictTargetNodeId = a91563ResolveStrictExplicitTargetModuleId(
+                instruction,
+                moduleTree
+        );
+        if (a91563StrictTargetNodeId != null) {
+            selectedNodeId = a91563StrictTargetNodeId;
+        }
 
         try {
             Object rawResponse = pythonAgentClient.proposeModuleTreePatch(
@@ -319,6 +332,28 @@ public class ModuleTreePatchProposalService {
                     normalizeImpact(proposal.get("impact"))
             );
         }
+
+        proposal = a9RecoverAgentJsonOperationsIfNeeded(
+                proposal,
+                content,
+                instruction,
+                selectedNodeId,
+                moduleTree
+        );
+
+        proposal = a91562CompletePageOperationFromInstructionIfNeeded(
+                proposal,
+                instruction,
+                selectedNodeId,
+                moduleTree
+        );
+
+        proposal = a91563ForceExplicitPageNameInOperations(
+                proposal,
+                instruction,
+                selectedNodeId,
+                moduleTree
+        );
 
         String description = firstNonBlank(
                 textValue(content.get("description")),
@@ -571,6 +606,678 @@ public class ModuleTreePatchProposalService {
         );
     }
 
+
+    // A9.10.14.4.3.15.4.14.10_PATCH_AGENT_JSON_SALVAGE
+    private Map<String, Object> a9RecoverAgentJsonOperationsIfNeeded(
+            Map<String, Object> proposal,
+            Map<String, Object> content,
+            String instruction,
+            UUID selectedNodeId,
+            List<ProjectModuleService.ModuleTreeNode> moduleTree
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>(proposal == null ? Map.of() : proposal);
+
+        if (a9HasOperationPayload(result.get("operations"))) {
+            result.put("impact", a9SanitizeModuleTreePatchImpact(result.get("impact")));
+            if (content != null && a9ContainsRawJsonDump(content.get("markdown"))) {
+                content.remove("markdown");
+            }
+            return result;
+        }
+
+        Map<String, Object> recovered = a9ExtractAgentJsonMapFromTextSources(result, content);
+
+        if (!recovered.isEmpty() && a9HasOperationPayload(recovered.get("operations"))) {
+            List<Map<String, Object>> recoveredOperations = normalizeOperations(
+                    recovered.get("operations"),
+                    instruction,
+                    selectedNodeId,
+                    moduleTree
+            );
+
+            if (!recoveredOperations.isEmpty()) {
+                result.put("operations", recoveredOperations);
+                result.put(
+                        "description",
+                        firstNonBlank(
+                                textValue(result.get("description")),
+                                textValue(recovered.get("description")),
+                                "根据用户说明生成模块树变更提案"
+                        )
+                );
+                result.put(
+                        "source",
+                        firstNonBlank(
+                                textValue(recovered.get("source")),
+                                textValue(result.get("source")),
+                                "LANGGRAPH_MODULE_TREE_PATCH_AGENT_JSON_SALVAGED"
+                        )
+                );
+                result.put(
+                        "impact",
+                        a9SanitizeModuleTreePatchImpact(
+                                recovered.containsKey("impact") ? recovered.get("impact") : result.get("impact")
+                        )
+                );
+                result.put("agentMode", "JSON_SALVAGED_FROM_AGENT_FALLBACK");
+                result.put("jsonSalvageApplied", true);
+
+                if (content != null) {
+                    content.remove("markdown");
+                    content.remove("content_markdown");
+                    content.remove("contentMarkdown");
+                }
+
+                return result;
+            }
+        }
+
+        result.put("impact", a9SanitizeModuleTreePatchImpact(result.get("impact")));
+        if (content != null && a9ContainsRawJsonDump(content.get("markdown"))) {
+            content.remove("markdown");
+        }
+        return result;
+    }
+
+    private boolean a9HasOperationPayload(Object value) {
+        return value instanceof java.util.Collection<?> collection && !collection.isEmpty();
+    }
+
+    private Map<String, Object> a9ExtractAgentJsonMapFromTextSources(
+            Map<String, Object> proposal,
+            Map<String, Object> content
+    ) {
+        List<String> candidates = new ArrayList<>();
+
+        a9CollectCandidateText(candidates, content);
+        a9CollectCandidateText(candidates, proposal);
+
+        for (String candidate : candidates) {
+            Map<String, Object> parsed = a9ParseFirstJsonObject(candidate);
+
+            if (parsed.isEmpty()) {
+                continue;
+            }
+
+            Map<String, Object> nestedProposal = a9ToStringObjectMap(parsed.get("proposal"));
+            if (!nestedProposal.isEmpty() && a9HasOperationPayload(nestedProposal.get("operations"))) {
+                return nestedProposal;
+            }
+
+            if (a9HasOperationPayload(parsed.get("operations"))) {
+                return parsed;
+            }
+        }
+
+        return Map.of();
+    }
+
+    private void a9CollectCandidateText(
+            List<String> candidates,
+            Object value
+    ) {
+        if (value == null) {
+            return;
+        }
+
+        if (value instanceof String text) {
+            if (a9ContainsRawJsonDump(text) || text.contains("\"operations\"")) {
+                candidates.add(text);
+            }
+            return;
+        }
+
+        if (value instanceof Map<?, ?> map) {
+            for (Object item : map.values()) {
+                a9CollectCandidateText(candidates, item);
+            }
+            return;
+        }
+
+        if (value instanceof Iterable<?> iterable) {
+            for (Object item : iterable) {
+                a9CollectCandidateText(candidates, item);
+            }
+        }
+    }
+
+    private Map<String, Object> a9ParseFirstJsonObject(String rawText) {
+        String json = a9ExtractFirstJsonObject(rawText);
+
+        if (json.isBlank()) {
+            return Map.of();
+        }
+
+        String sanitizedJson = json
+                .replace("\\_", "_")
+                .replace("\\:", ":");
+
+        try {
+            return A9_MODULE_TREE_PATCH_JSON_MAPPER.readValue(
+                    sanitizedJson,
+                    new com.fasterxml.jackson.core.type.TypeReference<LinkedHashMap<String, Object>>() {
+                    }
+            );
+        } catch (Exception ignored) {
+            return Map.of();
+        }
+    }
+
+    private String a9ExtractFirstJsonObject(String rawText) {
+        if (rawText == null || rawText.isBlank()) {
+            return "";
+        }
+
+        String source = rawText.trim();
+        String marker = "LLM output is not valid JSON:";
+        int markerIndex = source.indexOf(marker);
+        int searchFrom = markerIndex >= 0 ? markerIndex + marker.length() : 0;
+        int start = source.indexOf('{', searchFrom);
+
+        if (start < 0) {
+            return "";
+        }
+
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+
+        for (int index = start; index < source.length(); index++) {
+            char ch = source.charAt(index);
+
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+
+            if (ch == '\\') {
+                escaped = true;
+                continue;
+            }
+
+            if (ch == '"') {
+                inString = !inString;
+                continue;
+            }
+
+            if (inString) {
+                continue;
+            }
+
+            if (ch == '{') {
+                depth++;
+            } else if (ch == '}') {
+                depth--;
+
+                if (depth == 0) {
+                    return source.substring(start, index + 1);
+                }
+            }
+        }
+
+        return "";
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> a9ToStringObjectMap(Object value) {
+        if (!(value instanceof Map<?, ?> rawMap) || rawMap.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
+            if (entry.getKey() != null) {
+                result.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+        }
+
+        return result;
+    }
+
+    private Map<String, Object> a9SanitizeModuleTreePatchImpact(Object rawImpact) {
+        Map<String, Object> impact = new LinkedHashMap<>(normalizeImpact(rawImpact));
+        Object rawRiskNotes = impact.get("riskNotes");
+        List<String> riskNotes = new ArrayList<>();
+        boolean replacedRawJsonDump = false;
+
+        if (rawRiskNotes instanceof Iterable<?> iterable) {
+            for (Object item : iterable) {
+                String note = String.valueOf(item == null ? "" : item).trim();
+
+                if (note.isBlank()) {
+                    continue;
+                }
+
+                if (a9ContainsRawJsonDump(note)) {
+                    if (!replacedRawJsonDump) {
+                        riskNotes.add("LLM 返回了非严格 JSON，系统已隐藏原始长文本并尝试恢复可执行模块树操作。");
+                        replacedRawJsonDump = true;
+                    }
+                    continue;
+                }
+
+                riskNotes.add(a9TrimForUser(note, 180));
+            }
+        }
+
+        if (riskNotes.isEmpty() && replacedRawJsonDump) {
+            riskNotes.add("系统已从 Agent 兜底信息中恢复可执行模块树操作。");
+        }
+
+        impact.put("riskNotes", riskNotes);
+        return impact;
+    }
+
+    private boolean a9ContainsRawJsonDump(Object value) {
+        if (value == null) {
+            return false;
+        }
+
+        String text = String.valueOf(value);
+
+        return text.contains("LLM output is not valid JSON")
+                || (text.contains("\"operations\"") && text.contains("\"ADD_NODE\"") && text.length() > 800);
+    }
+
+    private String a9TrimForUser(String value, int maxLength) {
+        String text = value == null ? "" : value.trim();
+
+        if (text.length() <= maxLength) {
+            return text;
+        }
+
+        return text.substring(0, Math.max(0, maxLength - 1)) + "…";
+    }
+
+
+
+    // A9.10.14.4.3.15.4.15.6.2_HOTFIX_PROPOSAL_PAGE_COMPLETION
+    private Map<String, Object> a91562CompletePageOperationFromInstructionIfNeeded(
+            Map<String, Object> proposal,
+            String instruction,
+            UUID selectedNodeId,
+            List<ProjectModuleService.ModuleTreeNode> moduleTree
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>(proposal == null ? Map.of() : proposal);
+
+        List<Map<String, Object>> operations = normalizeOperations(
+                result.get("operations"),
+                instruction,
+                selectedNodeId,
+                moduleTree
+        );
+
+        if (operations.isEmpty()) {
+            result.put("operations", operations);
+            return result;
+        }
+
+        boolean hasFeature = false;
+        boolean hasPage = false;
+        Map<String, Object> firstFeature = null;
+
+        for (Map<String, Object> operation : operations) {
+            if (operation == null || operation.isEmpty()) {
+                continue;
+            }
+
+            if (!"ADD_NODE".equals(textValue(operation.get("op")).toUpperCase())) {
+                continue;
+            }
+
+            String type = normalizeModuleTypeAlias(
+                    textValue(operation.get("moduleType")),
+                    textValue(operation.get("moduleName"))
+            );
+
+            if ("FEATURE".equals(type)) {
+                hasFeature = true;
+                if (firstFeature == null) {
+                    firstFeature = operation;
+                }
+            }
+
+            if ("PAGE".equals(type)) {
+                hasPage = true;
+                String normalizedPageName = a91562NormalizePatchPageName(
+                        textValue(operation.get("moduleName"))
+                );
+                if (!normalizedPageName.isBlank()) {
+                    operation.put("moduleName", normalizedPageName);
+                    operation.put("moduleKey", generateModuleKey(normalizedPageName, "PAGE"));
+                }
+            }
+        }
+
+        String pageName = a91562InferPageNameFromInstruction(instruction);
+
+        if (!hasFeature || hasPage || pageName.isBlank() || firstFeature == null) {
+            result.put("operations", operations);
+            return result;
+        }
+
+        Map<String, Object> pageOperation = new LinkedHashMap<>();
+        pageOperation.put("op", "ADD_NODE");
+
+        // 提案阶段还拿不到“本次新建 FEATURE”的真实 id。
+        // 这里暂时使用 FEATURE 的 parentId，应用阶段已有 runtime guard 会把 PAGE 转挂到刚创建的 FEATURE 下。
+        pageOperation.put("parentId", firstFeature.get("parentId"));
+        pageOperation.put("moduleName", pageName);
+        pageOperation.put("moduleKey", generateModuleKey(pageName, "PAGE"));
+        pageOperation.put("moduleType", "PAGE");
+
+        Map<String, Object> extra = new LinkedHashMap<>();
+        extra.put("source", "JAVA_PROPOSAL_PAGE_COMPLETION_FROM_INSTRUCTION");
+        extra.put("sourceInstruction", instruction);
+        extra.put("originalInstruction", instruction);
+        extra.put("derivedFromFeatureName", textValue(firstFeature.get("moduleName")));
+        extra.put("targetResolvePolicy", "FEATURE_THEN_PAGE_IN_SAME_PROPOSAL");
+        extra.put("proposalCompletionVersion", "A9.10.14.4.3.15.4.15.6.2");
+        extra.put("confirmationStatus", "PENDING_CONFIRMATION");
+        extra.put("sourceType", "AI_COMPLETED");
+        pageOperation.put("extra", extra);
+
+        operations.add(pageOperation);
+
+        result.put("operations", operations);
+        result.put("autoCompletedPageOperation", true);
+        result.put("autoCompletedPageOperationName", pageName);
+
+        List<String> validationNotes = asStringList(result.get("validationNotes"));
+        validationNotes.add("已根据用户说明中的对应页面/弹窗，自动补齐 PAGE 操作：" + pageName);
+        result.put("validationNotes", dedupe(validationNotes));
+
+        return result;
+    }
+
+    private String a91562InferPageNameFromInstruction(String instruction) {
+        String text = normalizeText(instruction);
+        if (text.isBlank()) {
+            return "";
+        }
+
+        List<String> patterns = List.of(
+                "对应的[“\\\"']?([^，。；;\\\"'”]{2,50}?(?:弹窗|弹框|抽屉|窗口|页面|页))[”\\\"']?",
+                "并(?:增加|新增|添加|创建|新建)对应的[“\\\"']?([^，。；;\\\"'”]{2,50}?(?:弹窗|弹框|抽屉|窗口|页面|页))[”\\\"']?",
+                "(?:增加|新增|添加|创建|新建)(?:一个|个)?[“\\\"']?([^，。；;\\\"'”]{2,50}?(?:弹窗|弹框|抽屉|窗口|页面|页))[”\\\"']?"
+        );
+
+        for (String pattern : patterns) {
+            java.util.regex.Matcher matcher =
+                    java.util.regex.Pattern.compile(pattern).matcher(text);
+
+            if (matcher.find()) {
+                String name = a91562NormalizePatchPageName(matcher.group(1));
+                if (!name.isBlank()) {
+                    return name;
+                }
+            }
+        }
+
+        return "";
+    }
+
+    private String a91562NormalizePatchPageName(String rawName) {
+        String name = normalizeText(rawName)
+                .replaceAll("\\s+", "")
+                .replace("“", "")
+                .replace("”", "")
+                .replace("\"", "")
+                .replace("'", "")
+                .trim();
+
+        if (name.isBlank()) {
+            return "";
+        }
+
+        name = name
+                .replace("弹窗页面", "弹窗")
+                .replace("弹窗页", "弹窗")
+                .replace("弹框页面", "弹框")
+                .replace("弹框页", "弹框")
+                .replace("抽屉页面", "抽屉")
+                .replace("抽屉页", "抽屉")
+                .replace("窗口页面", "窗口")
+                .replace("窗口页", "窗口");
+
+        if (name.endsWith("弹窗")
+                || name.endsWith("弹框")
+                || name.endsWith("抽屉")
+                || name.endsWith("窗口")
+                || name.endsWith("页面")
+                || name.endsWith("页")) {
+            return name;
+        }
+
+        return name + "页";
+    }
+
+
+
+    // A9.10.14.4.3.15.4.15.6.3_STRICT_EXPLICIT_TARGET_MODULE_LOCK
+    private UUID a91563ResolveStrictExplicitTargetModuleId(
+            String instruction,
+            List<ProjectModuleService.ModuleTreeNode> moduleTree
+    ) {
+        ProjectModuleService.ModuleTreeNode node =
+                a91563ResolveStrictMentionedTargetModule(
+                        instruction,
+                        "FEATURE",
+                        a91563FlattenNodes(moduleTree)
+                );
+
+        return node == null ? null : node.getId();
+    }
+
+    private ProjectModuleService.ModuleTreeNode a91563ResolveStrictMentionedTargetModule(
+            String instruction,
+            String childType,
+            List<ProjectModuleService.ModuleTreeNode> flatNodes
+    ) {
+        String source = normalizeText(instruction).replaceAll("\\s+", "");
+        if (source.isBlank() || flatNodes == null || flatNodes.isEmpty()) {
+            return null;
+        }
+
+        String type = normalizeModuleTypeAlias(childType, "");
+        ProjectModuleService.ModuleTreeNode best = null;
+        int bestScore = 0;
+
+        for (ProjectModuleService.ModuleTreeNode node : flatNodes) {
+            if (node == null || node.getId() == null) {
+                continue;
+            }
+
+            String nodeType = normalizeModuleTypeAlias(node.getModuleType(), node.getModuleName());
+            if (!"MODULE".equals(nodeType)) {
+                continue;
+            }
+
+            String nodeName = normalizeText(node.getModuleName()).replaceAll("\\s+", "");
+            if (nodeName.isBlank()) {
+                continue;
+            }
+
+            // 必须是用户原文中精确出现的模块名；不要用“订单/销售”这种模糊相似度。
+            if (!source.contains(nodeName)) {
+                continue;
+            }
+
+            if (!a91563CanAcceptStrictChild(node, type)) {
+                continue;
+            }
+
+            int score = nodeName.length() * 100;
+            if (a91562IsFinalRequirementModule(node)) {
+                score += 10000;
+            }
+            if (source.contains("在" + nodeName)
+                    || source.contains("给" + nodeName)
+                    || source.contains(nodeName + "的")
+                    || source.contains(nodeName + "模块")) {
+                score += 5000;
+            }
+
+            if (score > bestScore) {
+                best = node;
+                bestScore = score;
+            }
+        }
+
+        return best;
+    }
+
+    private boolean a91563CanAcceptStrictChild(
+            ProjectModuleService.ModuleTreeNode parent,
+            String childType
+    ) {
+        if (parent == null || childType == null || childType.isBlank()) {
+            return false;
+        }
+
+        if (a91562IsFinalRequirementModule(parent)) {
+            return "FEATURE".equals(childType) || "PAGE".equals(childType);
+        }
+
+        return "MODULE".equals(childType) || "FEATURE".equals(childType) || "PAGE".equals(childType);
+    }
+
+    private List<ProjectModuleService.ModuleTreeNode> a91563FlattenNodes(
+            List<ProjectModuleService.ModuleTreeNode> nodes
+    ) {
+        List<ProjectModuleService.ModuleTreeNode> result = new ArrayList<>();
+        flatten(nodes, result);
+        return result;
+    }
+
+    private Map<String, Object> a91563ForceExplicitPageNameInOperations(
+            Map<String, Object> proposal,
+            String instruction,
+            UUID selectedNodeId,
+            List<ProjectModuleService.ModuleTreeNode> moduleTree
+    ) {
+        Map<String, Object> result = new LinkedHashMap<>(proposal == null ? Map.of() : proposal);
+
+        String explicitPageName = a91563InferExplicitPageName(instruction);
+        if (explicitPageName.isBlank()) {
+            return result;
+        }
+
+        List<Map<String, Object>> operations = normalizeOperations(
+                result.get("operations"),
+                instruction,
+                selectedNodeId,
+                moduleTree
+        );
+
+        if (operations.isEmpty()) {
+            result.put("operations", operations);
+            return result;
+        }
+
+        boolean touchedPage = false;
+        Map<String, Object> firstFeature = null;
+
+        for (Map<String, Object> operation : operations) {
+            if (operation == null || operation.isEmpty()) {
+                continue;
+            }
+
+            if (!"ADD_NODE".equals(textValue(operation.get("op")).toUpperCase())) {
+                continue;
+            }
+
+            String type = normalizeModuleTypeAlias(
+                    textValue(operation.get("moduleType")),
+                    textValue(operation.get("moduleName"))
+            );
+
+            if ("FEATURE".equals(type) && firstFeature == null) {
+                firstFeature = operation;
+            }
+
+            if ("PAGE".equals(type)) {
+                String oldName = textValue(operation.get("moduleName"));
+                operation.put("moduleName", explicitPageName);
+                operation.put("moduleKey", generateModuleKey(explicitPageName, "PAGE"));
+
+                Map<String, Object> extra = toMap(operation.get("extra"));
+                extra.put("pageNameCorrectedByExplicitInstruction", true);
+                extra.put("oldPageName", oldName);
+                extra.put("sourceInstruction", instruction);
+                extra.put("targetResolveVersion", "A9.10.14.4.3.15.4.15.6.3");
+                operation.put("extra", extra);
+
+                touchedPage = true;
+            }
+        }
+
+        if (!touchedPage && firstFeature != null) {
+            Map<String, Object> pageOperation = new LinkedHashMap<>();
+            pageOperation.put("op", "ADD_NODE");
+            pageOperation.put("parentId", firstFeature.get("parentId"));
+            pageOperation.put("moduleName", explicitPageName);
+            pageOperation.put("moduleKey", generateModuleKey(explicitPageName, "PAGE"));
+            pageOperation.put("moduleType", "PAGE");
+
+            Map<String, Object> extra = new LinkedHashMap<>();
+            extra.put("source", "JAVA_STRICT_EXPLICIT_PAGE_COMPLETION");
+            extra.put("sourceInstruction", instruction);
+            extra.put("originalInstruction", instruction);
+            extra.put("derivedFromFeatureName", textValue(firstFeature.get("moduleName")));
+            extra.put("targetResolveVersion", "A9.10.14.4.3.15.4.15.6.3");
+            extra.put("sourceType", "AI_COMPLETED");
+            extra.put("confirmationStatus", "PENDING_CONFIRMATION");
+            pageOperation.put("extra", extra);
+
+            operations.add(pageOperation);
+        }
+
+        result.put("operations", operations);
+        result.put("strictExplicitPageName", explicitPageName);
+        return result;
+    }
+
+    private String a91563InferExplicitPageName(String instruction) {
+        String source = normalizeText(instruction);
+        if (source.isBlank()) {
+            return "";
+        }
+
+        List<String> patterns = List.of(
+                "对应的[“\\\"']?([^，。；;\\\"'”]{2,60}?(?:弹窗|弹框|抽屉|窗口|页面|页))[”\\\"']?",
+                "并(?:增加|新增|添加|创建|新建)对应的[“\\\"']?([^，。；;\\\"'”]{2,60}?(?:弹窗|弹框|抽屉|窗口|页面|页))[”\\\"']?",
+                "(?:增加|新增|添加|创建|新建)(?:一个|个)?[“\\\"']?([^，。；;\\\"'”]{2,60}?(?:弹窗|弹框|抽屉|窗口|页面|页))[”\\\"']?"
+        );
+
+        for (String pattern : patterns) {
+            java.util.regex.Matcher matcher =
+                    java.util.regex.Pattern.compile(pattern).matcher(source);
+
+            if (matcher.find()) {
+                String name = normalizeText(matcher.group(1))
+                        .replaceAll("\\s+", "")
+                        .replace("弹窗页面", "弹窗")
+                        .replace("弹窗页", "弹窗")
+                        .replace("弹框页面", "弹框")
+                        .replace("弹框页", "弹框")
+                        .replace("抽屉页面", "抽屉")
+                        .replace("抽屉页", "抽屉")
+                        .replace("窗口页面", "窗口")
+                        .replace("窗口页", "窗口")
+                        .trim();
+
+                if (!name.isBlank()) {
+                    return name;
+                }
+            }
+        }
+
+        return "";
+    }
+
+
     private boolean hasExecutableOperations(
             ModuleTreePatchProposalResponse response
     ) {
@@ -819,7 +1526,16 @@ public class ModuleTreePatchProposalService {
             return "";
         }
 
-        if ("PAGE".equals(moduleType) && !name.endsWith("页") && !name.endsWith("页面")) {
+        if ("PAGE".equals(moduleType)) {
+            name = a91562NormalizePatchNodeName(name, "PAGE");
+            if (name.endsWith("弹窗")
+                    || name.endsWith("弹框")
+                    || name.endsWith("抽屉")
+                    || name.endsWith("窗口")
+                    || name.endsWith("页")
+                    || name.endsWith("页面")) {
+                return name;
+            }
             return name + "页";
         }
 
@@ -891,6 +1607,31 @@ public class ModuleTreePatchProposalService {
             }
 
             if ("ADD_NODE".equals(op)) {
+                String a91562Type = normalizeModuleTypeAlias(
+                        textValue(operation.get("moduleType")),
+                        textValue(operation.get("moduleName"))
+                );
+                if (!a91562Type.isBlank()) {
+                    operation.put("moduleType", a91562Type);
+                }
+
+                String a91562Name = a91562NormalizePatchNodeName(
+                        textValue(operation.get("moduleName")),
+                        a91562Type
+                );
+                if (!a91562Name.isBlank()) {
+                    operation.put("moduleName", a91562Name);
+                }
+
+                Map<String, Object> a91562Extra = toMap(operation.get("extra"));
+                if (!normalizeText(instruction).isBlank()) {
+                    a91562Extra.put("sourceInstruction", instruction);
+                    a91562Extra.put("originalInstruction", instruction);
+                }
+                a91562Extra.put("targetResolvePolicy", "EXPLICIT_MENTIONED_MODULE_OVERRIDES_SELECTED_NODE");
+                a91562Extra.put("targetResolveVersion", "A9.10.14.4.3.15.4.15.6.2");
+                operation.put("extra", a91562Extra);
+
                 normalizeAddNodeParent(
                         operation,
                         instruction,
@@ -984,6 +1725,26 @@ public class ModuleTreePatchProposalService {
         List<ProjectModuleService.ModuleTreeNode> flatNodes = new ArrayList<>();
         flatten(moduleTree, flatNodes);
 
+        ProjectModuleService.ModuleTreeNode a91563StrictMentionedParent =
+                a91563ResolveStrictMentionedTargetModule(
+                        instruction,
+                        moduleType,
+                        flatNodes
+                );
+
+        if (a91563StrictMentionedParent != null && a91563StrictMentionedParent.getId() != null) {
+            operation.put("parentId", a91563StrictMentionedParent.getId().toString());
+
+            Map<String, Object> extra = toMap(operation.get("extra"));
+            extra.put("targetModuleId", a91563StrictMentionedParent.getId().toString());
+            extra.put("targetModuleName", a91563StrictMentionedParent.getModuleName());
+            extra.put("targetModuleType", a91563StrictMentionedParent.getModuleType());
+            extra.put("targetResolvedBy", "STRICT_EXPLICIT_INSTRUCTION_MODULE_NAME");
+            extra.put("targetResolveVersion", "A9.10.14.4.3.15.4.15.6.3");
+            operation.put("extra", extra);
+            return;
+        }
+
         String originalParentId = textValue(operation.get("parentId"));
         ProjectModuleService.ModuleTreeNode originalParent =
                 findNodeById(
@@ -991,9 +1752,23 @@ public class ModuleTreePatchProposalService {
                         originalParentId
                 );
 
-        ProjectModuleService.ModuleTreeNode resolvedParent = null;
+        ProjectModuleService.ModuleTreeNode resolvedParent =
+                a91562ResolveExplicitMentionedParent(
+                        instruction,
+                        moduleName,
+                        moduleType,
+                        flatNodes
+                );
 
-        if (originalParent != null) {
+        if (resolvedParent != null) {
+            Map<String, Object> extra = toMap(operation.get("extra"));
+            extra.put("targetModuleId", resolvedParent.getId() == null ? "" : resolvedParent.getId().toString());
+            extra.put("targetModuleName", resolvedParent.getModuleName());
+            extra.put("targetModuleType", resolvedParent.getModuleType());
+            extra.put("targetResolvedBy", "EXPLICIT_INSTRUCTION_MODULE_NAME");
+            extra.put("targetResolveVersion", "A9.10.14.4.3.15.4.15.6.2");
+            operation.put("extra", extra);
+        } else if (originalParent != null) {
             resolvedParent = resolveCompatibleAncestorOrSelf(
                     originalParent,
                     flatNodes,
@@ -1031,6 +1806,170 @@ public class ModuleTreePatchProposalService {
             operation.remove("parentId");
         }
     }
+
+
+    // A9.10.14.4.3.15.4.15.6.2_TARGET_MODULE_RESOLVE_AND_PAGE_NAME_QUALITY
+    private ProjectModuleService.ModuleTreeNode a91562ResolveExplicitMentionedParent(
+            String instruction,
+            String childName,
+            String childType,
+            List<ProjectModuleService.ModuleTreeNode> flatNodes
+    ) {
+        String normalizedInstruction = normalizeForMatch(instruction);
+        String normalizedChildName = normalizeForMatch(childName);
+        String normalizedChildType = normalizeModuleTypeAlias(childType, childName);
+
+        if (normalizedInstruction.isBlank() || flatNodes == null || flatNodes.isEmpty()) {
+            return null;
+        }
+
+        ProjectModuleService.ModuleTreeNode best = null;
+        int bestScore = 0;
+
+        for (ProjectModuleService.ModuleTreeNode node : flatNodes) {
+            if (node == null || node.getId() == null) {
+                continue;
+            }
+
+            String nodeName = normalizeForMatch(node.getModuleName());
+            String nodeKey = normalizeForMatch(node.getModuleKey());
+            String nodeType = normalizeModuleTypeAlias(node.getModuleType(), node.getModuleName());
+
+            if (nodeName.isBlank()) {
+                continue;
+            }
+
+            if (nodeName.equals(normalizedChildName)) {
+                continue;
+            }
+
+            int score = 0;
+            if (normalizedInstruction.contains(nodeName)) {
+                score = Math.max(score, nodeName.length() * 10);
+            }
+            if (!nodeKey.isBlank() && normalizedInstruction.contains(nodeKey)) {
+                score = Math.max(score, nodeKey.length() * 8);
+            }
+
+            if (score <= 0) {
+                continue;
+            }
+
+            if (!a91562CanAcceptChild(node, normalizedChildType)) {
+                continue;
+            }
+
+            if ("MODULE".equals(nodeType)) {
+                score += 30;
+            }
+            if (a91562IsFinalRequirementModule(node)) {
+                score += 50;
+            }
+
+            if (score > bestScore) {
+                best = node;
+                bestScore = score;
+            }
+        }
+
+        return best;
+    }
+
+    private boolean a91562CanAcceptChild(
+            ProjectModuleService.ModuleTreeNode parent,
+            String childType
+    ) {
+        if (parent == null || childType == null || childType.isBlank()) {
+            return false;
+        }
+
+        String parentType = normalizeModuleTypeAlias(parent.getModuleType(), parent.getModuleName());
+
+        if ("FEATURE".equals(parentType)) {
+            return "PAGE".equals(childType);
+        }
+
+        if ("PAGE".equals(parentType)) {
+            return false;
+        }
+
+        if (!"MODULE".equals(parentType)) {
+            return false;
+        }
+
+        if (a91562IsFinalRequirementModule(parent)) {
+            return "FEATURE".equals(childType);
+        }
+
+        return "MODULE".equals(childType)
+                || "FEATURE".equals(childType);
+    }
+
+    private boolean a91562IsFinalRequirementModule(
+            ProjectModuleService.ModuleTreeNode node
+    ) {
+        if (node == null) {
+            return false;
+        }
+
+        Map<String, Object> extra = node.getExtra() == null ? Map.of() : node.getExtra();
+
+        if (Boolean.TRUE.equals(extra.get("hasModulePrd"))
+                || Boolean.TRUE.equals(extra.get("finalRequirementModule"))) {
+            return true;
+        }
+
+        Object mode = extra.get("requirementMode");
+        if (mode == null) {
+            mode = extra.get("requirement_mode");
+        }
+
+        return mode != null && "REQUIREMENT_MODULE".equalsIgnoreCase(String.valueOf(mode));
+    }
+
+    private String a91562NormalizePatchNodeName(
+            String rawName,
+            String moduleType
+    ) {
+        String name = normalizeText(rawName)
+                .replaceAll("\\s+", "")
+                .trim();
+
+        if (name.isBlank()) {
+            return "";
+        }
+
+        String type = moduleType == null ? "" : moduleType.trim().toUpperCase();
+
+        if ("PAGE".equals(type)) {
+            name = name
+                    .replace("弹窗页面", "弹窗")
+                    .replace("弹窗页", "弹窗")
+                    .replace("弹框页面", "弹框")
+                    .replace("弹框页", "弹框")
+                    .replace("抽屉页面", "抽屉")
+                    .replace("抽屉页", "抽屉")
+                    .replace("窗口页面", "窗口")
+                    .replace("窗口页", "窗口");
+
+            if (name.endsWith("弹窗")
+                    || name.endsWith("弹框")
+                    || name.endsWith("抽屉")
+                    || name.endsWith("窗口")) {
+                return name;
+            }
+        }
+
+        if ("FEATURE".equals(type)) {
+            return name
+                    .replace("功能点功能", "功能点")
+                    .replace("功能功能", "功能")
+                    .replace("业务能力功能", "业务能力");
+        }
+
+        return name;
+    }
+
 
     private ProjectModuleService.ModuleTreeNode resolveCompatibleParentForAdd(
             String instruction,
@@ -1288,9 +2227,9 @@ public class ModuleTreePatchProposalService {
         );
 
         return switch (parentType) {
-            case "DOMAIN" -> List.of("MODULE", "FEATURE").contains(childType);
-            case "MODULE" -> List.of("MODULE", "FEATURE").contains(childType);
-            case "SUBMODULE" -> List.of("MODULE", "FEATURE").contains(childType);
+            case "DOMAIN" -> List.of("MODULE", "FEATURE", "PAGE").contains(childType);
+            case "MODULE" -> List.of("MODULE", "FEATURE", "PAGE").contains(childType);
+            case "SUBMODULE" -> List.of("MODULE", "FEATURE", "PAGE").contains(childType);
             case "FEATURE" -> "PAGE".equals(childType);
             default -> false;
         };
@@ -1674,3 +2613,5 @@ public class ModuleTreePatchProposalService {
         return text.length() > 80 ? text.substring(0, 80) : text;
     }
 }
+
+// A9.10.14.4.3.15.6.24L0A_CONTINUE_AGENT_BACKEND: backend policy allows MODULE -> PAGE; FEATURE remains legacy capability metadata.

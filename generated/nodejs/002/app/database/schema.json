@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0",
+  "entities": [
+    {
+      "name": "AuthUser",
+      "description": "认证用户。",
+      "fields": [
+        { "name": "id", "type": "string", "required": true },
+        { "name": "account", "type": "string", "required": true },
+        { "name": "nickname", "type": "string", "required": true },
+        { "name": "password", "type": "string", "required": true },
+        { "name": "status", "type": "enum", "values": ["ACTIVE", "DISABLED"], "required": true }
+      ]
+    }
+  ]
+}

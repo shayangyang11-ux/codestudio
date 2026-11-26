@@ -324,10 +324,26 @@
         </header>
 
         <main class="business-body">
-          <UiContractRuntimeNode
-            v-for="component in businessDisplayComponents"
-            :key="component.componentId"
-            :component="component"
+          <!-- A9.10.14.4.3.15.6.24G_ADMIN_PAGE_RENDERER: page-level admin layout renderer -->
+          <AntDesignAdminPageRenderer
+            v-if="shouldUseAntDesignRenderer"
+            :components="businessDisplayComponents"
+            :component-map="componentMap"
+            :interactions="interactions"
+            :form-values="formValues"
+            :field-errors="fieldErrors"
+            :mock-data="mockData"
+            :active-tabs="activeTabs"
+            :visible-component-ids="visibleComponentIds"
+            :disabled-component-ids="disabledComponentIds"
+            @execute="$emit('execute', $event)"
+            @update-field="$emit('updateField', $event)"
+            @switch-tab="$emit('switchTab', $event)"
+          />
+
+<ElementPlusAdminPageRenderer
+            v-else
+            :components="businessDisplayComponents"
             :component-map="componentMap"
             :interactions="interactions"
             :form-values="formValues"
@@ -350,7 +366,8 @@
 import {
   computed,
 } from 'vue'
-import UiContractRuntimeNode from '../UiContractRuntimeNode.vue'
+import ElementPlusAdminPageRenderer from './ElementPlusAdminPageRenderer.vue'
+import AntDesignAdminPageRenderer from './AntDesignAdminPageRenderer.vue'
 import type {
   UiContractComponent,
   UiContractContent,
@@ -855,6 +872,41 @@ function inputValue(
     ? target.value
     : ''
 }
+
+
+// A9.10.14.4.3.15.7.24L3A1_ANT_DESIGN_VUE_RUNTIME_BASELINE
+// Ant Design Vue becomes the default admin-page renderer.
+// Existing contracts can still force Element Plus through designSystem/uiFramework/renderEngine.
+const shouldUseAntDesignRenderer = computed(() => {
+  const source = props.contract as any
+  const page = source?.page || {}
+  const layout = page?.layout || {}
+
+  const raw = [
+    source?.designSystem,
+    source?.uiFramework,
+    source?.renderEngine,
+    source?.renderer,
+    source?.runtime,
+    page?.designSystem,
+    page?.uiFramework,
+    page?.renderEngine,
+    page?.renderer,
+    layout?.designSystem,
+    layout?.uiFramework,
+    layout?.renderer,
+  ].map((item) => String(item || '').toUpperCase()).join(' ')
+
+  // A9.10.14.4.3.15.7.24L3A3_ANTD_DEFAULT_SEMANTIC_CLEAN_CONTRACT
+  // New generated prototypes default to Ant Design Vue.
+  // Only explicit Element Plus contracts opt out.
+  return !(
+    raw.includes('ELEMENT_PLUS') ||
+    raw.includes('ELEMENTPLUS') ||
+    raw.includes('ELEMENT PLUS')
+  )
+})
+
 </script>
 
 <style scoped>
@@ -1958,6 +2010,362 @@ function inputValue(
   background:
     radial-gradient(circle at 12% 8%, rgba(249, 115, 22, 0.16), transparent 30%),
     linear-gradient(135deg, #ffffff 0%, #fff7ed 100%);
+}
+
+
+/* A9.10.14.4.3.15.6.24D2_RUNTIME_VISUAL_RATIO */
+.business-body {
+  width: min(100%, 1240px) !important;
+  max-width: 1240px !important;
+  margin: 0 auto !important;
+  padding: 20px 24px 40px !important;
+  box-sizing: border-box !important;
+}
+
+.business-header,
+.business-hero,
+.business-page-header,
+.business-page-hero {
+  min-height: 108px !important;
+  padding: 24px 32px !important;
+  border-radius: 18px !important;
+  box-sizing: border-box !important;
+}
+
+.business-header h1,
+.business-hero h1,
+.business-page-header h1,
+.business-page-hero h1,
+.business-title,
+.business-page-title {
+  font-size: 34px !important;
+  line-height: 1.16 !important;
+  letter-spacing: -0.04em !important;
+  margin: 0 0 8px !important;
+}
+
+.business-header p,
+.business-hero p,
+.business-page-header p,
+.business-page-hero p,
+.business-subtitle,
+.business-page-subtitle {
+  font-size: 13px !important;
+  line-height: 1.6 !important;
+  margin: 0 !important;
+}
+
+.business-body :deep(.ep-runtime-node + .ep-runtime-node) {
+  margin-top: 18px !important;
+}
+
+.business-body :deep(.ep-container-panel) {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.business-body :deep(.ep-container-header) {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+@media (max-width: 900px) {
+  .business-body {
+    padding: 16px !important;
+  }
+
+  .business-header,
+  .business-hero,
+  .business-page-header,
+  .business-page-hero {
+    padding: 20px !important;
+  }
+
+  .business-header h1,
+  .business-hero h1,
+  .business-page-header h1,
+  .business-page-hero h1,
+  .business-title,
+  .business-page-title {
+    font-size: 28px !important;
+  }
+}
+
+
+/* A9.10.14.4.3.15.6.24D4_ADMIN_DENSITY_POPPER */
+.business-body {
+  width: min(100%, 1180px) !important;
+  max-width: 1180px !important;
+  padding: 18px 22px 36px !important;
+  margin: 0 auto !important;
+  box-sizing: border-box !important;
+}
+
+.business-header,
+.business-hero,
+.business-page-header,
+.business-page-hero {
+  min-height: 92px !important;
+  padding: 20px 28px !important;
+  border-radius: 14px !important;
+}
+
+.business-header h1,
+.business-hero h1,
+.business-page-header h1,
+.business-page-hero h1,
+.business-title,
+.business-page-title {
+  font-size: 26px !important;
+  line-height: 1.18 !important;
+  letter-spacing: -0.02em !important;
+  margin: 0 0 6px !important;
+}
+
+.business-header p,
+.business-hero p,
+.business-page-header p,
+.business-page-hero p,
+.business-subtitle,
+.business-page-subtitle {
+  font-size: 12.5px !important;
+  line-height: 1.55 !important;
+}
+
+.business-body :deep(.ep-runtime-node + .ep-runtime-node) {
+  margin-top: 14px !important;
+}
+
+
+/* A9.10.14.4.3.15.6.24D5_ADMIN_ALIGNMENT_ACTIONBAR */
+.business-body {
+  width: min(100%, 1180px) !important;
+  max-width: 1180px !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+.business-header,
+.business-hero,
+.business-page-header,
+.business-page-hero {
+  width: min(100%, 1180px) !important;
+  max-width: 1180px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  box-sizing: border-box !important;
+}
+
+.business-body :deep(.ep-action-toolbar) {
+  margin-bottom: 0 !important;
+}
+
+.business-body :deep(.ep-action-toolbar + .ep-runtime-node) {
+  margin-top: 8px !important;
+}
+
+
+/* A9.10.14.4.3.15.6.24G_ADMIN_PAGE_RENDERER */
+.business-page {
+  background: #f4f7fb !important;
+  padding: 20px 24px 40px !important;
+  box-sizing: border-box !important;
+}
+
+.business-header {
+  width: 100% !important;
+  max-width: none !important;
+  min-height: 104px !important;
+  margin: 0 0 16px !important;
+  padding: 20px 24px !important;
+  box-sizing: border-box !important;
+  border-radius: 14px !important;
+}
+
+.business-header h1 {
+  font-size: 24px !important;
+  line-height: 1.2 !important;
+  margin: 0 0 6px !important;
+}
+
+.business-header span {
+  font-size: 12.5px !important;
+  line-height: 1.55 !important;
+}
+
+.business-body {
+  width: 100% !important;
+  max-width: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  display: block !important;
+  box-sizing: border-box !important;
+}
+
+.business-body :deep(.a9-admin-page) {
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+}
+
+.pattern-runtime :deep(.a9-admin-form .el-input__inner),
+.pattern-runtime :deep(.a9-admin-form .el-select__input),
+.pattern-runtime :deep(.a9-admin-form .el-range-input) {
+  border: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+
+/* A9.10.14.4.3.15.6.24G2_ADMIN_CENTER_WIDTH */
+.business-page {
+  padding: 20px 32px 40px !important;
+  box-sizing: border-box !important;
+}
+
+.business-header,
+.business-body {
+  width: min(100%, 1180px) !important;
+  max-width: 1180px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  box-sizing: border-box !important;
+}
+
+.business-header {
+  margin-bottom: 16px !important;
+}
+
+.business-body {
+  display: block !important;
+  padding: 0 !important;
+}
+
+.business-body :deep(.a9-admin-page),
+.business-body :deep(.a9-admin-card),
+.business-body :deep(.a9-admin-table) {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+@media (max-width: 900px) {
+  .business-page {
+    padding: 16px !important;
+  }
+
+  .business-header,
+  .business-body {
+    width: 100% !important;
+    max-width: none !important;
+  }
+}
+
+
+/* A9.10.14.4.3.15.6.24G3_ADMIN_CANVAS_GUTTER
+   Undo 24G2 centered max-width behavior.
+   Use canvas gutters instead: header/body share the same left/right boundary. */
+.business-page {
+  padding: 20px 96px 40px 52px !important;
+  box-sizing: border-box !important;
+}
+
+.business-header,
+.business-body {
+  width: 100% !important;
+  max-width: none !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.business-header {
+  min-height: 104px !important;
+  margin-bottom: 16px !important;
+  padding: 20px 24px !important;
+}
+
+.business-body {
+  display: block !important;
+  padding: 0 !important;
+}
+
+.business-body :deep(.a9-admin-page),
+.business-body :deep(.a9-admin-card),
+.business-body :deep(.a9-admin-table) {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.business-body :deep(.el-table) {
+  width: 100% !important;
+}
+
+.business-body :deep(.el-table__inner-wrapper),
+.business-body :deep(.el-table__body-wrapper),
+.business-body :deep(.el-table__header-wrapper) {
+  width: 100% !important;
+}
+
+@media (max-width: 900px) {
+  .business-page {
+    padding: 16px !important;
+  }
+}
+
+
+/* A9.10.14.4.3.15.6.24G4_SELECTION_OVERFLOW_FIX
+   Selection outline / selected badge must not enlarge the admin page scroll width. */
+.pattern-runtime,
+.business-page,
+.business-body {
+  overflow-x: hidden !important;
+}
+
+.business-body :deep(.a9-admin-page),
+.business-body :deep(.a9-admin-card),
+.business-body :deep(.a9-admin-table-card),
+.business-body :deep(.el-table),
+.business-body :deep(.el-table__inner-wrapper),
+.business-body :deep(.el-table__body-wrapper),
+.business-body :deep(.el-table__header-wrapper) {
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.pattern-runtime :deep([data-ui-selectable]) {
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+}
+
+.pattern-runtime :deep([data-ui-selectable][data-ui-selected='true']),
+.pattern-runtime :deep([data-ui-selectable][data-selected='true']),
+.pattern-runtime :deep([data-ui-selectable].is-selected),
+.pattern-runtime :deep([data-ui-selectable].is-prototype-selected),
+.pattern-runtime :deep([data-ui-selectable].prototype-selected),
+.pattern-runtime :deep([data-ui-selectable].a9-selected) {
+  outline: 2px solid #3b82f6 !important;
+  outline-offset: -2px !important;
+  border-color: transparent !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.18) !important;
+}
+
+.pattern-runtime :deep(.selection-label),
+.pattern-runtime :deep(.selected-label),
+.pattern-runtime :deep(.prototype-selection-label),
+.pattern-runtime :deep(.prototype-selected-label),
+.pattern-runtime :deep(.ui-selection-label),
+.pattern-runtime :deep(.a9-selection-label) {
+  max-width: min(240px, calc(100vw - 32px)) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  pointer-events: none !important;
 }
 
 </style>

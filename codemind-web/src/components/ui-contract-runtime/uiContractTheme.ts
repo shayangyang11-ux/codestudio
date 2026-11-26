@@ -5,6 +5,8 @@ import type {
 } from '../../types/uiContract'
 import type { ProjectThemeProfile } from '../../types/themeProfile'
 
+import { inferSurface } from '../../domain/pageSemantics'
+
 export type LooseRecord = Record<string, any>
 
 export type UiRuntimeThemeKey =
@@ -270,28 +272,21 @@ export function resolvePagePattern(
 
   const pageKind = String(page.pageKind || '').toUpperCase()
   const layoutType = String(getLayoutType(contract) || '').toUpperCase()
-  const formIdentity = pageKind === 'FORM_PAGE' ||
-    layoutType === 'FORM_DETAIL' ||
-    hasAny(identityText, ['创建', '新建', '新增', '编辑', '录入', '表单', 'create', 'new', 'edit', 'form'])
+  const surface = inferSurface(businessText)
 
-  if (formIdentity) return 'EDIT_FORM'
-
-  if (hasAny(businessText, ['dashboard', '看板', '驾驶舱', '统计', '指标', '总览', '概览', '首页', '用户首页', '工作台', 'home', 'workbench'])) return 'DASHBOARD'
-  if (hasAny(businessText, ['个人资料', '用户资料', 'profile', '资料页', '账户信息', '用户信息'])) return 'PROFILE_PAGE'
-  if (hasAny(businessText, ['详情', 'detail', '明细'])) return 'DETAIL_PAGE'
-  if (hasAny(businessText, ['搜索', '筛选', '查询', 'search', 'filter'])) return 'SEARCH_LIST'
-  if (hasAny(businessText, ['列表', '表格', '分页', 'list', 'table', 'crud'])) return 'CRUD_LIST'
-  if (hasAny(businessText, ['设置', '配置', 'setting', 'config'])) return 'SETTINGS_FORM'
-  if (hasAny(businessText, ['上传', 'upload', '导入'])) return 'UPLOAD_FORM'
-  if (hasAny(businessText, ['流程', '审批', '步骤', 'workflow', 'step'])) return 'WORKFLOW_STEP'
-  if (hasAny(businessText, ['编辑', '修改', '保存', 'edit', 'form'])) return 'EDIT_FORM'
-
-  // Feature text may refine business categories, but never auth categories.
-  if (hasAny(featureText, ['用户信息', '用户资料', '退出登录', '状态守卫', '会话', 'session', 'logout'])) return 'DASHBOARD'
-  if (hasAny(featureText, ['查询', '搜索', '列表', '分页', 'search', 'list'])) return 'SEARCH_LIST'
-  if (hasAny(featureText, ['设置', '配置', '保存', 'setting', 'config', 'save'])) return 'SETTINGS_FORM'
-
-  return 'GENERIC_PAGE'
+  switch (surface) {
+    case 'APPROVAL': return 'WORKFLOW_STEP'
+    case 'DETAIL': return 'DETAIL_PAGE'
+    case 'UPLOAD': return 'UPLOAD_FORM'
+    case 'FORM': return 'EDIT_FORM'
+    case 'DASHBOARD': return 'DASHBOARD'
+    case 'CONFIG': return 'SETTINGS_FORM'
+    case 'PORTAL': return 'DASHBOARD'
+    case 'WIZARD': return 'EDIT_FORM'
+    case 'SEARCH_LIST': return 'SEARCH_LIST'
+    case 'LIST': return 'CRUD_LIST'
+    default: return 'GENERIC_PAGE'
+  }
 }
 
 export function resolveThemeProfile(

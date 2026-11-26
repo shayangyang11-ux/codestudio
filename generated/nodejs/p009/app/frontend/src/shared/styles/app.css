@@ -1,0 +1,207 @@
+:root {
+  color: #0f172a;
+  background: #eef4ff;
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; min-width: 1180px; min-height: 100vh; background: #eef4ff; }
+
+button, input, select, textarea { font: inherit; }
+
+.app-shell {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #eef4ff 0%, #f8fafc 100%);
+}
+
+.app-shell.layout-sidebar {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+}
+
+.app-shell.layout-top-nav,
+.app-shell.layout-action-hub,
+.app-shell.layout-no-nav {
+  display: block;
+}
+
+.app-sidebar {
+  padding: 28px 22px;
+  color: #e2e8f0;
+  background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+  min-height: 100vh;
+}
+
+.app-sidebar strong,
+.app-topbar strong {
+  display: block;
+  font-size: 19px;
+  color: inherit;
+}
+
+.app-sidebar span,
+.app-topbar span {
+  display: block;
+  margin-top: 8px;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.app-sidebar nav {
+  display: grid;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.app-sidebar button,
+.app-topbar button,
+.module-action-bar button {
+  border: 1px solid rgba(37, 99, 235, .22);
+  border-radius: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.app-sidebar button {
+  text-align: left;
+  background: rgba(255,255,255,.08);
+  color: #e2e8f0;
+  border-color: rgba(255,255,255,.16);
+}
+
+.app-sidebar button:hover,
+.app-sidebar button.active {
+  background: rgba(37, 99, 235, .85);
+  color: #fff;
+  border-color: rgba(255,255,255,.25);
+}
+
+.shell-hint {
+  margin-top: 24px;
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.app-main {
+  min-width: 0;
+}
+
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 28px;
+  background: rgba(255, 255, 255, .92);
+  border-bottom: 1px solid #dbeafe;
+  backdrop-filter: blur(14px);
+}
+
+.app-topbar nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.app-topbar button {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.app-topbar button.active,
+.app-topbar button:hover,
+.module-action-bar button:hover {
+  background: #2563eb;
+  color: #fff;
+}
+
+.app-action-hub {
+  padding: 28px 28px 0;
+}
+
+.app-action-hub > div,
+.module-action-bar,
+.generated-hero,
+.generated-card,
+.ucg-card {
+  border: 1px solid #dbeafe;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, .92);
+  box-shadow: 0 18px 45px rgba(15,23,42,.08);
+}
+
+.app-action-hub > div {
+  padding: 24px;
+}
+
+.app-action-hub small,
+.module-action-bar small {
+  color: #2563eb;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.app-action-hub h1 {
+  margin: 6px 0;
+}
+
+.module-action-bar {
+  margin: 24px 28px 0;
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.module-action-bar strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 18px;
+}
+
+.module-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.module-action-bar button {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.app-content {
+  min-width: 0;
+  padding: 28px;
+}
+
+.generated-home { display: grid; gap: 18px; }
+
+.generated-hero { padding: 28px; background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%); }
+
+.generated-hero h1 { margin: 8px 0 8px; font-size: 30px; }
+
+.generated-hero p { margin: 0; color: #64748b; }
+
+.generated-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+
+.generated-card { padding: 20px; background: #fff; }
+
+.generated-card small { color: #2563eb; font-weight: 900; }
+
+.generated-card strong { display: block; margin-top: 8px; font-size: 24px; }
+
+.generated-card span { color: #64748b; }
+
+.ucg-page { display: grid; gap: 18px; color: #0f172a; }
+.ucg-message { padding: 12px 14px; border-radius: 14px; background: #ecfdf5; color: #047857; font-weight: 800; }

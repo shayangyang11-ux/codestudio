@@ -12,6 +12,8 @@ export interface ModuleTreeNode {
   children?: ModuleTreeNode[]
 
   pageKind?: string
+  pageName?: string
+  pageKey?: string
   routePath?: string
   layoutType?: string
   primaryEntity?: string

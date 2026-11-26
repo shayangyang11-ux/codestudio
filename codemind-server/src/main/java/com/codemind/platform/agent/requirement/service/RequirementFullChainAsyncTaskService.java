@@ -155,6 +155,13 @@ public class RequirementFullChainAsyncTaskService {
         requestPayload.put("created_by_display_name", currentUser.displayName());
         requestPayload.put("orchestration_type", "FULL_CHAIN");
         requestPayload.put("orchestration_order", definition.order());
+        if ("GENERATE_MODULE_PRD".equals(definition.taskType().name())) {
+            requestPayload.put("autoMaterializeFeaturePageFromModulePrd", true);
+            requestPayload.put("auto_materialize_feature_page_from_module_prd", true);
+            requestPayload.put("fullRequirementBlueprintMode", "AUTO_MODULE_PRD_TO_FEATURE_PAGE");
+            requestPayload.put("full_requirement_blueprint_mode", "AUTO_MODULE_PRD_TO_FEATURE_PAGE");
+        }
+
 
         if (workspaceId != null) {
             requestPayload.put("workspace_id", workspaceId.toString());

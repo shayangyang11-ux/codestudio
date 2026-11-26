@@ -105,6 +105,7 @@
                     :key="runtimeContractKey"
                     :contract="contract"
                     :project-theme-profile="projectThemeProfile"
+                    :initial-row-context="activePrototypeRowContext"
                     :navigate-request="handlePrototypeNavigate"
                     display-mode="artboard"
                     @prototype-action="handlePrototypeAction"
@@ -439,6 +440,8 @@ const firstPage = computed<PreviewRecord | null>(() => {
 
 const activePrototypeContract = ref<PreviewContract | null>(null)
 const prototypeContractCache = ref<Record<string, PreviewContract>>({})
+const prototypeRuntimeDataSession = ref<Record<string, unknown>>({})
+const activePrototypeRowContext = ref<Record<string, unknown> | null>(null)
 const prototypeNavigationLoading = ref(false)
 const prototypeNavigationError = ref('')
 const activePrototypeNodeId = ref<string | null>(null)
@@ -688,6 +691,8 @@ type PrototypeNavigatePayload = {
   targetPageKey?: string | null
   targetPageName?: string | null
   route?: string | null
+  runtimeDataPatch?: Record<string, unknown> | null
+  rowContext?: Record<string, unknown> | null
 }
 
 type PrototypeActionPayload = {
@@ -736,6 +741,10 @@ async function handlePrototypeNavigate(
   }
 
   prototypeNavigationError.value = ''
+  mergePrototypeRuntimeDataPatch(payload.runtimeDataPatch)
+  activePrototypeRowContext.value = payload.rowContext && typeof payload.rowContext === 'object'
+    ? deepClonePreviewRecord(payload.rowContext)
+    : null
 
   return navigateToPrototypeTarget(payload)
 }
@@ -876,7 +885,8 @@ async function activatePrototypePage(
     )
 
   if (cached) {
-    activePrototypeContract.value = cached
+    const nextCached = applyPrototypeRuntimeDataSession(cached)
+    activePrototypeContract.value = nextCached
     activePrototypeNodeId.value = descriptor.nodeId
     activeTab.value = 'runtime'
 
@@ -888,17 +898,17 @@ async function activatePrototypePage(
       code: 'SUCCESS',
       message: `已切换到：${descriptor.pageName}`,
       targetPageId:
-        cached.page?.pageId ||
+        nextCached.page?.pageId ||
         descriptor.pageId ||
         descriptor.nodeId,
       targetPageKey:
-        cached.page?.pageKey ||
+        nextCached.page?.pageKey ||
         descriptor.pageKey,
       targetPageName:
-        cached.page?.pageName ||
+        nextCached.page?.pageName ||
         descriptor.pageName,
       route:
-        cached.page?.route ||
+        nextCached.page?.route ||
         descriptor.route,
     }
   }
@@ -954,13 +964,15 @@ async function activatePrototypePage(
       }
     }
 
-    cachePrototypeContract(nextContract)
+    const nextContractWithSession = applyPrototypeRuntimeDataSession(nextContract)
+
+    cachePrototypeContract(nextContractWithSession)
     cachePrototypeContractForNodeId(
       descriptor.nodeId,
-      nextContract,
+      nextContractWithSession,
     )
 
-    activePrototypeContract.value = nextContract
+    activePrototypeContract.value = nextContractWithSession
     activePrototypeNodeId.value = descriptor.nodeId
     activeTab.value = 'runtime'
 
@@ -971,19 +983,19 @@ async function activatePrototypePage(
       ok: true,
       code: 'SUCCESS',
       message:
-        `已切换到：${nextContract.page.pageName || descriptor.pageName}`,
+        `已切换到：${nextContractWithSession.page.pageName || descriptor.pageName}`,
       targetPageId:
-        nextContract.page.pageId ||
+        nextContractWithSession.page.pageId ||
         descriptor.pageId ||
         descriptor.nodeId,
       targetPageKey:
-        nextContract.page.pageKey ||
+        nextContractWithSession.page.pageKey ||
         descriptor.pageKey,
       targetPageName:
-        nextContract.page.pageName ||
+        nextContractWithSession.page.pageName ||
         descriptor.pageName,
       route:
-        nextContract.page.route ||
+        nextContractWithSession.page.route ||
         descriptor.route,
     }
   } catch (error) {
@@ -1408,6 +1420,40 @@ function normalizePreviewContractCandidate(
         ? candidate.assumptions
         : [],
   } as unknown as PreviewContract
+}
+
+function mergePrototypeRuntimeDataPatch(
+  patch?: Record<string, unknown> | null,
+) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return
+
+  prototypeRuntimeDataSession.value = {
+    ...prototypeRuntimeDataSession.value,
+    ...deepClonePreviewRecord(patch),
+  }
+}
+
+function applyPrototypeRuntimeDataSession(
+  value: PreviewContract,
+): PreviewContract {
+  const session = prototypeRuntimeDataSession.value
+  if (!session || !Object.keys(session).length) return value
+
+  const cloned = deepClonePreviewRecord(value) as PreviewContract
+  cloned.mockData = {
+    ...(cloned.mockData || {}),
+    ...deepClonePreviewRecord(session),
+  }
+  return cloned
+}
+
+function deepClonePreviewRecord<T>(value: T): T {
+  if (value === null || value === undefined) return value
+  try {
+    return JSON.parse(JSON.stringify(value)) as T
+  } catch {
+    return value
+  }
 }
 
 function cachePrototypeContract(

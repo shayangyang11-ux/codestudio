@@ -2,6 +2,7 @@
   <div
     class="runtime-shell"
     @mousemove.capture="handlePrototypeInspectPointerMove"
+    @mousedown.capture="handlePrototypeInspectPointerDown"
     @click.capture="handlePrototypeInspectClick"
     @mouseleave="clearPrototypeInspectHover"
     :class="[
@@ -13,6 +14,8 @@
         'runtime-shell--inspect': props.inspectComponentMode,
       },
     ]"
+    :data-ui-runtime-renderer="runtimeRendererName"
+    :data-ui-runtime-mode="props.displayMode"
     :style="themeVars"
   >
     <div
@@ -164,7 +167,7 @@
           </div>
 
           <div class="header-actions">
-            <button @click="resetRuntime">
+            <button @click="resetRuntime(true)">
               重置 Mock
             </button>
           </div>
@@ -377,7 +380,7 @@ import {
   watch,
   nextTick,
 } from 'vue'
-import UiContractRuntimeNode from './UiContractRuntimeNode.vue'
+import UiContractRuntimeNode from './ui-contract-runtime/ElementPlusUiContractRuntimeNode.vue'
 import UiContractPatternRenderer from './ui-contract-runtime/UiContractPatternRenderer.vue'
 import {
   getThemeCssVars,
@@ -401,6 +404,8 @@ const props = withDefaults(
     focusComponentId?: string | null
     focusElementSelection?: Record<string, unknown> | null
     inspectComponentMode?: boolean
+    initialRowContext?: RuntimeRow | null
+    initialRuntimeDataSession?: Record<string, unknown> | null
     navigateRequest?: (
       payload: PrototypeNavigatePayload,
     ) => Promise<PrototypeNavigationResult> | PrototypeNavigationResult
@@ -411,6 +416,8 @@ const props = withDefaults(
     focusComponentId: null,
     focusElementSelection: null,
     inspectComponentMode: false,
+    initialRowContext: null,
+    initialRuntimeDataSession: null,
   },
 )
 
@@ -428,6 +435,10 @@ interface ExecutePayload {
   actionId: string
   componentId: string
   row?: RuntimeRow
+  label?: string
+  dataBindingKey?: string
+  tableComponentId?: string
+  sourceComponentType?: string
 }
 
 interface PrototypeNavigatePayload {
@@ -438,6 +449,8 @@ interface PrototypeNavigatePayload {
   targetPageKey?: string | null
   targetPageName?: string | null
   route?: string | null
+  runtimeDataPatch?: Record<string, unknown> | null
+  rowContext?: RuntimeRow | null
 }
 
 interface PrototypeActionPayload {
@@ -459,6 +472,8 @@ interface PrototypeElementSelectionPayload {
   columnKey?: string
   tabKey?: string
   textKey?: string
+  textRole?: string
+  inspectPrecision?: string
 }
 
 interface PrototypeNavigationResult {
@@ -501,9 +516,31 @@ watch(
     )
 
     lockRuntimeComponent(String(componentId || ''), false, target)
-    focusRuntimeComponent(String(componentId || ''), target)
+
+    // A9.10.14.4.3.15.6.24G8_FOCUS_INLINE_NEAREST
+    // Inspect mode selection must not call scrollIntoView, otherwise selecting
+    // right-side buttons horizontally scrolls the artboard and shifts the page.
+    if (!props.inspectComponentMode) {
+      focusRuntimeComponent(String(componentId || ''), target)
+    }
   },
   { immediate: true },
+)
+
+watch(
+  () => props.initialRowContext,
+  () => {
+    applyInitialRowContextToForms()
+  },
+  { deep: true },
+)
+
+watch(
+  () => props.initialRuntimeDataSession,
+  () => {
+    applyInitialRuntimeDataSession()
+  },
+  { deep: true },
 )
 
 const scenarioMode = ref<ScenarioMode>('SUCCESS')
@@ -543,10 +580,12 @@ const formValues = reactive<Record<string, unknown>>({})
 const initialFormValues = reactive<Record<string, unknown>>({})
 const fieldErrors = reactive<Record<string, string>>({})
 const runtimeData = reactive<Record<string, unknown>>({})
+const runtimeDataSession = reactive<Record<string, unknown>>({})
 const activeTabs = reactive<Record<string, string>>({})
 const toasts = ref<RuntimeToast[]>([])
 
 const isArtboardMode = computed(() => props.displayMode === 'artboard')
+const runtimeRendererName = computed(() => isArtboardMode.value ? 'ant-design-vue' : 'legacy-workbench')
 const runtimeContext = computed(() =>
   resolveUiRuntimeContext(
     props.contract,
@@ -724,6 +763,70 @@ watch(
   },
 )
 
+
+// A9.10.14.4.3.15.6.24G5_SELECTION_SCROLL_LOCK
+type PrototypeHorizontalScrollSnapshot = Array<{
+  element: HTMLElement
+  scrollLeft: number
+}>
+
+function capturePrototypeHorizontalScroll(source?: EventTarget | null): PrototypeHorizontalScrollSnapshot {
+  if (typeof document === 'undefined') return []
+
+  const root = source instanceof HTMLElement
+    ? source.closest('.runtime-shell') as HTMLElement | null
+    : null
+
+  const selectors = [
+    '.runtime-shell',
+    '.runtime-shell--artboard',
+    '.artboard-runtime-main',
+    '.pattern-runtime',
+    '.business-page',
+    '.business-body',
+    '.module-app-artboard-host',
+    '.module-app-artboard-scale',
+    '.module-app-shell',
+    '.module-app-content',
+  ]
+
+  const bucket = new Set<HTMLElement>()
+
+  for (const selector of selectors) {
+    if (root?.matches(selector)) {
+      bucket.add(root)
+    }
+
+    root?.querySelectorAll(selector).forEach((element) => {
+      if (element instanceof HTMLElement) {
+        bucket.add(element)
+      }
+    })
+
+    document.querySelectorAll(selector).forEach((element) => {
+      if (element instanceof HTMLElement) {
+        bucket.add(element)
+      }
+    })
+  }
+
+  return Array.from(bucket)
+    .filter((element) => element.scrollWidth > element.clientWidth || element.scrollLeft !== 0)
+    .map((element) => ({
+      element,
+      scrollLeft: element.scrollLeft,
+    }))
+}
+
+function restorePrototypeHorizontalScroll(snapshot: PrototypeHorizontalScrollSnapshot) {
+  for (const item of snapshot) {
+    item.element.scrollLeft = item.scrollLeft
+  }
+
+  forcePrototypeInspectHorizontalZero()
+}
+
+
 function handlePrototypeInspectPointerMove(event: MouseEvent) {
   if (!props.inspectComponentMode) {
     return
@@ -744,7 +847,8 @@ function handlePrototypeInspectPointerMove(event: MouseEvent) {
 }
 
 
-function handlePrototypeInspectClick(event: MouseEvent) {
+
+function handlePrototypeInspectPointerDown(event: MouseEvent) {
   if (!props.inspectComponentMode) {
     return
   }
@@ -752,6 +856,84 @@ function handlePrototypeInspectClick(event: MouseEvent) {
   const target = resolvePrototypeInspectTarget(event)
 
   if (!target) {
+    return
+  }
+
+  const snapshot = capturePrototypeHorizontalScroll(event.target)
+  event.preventDefault()
+
+  restorePrototypeHorizontalScroll(snapshot)
+
+  window.requestAnimationFrame(() => {
+    restorePrototypeHorizontalScroll(snapshot)
+  })
+}
+
+
+// A9.10.14.4.3.15.6.24G7_ADMIN_SELECTION_SCROLL_ROOTFIX
+function forcePrototypeInspectHorizontalZero(source?: EventTarget | null) {
+  if (typeof document === 'undefined') return
+
+  const root = source instanceof HTMLElement
+    ? source.closest('.runtime-shell') as HTMLElement | null
+    : null
+
+  const selectors = [
+    '.runtime-shell',
+    '.runtime-shell--artboard',
+    '.artboard-runtime-main',
+    '.pattern-runtime',
+    '.business-page',
+    '.business-body',
+    '.a9-admin-page',
+    '.a9-admin-card',
+    '.a9-admin-table-card',
+    '.el-table__body-wrapper',
+    '.el-table__header-wrapper',
+    '.el-scrollbar__wrap',
+    '.module-app-runtime',
+    '.module-app-shell-page',
+    '.module-app-shell',
+  ]
+
+  const bucket = new Set<HTMLElement>()
+
+  for (const selector of selectors) {
+    if (root?.matches(selector)) {
+      bucket.add(root)
+    }
+
+    root?.querySelectorAll(selector).forEach((element) => {
+      if (element instanceof HTMLElement) {
+        bucket.add(element)
+      }
+    })
+
+    document.querySelectorAll(selector).forEach((element) => {
+      if (element instanceof HTMLElement) {
+        bucket.add(element)
+      }
+    })
+  }
+
+  for (const element of bucket) {
+    if (element.scrollLeft !== 0) {
+      element.scrollLeft = 0
+    }
+  }
+}
+
+
+function handlePrototypeInspectClick(event: MouseEvent) {
+  if (!props.inspectComponentMode) {
+    return
+  }
+
+  const horizontalScrollSnapshot = capturePrototypeHorizontalScroll(event.target)
+  const target = resolvePrototypeInspectTarget(event)
+
+  if (!target) {
+    restorePrototypeHorizontalScroll(horizontalScrollSnapshot)
     return
   }
 
@@ -763,6 +945,20 @@ function handlePrototypeInspectClick(event: MouseEvent) {
   lockRuntimeComponent(target.dataset.uiComponentId || '', true, target)
 
   emit('selectComponent', buildPrototypeElementSelectionPayload(target) as any)
+  forcePrototypeInspectHorizontalZero(event.target)
+
+  window.requestAnimationFrame(() => {
+    forcePrototypeInspectHorizontalZero(event.target)
+  })
+
+  window.setTimeout(() => {
+    forcePrototypeInspectHorizontalZero(event.target)
+  }, 0)
+  restorePrototypeHorizontalScroll(horizontalScrollSnapshot)
+
+  window.requestAnimationFrame(() => {
+    restorePrototypeHorizontalScroll(horizontalScrollSnapshot)
+  })
 }
 
 
@@ -813,13 +1009,122 @@ function resolveFocusedPrototypeElement(
 
   const base = `[data-ui-component-id="${escapeCssSelectorValue(normalizedComponentId)}"]`
 
+  // A9.10.14.4.3.15.6.24J7C_COLUMN_FOCUS_COMPOSITE_KEY
+  // Focus replay must use composite identity.
+  // Column labels all share data-ui-text-key="columnLabel"; querying textKey first
+  // returns the first column. Always prefer componentId + columnKey + kind/textKey.
+  if (record) {
+    const kind = selectionString(record.elementKind).toUpperCase()
+    const columnKey = selectionString(record.columnKey)
+    const actionId = selectionString(record.actionId)
+    const fieldKey = selectionString(record.fieldKey)
+    const tabKey = selectionString(record.tabKey)
+    const textKey = selectionString(record.textKey)
+    const textRole = selectionString(record.textRole)
+    const rowIndex = selectionString(record.rowIndex)
+
+    if (columnKey) {
+      const columnSelector = `${base}[data-ui-column-key="${escapeCssSelectorValue(columnKey)}"]`
+
+      if (
+        kind.includes('COLUMN_LABEL') ||
+        textKey === 'columnLabel' ||
+        textRole === 'label'
+      ) {
+        const labelTarget = document.querySelector(
+          `${columnSelector}[data-ui-element-kind="TABLE_COLUMN_LABEL"], ${columnSelector}[data-ui-text-key="columnLabel"]`,
+        ) as HTMLElement | null
+
+        if (labelTarget) {
+          return labelTarget
+        }
+      }
+
+      if (kind.includes('TABLE_CELL') || kind.includes('CELL')) {
+        const cellTarget = document.querySelector(
+          `${columnSelector}[data-ui-element-kind="TABLE_CELL"]`,
+        ) as HTMLElement | null
+
+        if (cellTarget) {
+          return cellTarget
+        }
+      }
+
+      const columnTarget = document.querySelector(
+        `${columnSelector}[data-ui-element-kind="TABLE_COLUMN"]`,
+      ) as HTMLElement | null
+
+      if (columnTarget) {
+        return columnTarget
+      }
+
+      const fallbackColumnTarget = document.querySelector(columnSelector) as HTMLElement | null
+      if (fallbackColumnTarget) {
+        return fallbackColumnTarget
+      }
+    }
+
+    if (kind.includes('TABLE_ROW')) {
+      const rowSelector = rowIndex
+        ? `${base}[data-ui-element-kind="TABLE_ROW"][data-ui-row-index="${escapeCssSelectorValue(rowIndex)}"]`
+        : `${base}[data-ui-element-kind="TABLE_ROW"]`
+      const rowTarget = document.querySelector(rowSelector) as HTMLElement | null
+
+      if (rowTarget) {
+        return rowTarget
+      }
+    }
+
+    if (actionId) {
+      const actionSelector = `${base}[data-ui-action-id="${escapeCssSelectorValue(actionId)}"]`
+      const kindActionTarget = kind
+        ? document.querySelector(`${actionSelector}[data-ui-element-kind="${escapeCssSelectorValue(kind)}"]`) as HTMLElement | null
+        : null
+
+      if (kindActionTarget) {
+        return kindActionTarget
+      }
+
+      const actionTarget = document.querySelector(actionSelector) as HTMLElement | null
+      if (actionTarget) {
+        return actionTarget
+      }
+    }
+
+    if (fieldKey) {
+      const fieldSelector = `${base}[data-ui-field-key="${escapeCssSelectorValue(fieldKey)}"]`
+      const kindFieldTarget = kind
+        ? document.querySelector(`${fieldSelector}[data-ui-element-kind="${escapeCssSelectorValue(kind)}"]`) as HTMLElement | null
+        : null
+
+      if (kindFieldTarget) {
+        return kindFieldTarget
+      }
+
+      const fieldTarget = document.querySelector(fieldSelector) as HTMLElement | null
+      if (fieldTarget) {
+        return fieldTarget
+      }
+    }
+
+    if (tabKey) {
+      const tabTarget = document.querySelector(
+        `${base}[data-ui-tab-key="${escapeCssSelectorValue(tabKey)}"]`,
+      ) as HTMLElement | null
+
+      if (tabTarget) {
+        return tabTarget
+      }
+    }
+  }
+
   const preciseAttrs: Array<[string, string]> = [
-    ['textKey', 'data-ui-text-key'],
-    ['textRole', 'data-ui-text-role'],
     ['fieldKey', 'data-ui-field-key'],
     ['actionId', 'data-ui-action-id'],
     ['columnKey', 'data-ui-column-key'],
     ['tabKey', 'data-ui-tab-key'],
+    ['textKey', 'data-ui-text-key'],
+    ['textRole', 'data-ui-text-role'],
   ]
 
   if (record) {
@@ -887,6 +1192,64 @@ function resolveDirectPrototypePickTarget(rawTarget: HTMLElement): HTMLElement |
   return null
 }
 
+
+// A9.10.14.4.3.15.6.24J7B_TABLE_HIT_TEST_MODEL
+function resolveTableSemanticInspectTarget(
+  event: MouseEvent,
+  rawTarget: HTMLElement,
+): HTMLElement | null {
+  const row = rawTarget.closest('.a9-admin-table .el-table__body-wrapper tr') as HTMLElement | null
+
+  if (!row) {
+    return null
+  }
+
+  // If the pointer is really on a selectable text/tag/button, direct target
+  // already returned above. Reaching here means user clicked row/cell blank area.
+  const owner = row.querySelector('[data-ui-component-id]') as HTMLElement | null
+  const componentId = String(owner?.dataset.uiComponentId || '').trim()
+
+  if (!componentId) {
+    return null
+  }
+
+  const siblings = Array.from(row.parentElement?.children || []).filter((item) =>
+    item instanceof HTMLElement && item.tagName.toUpperCase() === 'TR',
+  )
+  const rowIndex = Math.max(0, siblings.indexOf(row)) + 1
+  const componentType = String(owner?.dataset.uiComponentType || '').trim()
+
+  row.dataset.uiSelectable = 'true'
+  row.dataset.uiElementKind = 'TABLE_ROW'
+  row.dataset.uiComponentId = componentId
+  row.dataset.uiComponentType = componentType
+  row.dataset.uiElementLabel = `表格行模板 · 第${rowIndex}行`
+  row.dataset.uiRowIndex = String(rowIndex)
+
+  return row
+}
+
+
+// A9.10.14.4.3.15.6.24J7F_MOCK_CELL_NOT_SELECTABLE
+function isMockTableCellValueTarget(rawTarget: HTMLElement): boolean {
+  const mockValue = rawTarget.closest('[data-ui-mock-value="true"], .a9-admin-cell-mock-value') as HTMLElement | null
+
+  if (!mockValue) {
+    return false
+  }
+
+  if (!mockValue.closest('.a9-admin-table .el-table__body-wrapper')) {
+    return false
+  }
+
+  // Row action buttons are real prototype actions, not mock values.
+  if (rawTarget.closest('[data-ui-element-kind="TABLE_ACTION"], button, .el-button')) {
+    return false
+  }
+
+  return true
+}
+
 function resolvePrototypeInspectTargetBase(event: Event): HTMLElement | null {
   if (!props.inspectComponentMode) {
     return null
@@ -902,9 +1265,23 @@ function resolvePrototypeInspectTargetBase(event: Event): HTMLElement | null {
     return rawTarget.closest('[data-ui-selectable="true"], [data-ui-component-id]') as HTMLElement | null
   }
 
+  // A9.10.14.4.3.15.6.24J7F_MOCK_CELL_NOT_SELECTABLE
+  // Mock cell text is generated preview data. Clicking it should not select a fake data value.
+  if (isMockTableCellValueTarget(rawTarget)) {
+    return null
+  }
+
   const directTarget = resolveDirectPrototypePickTarget(rawTarget)
   if (directTarget) {
     return directTarget
+  }
+
+  // A9.10.14.4.3.15.6.24J7B_TABLE_HIT_TEST_MODEL
+  // Element Plus <tr> does not carry data-ui-selectable.
+  // If user clicks row blank area, synthesize TABLE_ROW on the real row element.
+  const tableSemanticTarget = resolveTableSemanticInspectTarget(event, rawTarget)
+  if (tableSemanticTarget) {
+    return tableSemanticTarget
   }
 
   const runtimeRoot = rawTarget.closest('.runtime-shell') as HTMLElement | null
@@ -1192,8 +1569,14 @@ function eventSelectionPrecisionHint(target: HTMLElement): string {
   if (target.dataset.uiActionId || ['BUTTON', 'ACTION'].includes(kind) || target.tagName.toUpperCase() === 'BUTTON') {
     return 'ACTION'
   }
+  if (kind === 'TABLE_ROW') {
+    return 'TABLE_ROW'
+  }
+  if (kind === 'TABLE_COLUMN_LABEL') {
+    return 'TABLE_COLUMN_LABEL'
+  }
   if (target.dataset.uiColumnKey) {
-    return 'TABLE_COLUMN'
+    return kind === 'TABLE_CELL' ? 'TABLE_CELL' : 'TABLE_COLUMN'
   }
   if (target.dataset.uiFieldKey) {
     return 'FIELD'
@@ -1218,7 +1601,9 @@ function normalizePrototypeElementKindLabel(kind: unknown): string {
     SECONDARY_ACTION: '次按钮',
     ROW_ACTION: '行操作',
     TABLE_COLUMN: '表格列',
+    TABLE_COLUMN_LABEL: '列名',
     TABLE_CELL: '单元格',
+    TABLE_ROW: '表格行',
     TAB: '标签页',
     TEXT: '文案',
     TITLE: '标题',
@@ -1329,7 +1714,7 @@ function clearPrototypeInspectHover() {
   inspectHoverElement.value = null
 }
 
-function resetRuntime() {
+function resetRuntime(clearSession = false) {
   clearPrototypeInspectSelection()
   clearRecord(formValues)
   clearRecord(initialFormValues)
@@ -1337,7 +1722,13 @@ function resetRuntime() {
   clearRecord(runtimeData)
   clearRecord(activeTabs)
 
+  if (clearSession) {
+    clearRecord(runtimeDataSession)
+  }
+
   Object.assign(runtimeData, deepClone(props.contract.mockData || {}))
+  applyInitialRuntimeDataSession()
+  mergeRuntimeDataSessionIntoCurrentPage()
 
   for (const component of Object.values(componentMap.value)) {
     for (const field of component.fields || []) {
@@ -1350,6 +1741,8 @@ function resetRuntime() {
       activeTabs[component.componentId] = component.tabs[0].tabKey
     }
   }
+
+  applyInitialRowContextToForms()
 
   currentRoute.value = props.contract.page.route
   currentPageStateKey.value =
@@ -1382,6 +1775,29 @@ function handleSwitchTab(
   activeTabs[payload.componentId] = payload.tabKey
 }
 
+function applyInitialRuntimeDataSession() {
+  const session = props.initialRuntimeDataSession
+  if (!session || typeof session !== 'object' || Array.isArray(session)) return
+
+  Object.assign(runtimeData, deepClone(session))
+  Object.assign(runtimeDataSession, deepClone(session))
+}
+
+function applyInitialRowContextToForms() {
+  const row = props.initialRowContext
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return
+
+  for (const component of Object.values(componentMap.value)) {
+    for (const field of component.fields || []) {
+      if (!(field.fieldKey in row)) continue
+      const value = deepClone(row[field.fieldKey])
+      formValues[field.fieldKey] = value
+      initialFormValues[field.fieldKey] = deepClone(value)
+      delete fieldErrors[field.fieldKey]
+    }
+  }
+}
+
 async function handleExecute(
   payload: ExecutePayload,
 ) {
@@ -1400,9 +1816,9 @@ async function executeAction(
 
   visited.add(actionId)
 
-  const action = props.contract.interactions.find(
-    (item) => item.actionId === actionId,
-  )
+  const action =
+    props.contract.interactions.find((item) => item.actionId === actionId) ||
+    buildA924L2AFallbackAction(actionId, context)
 
   if (!action) {
     showToast(`动作不存在：${actionId}`, 'ERROR')
@@ -1436,10 +1852,11 @@ async function executeAction(
       }
       const succeeded = await runScenario(action, context, visited)
       if (succeeded) {
-        applyRuntimeMockMutation(action, context)
+        const mutatedRow = applyRuntimeMockMutation(action, context)
         if (action.payload?.closeModalOnSuccess !== false) {
           closeModal()
         }
+        await navigateAfterSubmit(action, context, mutatedRow)
       }
       break
     }
@@ -1459,7 +1876,7 @@ async function executeAction(
       break
 
     case 'NAVIGATE':
-      await navigateTo(action)
+      await navigateTo(action, context)
       break
 
     case 'SHOW_TOAST':
@@ -1494,6 +1911,7 @@ async function executeAction(
 
     case 'QUERY_DATA':
       await runScenario(action, context, visited)
+      applyA924L2AQueryFilter(action)
       break
 
     case 'DELETE_ROW': {
@@ -1600,7 +2018,7 @@ async function runScenario(
   const scenario = selectScenario(action)
 
   if (!scenario) {
-    showToast(action.label || 'Mock 操作已完成。', 'SUCCESS')
+    showToast(action.label || '演示操作已完成。', 'SUCCESS')
     await executeChainedActions(
       action.successActionIds || [],
       context,
@@ -1651,7 +2069,7 @@ async function runScenario(
 
   showToast(
     scenario.message ||
-      (scenario.outcome === 'SUCCESS' ? 'Mock 操作成功。' : 'Mock 操作失败。'),
+      (scenario.outcome === 'SUCCESS' ? '演示操作成功。' : '演示操作失败。'),
     scenario.outcome === 'SUCCESS' ? 'SUCCESS' : 'ERROR',
   )
 
@@ -1781,64 +2199,121 @@ function closeModal() {
 function applyRuntimeMockMutation(
   action: UiContractInteraction,
   context: ExecutePayload,
-) {
+): RuntimeRow | null {
   const effect = String(
     action.payload?.runtimeEffect ||
       action.payload?.mockEffect ||
       '',
   ).toUpperCase()
 
-  if (!effect) return
+  if (!effect) return null
 
   if (effect === 'ADD_ROW') {
-    addRuntimeRow(action)
-    return
+    return addRuntimeRow(action)
   }
 
   if (effect === 'UPDATE_ROW') {
-    updateRuntimeRow(action, context.row)
-    return
+    return updateRuntimeRow(action, context.row)
   }
+
+  return null
 }
 
 function addRuntimeRow(
   action: UiContractInteraction,
-) {
+): RuntimeRow {
   const bindingKey = resolveRuntimeBindingKey(action)
-  if (!bindingKey) return
-
-  const current = runtimeData[bindingKey]
-  const rows = Array.isArray(current) ? [...current] : []
   const nextRow = buildRuntimeRowFromForms()
   nextRow.id = nextRow.id || nextRow.key || `mock_${Date.now()}`
   nextRow.key = nextRow.key || nextRow.id
-  rows.unshift(nextRow)
-  runtimeData[bindingKey] = rows
-  showToast(String(action.payload?.message || '已新增一条模拟记录，刷新页面后恢复原始数据。'), 'SUCCESS')
+
+  if (!bindingKey) return nextRow
+
+  for (const key of resolveRuntimeMutationBindingKeys(action, bindingKey)) {
+    const current = runtimeData[key]
+    const rows = Array.isArray(current) ? [...current] : []
+    rows.unshift(deepClone(nextRow))
+    runtimeData[key] = rows
+    runtimeDataSession[key] = deepClone(rows)
+  }
+
+  showToast(String(action.payload?.message || '已新增一条演示记录，并同步到目标列表页。'), 'SUCCESS')
+  return nextRow
 }
 
 function updateRuntimeRow(
   action: UiContractInteraction,
   row?: RuntimeRow,
-) {
+): RuntimeRow {
   const bindingKey = resolveRuntimeBindingKey(action)
-  if (!bindingKey || !row) return
-
-  const current = runtimeData[bindingKey]
-  if (!Array.isArray(current)) return
-
-  const identity = rowIdentity(row)
+  const identity = row ? rowIdentity(row) : rowIdentity(buildRuntimeRowFromForms())
   const nextValues = buildRuntimeRowFromForms()
-  runtimeData[bindingKey] = current.map((item) => {
-    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
-      return item
+  let updated = false
+  let mutatedRow: RuntimeRow = row ? { ...row, ...nextValues } : { ...nextValues }
+
+  if (!bindingKey) return mutatedRow
+
+  for (const key of resolveRuntimeMutationBindingKeys(action, bindingKey)) {
+    const current = runtimeData[key]
+    if (!Array.isArray(current)) continue
+
+    const rows = current.map((item) => {
+      if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+        return item
+      }
+      const candidate = item as RuntimeRow
+      if (rowIdentity(candidate) !== identity) return item
+      updated = true
+      mutatedRow = { ...candidate, ...nextValues, id: candidate.id || nextValues.id, key: candidate.key || nextValues.key }
+      return mutatedRow
+    })
+
+    runtimeData[key] = rows
+    runtimeDataSession[key] = deepClone(rows)
+  }
+
+  if (!updated && !row) {
+    const targetKey = resolveRuntimeMutationBindingKeys(action, bindingKey)[0]
+    if (targetKey) {
+      const current = runtimeData[targetKey]
+      const rows = Array.isArray(current) ? [...current] : []
+      const nextRow = { ...nextValues }
+      nextRow.id = nextRow.id || nextRow.key || `mock_${Date.now()}`
+      nextRow.key = nextRow.key || nextRow.id
+      rows.unshift(nextRow)
+      runtimeData[targetKey] = rows
+      runtimeDataSession[targetKey] = deepClone(rows)
+      mutatedRow = nextRow
     }
-    const candidate = item as RuntimeRow
-    return rowIdentity(candidate) === identity
-      ? { ...candidate, ...nextValues, id: candidate.id || nextValues.id, key: candidate.key || nextValues.key }
-      : item
-  })
-  showToast(String(action.payload?.message || '已更新当前模拟记录，刷新页面后恢复原始数据。'), 'SUCCESS')
+  }
+
+  showToast(String(action.payload?.message || '已更新当前演示记录，并同步到目标列表页。'), 'SUCCESS')
+  return mutatedRow
+}
+
+function resolveRuntimeMutationBindingKeys(
+  action: UiContractInteraction,
+  fallback: string,
+): string[] {
+  const payload = action.payload || {}
+  const keys = [
+    payload.targetDataBindingKey,
+    payload.target_data_binding_key,
+    payload.dataBindingKey,
+    action.dataBindingKey,
+    fallback,
+    'rows',
+  ]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+
+  return Array.from(new Set(keys))
+}
+
+function mergeRuntimeDataSessionIntoCurrentPage() {
+  for (const [key, value] of Object.entries(runtimeDataSession)) {
+    runtimeData[key] = deepClone(value)
+  }
 }
 
 function buildRuntimeRowFromForms(): RuntimeRow {
@@ -1852,11 +2327,570 @@ function buildRuntimeRowFromForms(): RuntimeRow {
 function resolveRuntimeBindingKey(
   action: UiContractInteraction,
 ): string {
-  return String(
+  const explicit = String(
     action.payload?.dataBindingKey ||
       action.dataBindingKey ||
       '',
   ).trim()
+
+  if (explicit) {
+    return explicit
+  }
+
+  return resolveA924L2ADefaultBindingKey()
+}
+
+
+
+
+
+
+// A9.10.14.4.3.15.6.24L2A_RUNTIME_DEMO_ACTION_FALLBACK
+// Runtime demo fallback: older or weak UI_CONTRACTs may render buttons with
+// data-ui-action-id but without a complete interaction object. Instead of
+// failing with "动作不存在", infer a safe demo behavior from the action label.
+function buildA924L2AFallbackAction(
+  actionId: string,
+  context: ExecutePayload,
+): UiContractInteraction | null {
+  const label = actionLabelFromRuntime(actionId, context)
+  if (!label) return null
+
+  const bindingKey = String(context.dataBindingKey || '').trim() || resolveA924L2ADefaultBindingKey()
+  const navigationTarget = findA924L2ANavigationTargetForAction(label)
+
+  if (navigationTarget) {
+    return {
+      actionId,
+      label,
+      type: 'NAVIGATE',
+      targetPageId: String(navigationTarget.targetPageId || ''),
+      targetPageKey: String(navigationTarget.targetPageKey || ''),
+      targetPageName: String(navigationTarget.targetPageName || ''),
+      payload: {
+        inferredBy: 'A9.10.14.4.3.15.6.24L2A3',
+        targetPageKey: String(navigationTarget.targetPageKey || ''),
+        targetPageName: String(navigationTarget.targetPageName || ''),
+        route: String(navigationTarget.route || ''),
+      },
+    } as UiContractInteraction
+  }
+
+  if (/查询|搜索|筛选|检索/i.test(label)) {
+    ensureA924L2A3RuntimeRows(bindingKey, context)
+    return {
+      actionId,
+      label,
+      type: 'QUERY_DATA',
+      dataBindingKey: bindingKey,
+      payload: {
+        inferredBy: 'A9.10.14.4.3.15.6.24L2A3',
+      },
+    } as UiContractInteraction
+  }
+
+  if (/重置|清空/i.test(label)) {
+    return {
+      actionId,
+      label,
+      type: 'RESET_FORM',
+      targetId: findA924L2AFirstFormComponentId(),
+      payload: {
+        inferredBy: 'A9.10.14.4.3.15.6.24L2A3',
+        resetBindingKey: bindingKey,
+      },
+    } as UiContractInteraction
+  }
+
+  if (/删除|移除/i.test(label)) {
+    ensureA924L2A3RuntimeRows(bindingKey, context)
+    return {
+      actionId,
+      label,
+      type: 'DELETE_ROW',
+      dataBindingKey: bindingKey,
+      payload: {
+        inferredBy: 'A9.10.14.4.3.15.6.24L2A3',
+        message: '已从当前演示列表中移除该记录，刷新页面后恢复原始数据。',
+      },
+    } as UiContractInteraction
+  }
+
+  if (/保存|确定|确认|提交|状态更新|取消订单|解锁|异常记录/i.test(label)) {
+    ensureA924L2A3RuntimeRows(bindingKey, context)
+    return {
+      actionId,
+      label,
+      type: 'SUBMIT_FORM',
+      targetId: findA924L2AFirstFormComponentId(),
+      dataBindingKey: bindingKey,
+      payload: {
+        inferredBy: 'A9.10.14.4.3.15.6.24L2A3',
+        runtimeEffect: inferA924L2ARuntimeEffect(label),
+        closeModalOnSuccess: true,
+        message: inferA924L2ASubmitMessage(label),
+      },
+    } as UiContractInteraction
+  }
+
+  if (/返回|取消|关闭/i.test(label)) {
+    return {
+      actionId,
+      label,
+      type: activeModalId.value ? 'CLOSE_MODAL' : 'SHOW_TOAST',
+      payload: {
+        inferredBy: 'A9.10.14.4.3.15.6.24L2A3',
+        message: activeModalId.value ? '已关闭当前弹窗。' : '当前页面已完成演示操作。',
+        level: 'INFO',
+      },
+    } as UiContractInteraction
+  }
+
+  return {
+    actionId,
+    label,
+    type: 'SHOW_TOAST',
+    payload: {
+      inferredBy: 'A9.10.14.4.3.15.6.24L2A3',
+      message: `${label} 已完成演示处理。`,
+      level: 'SUCCESS',
+    },
+  } as UiContractInteraction
+}
+
+
+
+
+
+function actionLabelFromRuntime(
+  actionId: string,
+  context: ExecutePayload,
+): string {
+  const fromContext = String(context.label || '').trim()
+  if (fromContext) return fromContext
+
+  const fromInteraction = props.contract.interactions.find((item) => item.actionId === actionId)
+  const fromComponent = actionId
+    ? Object.values(componentMap.value).find((component) =>
+        Array.isArray(component.actionIds) && component.actionIds.includes(actionId),
+      )
+    : null
+
+  const fromDomLabel = findA924L2A3ActionDomLabel(actionId)
+
+  return String(
+    fromInteraction?.label ||
+      fromDomLabel ||
+      fromComponent?.title ||
+      fromComponent?.description ||
+      actionId ||
+      '',
+  ).trim()
+}
+
+
+
+function findA924L2ANavigationTargetForAction(labelInput: string): Record<string, any> | null {
+  const label = String(labelInput || '').trim()
+  const targets = Array.isArray(props.contract.navigationTargets)
+    ? props.contract.navigationTargets
+    : []
+
+  if (!label) return null
+
+  const tokenGroups = a924L2ANavigationTokenGroups(label)
+  const normalizedLabel = comparableRuntimeText(label)
+
+  for (const target of targets) {
+    const hay = comparableRuntimeText([
+      target.label,
+      target.actionLabel,
+      target.targetPageName,
+      target.targetPageKey,
+      target.targetPageId,
+      target.route,
+    ].join(' '))
+
+    if (normalizedLabel && hay.includes(normalizedLabel)) {
+      return target
+    }
+
+    for (const group of tokenGroups) {
+      if (group.some((token) => hay.includes(comparableRuntimeText(token)))) {
+        return target
+      }
+    }
+  }
+
+  const inferredTargetName = inferA924L2ANavigationTargetName(label)
+  if (inferredTargetName && props.navigateRequest) {
+    return {
+      targetPageId: '',
+      targetPageKey: '',
+      targetPageName: inferredTargetName,
+      route: '',
+      source: 'A9.10.14.4.3.15.6.24L2A2_INFERRED_RUNTIME_TARGET',
+    }
+  }
+
+  return null
+}
+
+
+
+function inferA924L2ARuntimeEffect(labelInput: string): 'ADD_ROW' | 'UPDATE_ROW' {
+  const label = String(labelInput || '')
+  const pageText = String(
+    props.contract.page?.pageName ||
+      props.contract.page?.title ||
+      props.contract.page?.pageKey ||
+      '',
+  )
+
+  if (/新增|新建|创建|录入/i.test(label) || /新增|新建|创建|录入/i.test(pageText)) {
+    return 'ADD_ROW'
+  }
+
+  return 'UPDATE_ROW'
+}
+
+function inferA924L2ASubmitMessage(labelInput: string): string {
+  const label = String(labelInput || '')
+  if (/取消订单|作废/i.test(label)) return '已更新当前演示记录状态，并记录本次取消原因。'
+  if (/解锁/i.test(label)) return '已更新当前演示记录状态，并记录本次解锁原因。'
+  if (/异常/i.test(label)) return '已追加当前演示记录的异常说明。'
+  if (/状态/i.test(label)) return '已更新当前演示记录状态。'
+  if (/新增|新建|创建|录入/i.test(label)) return '已新增一条演示记录，刷新页面后恢复原始数据。'
+  return '已保存当前演示记录，刷新页面后恢复原始数据。'
+}
+
+function findA924L2AFirstFormComponentId(): string {
+  for (const component of Object.values(componentMap.value)) {
+    const type = String(component.type || '').toUpperCase()
+    if (type === 'FORM' || type === 'FIELD_GROUP') {
+      return component.componentId
+    }
+  }
+
+  return ''
+}
+
+function resolveA924L2ADefaultBindingKey(): string {
+  const table = findA924L2APrimaryTableComponent()
+
+  if (table) {
+    const key = a924L2ATableBindingKey(table)
+
+    if (key) {
+      ensureA924L2ARuntimeRowsFromTable(table, key)
+      return key
+    }
+  }
+
+  const keys = Object.keys(runtimeData)
+  const arrayKey = keys.find((key) => Array.isArray(runtimeData[key]) && !key.endsWith('__a924L2AOriginalRows'))
+  if (arrayKey) return arrayKey
+
+  const mockData = props.contract.mockData || {}
+  if (mockData && typeof mockData === 'object' && !Array.isArray(mockData)) {
+    const key = Object.keys(mockData).find((item) => Array.isArray((mockData as Record<string, unknown>)[item]))
+    if (key) return key
+  }
+
+  return 'rows'
+}
+
+
+
+function applyA924L2AQueryFilter(action: UiContractInteraction): void {
+  const bindingKey = resolveRuntimeBindingKey(action)
+  if (!bindingKey) return
+
+  const current = runtimeData[bindingKey]
+  if (!Array.isArray(current)) return
+
+  const cacheKey = `${bindingKey}__a924L2AOriginalRows`
+  if (!Array.isArray(runtimeData[cacheKey])) {
+    runtimeData[cacheKey] = deepClone(current)
+  }
+
+  const source = Array.isArray(runtimeData[cacheKey])
+    ? deepClone(runtimeData[cacheKey]) as RuntimeRow[]
+    : deepClone(current) as RuntimeRow[]
+
+  const filters = Object.entries(formValues)
+    .map(([key, value]) => [key, normalizeA924L2AFilterValue(value)] as const)
+    .filter(([, value]) => value)
+
+  if (!filters.length) {
+    runtimeData[bindingKey] = source
+    runtimeData.rows = source
+    showToast('已重置查询条件，展示全部演示数据。', 'INFO')
+    return
+  }
+
+  const filtered = source.filter((row) => {
+    return filters.every(([key, expected]) => rowMatchesA924L2AFilter(row, key, expected))
+  })
+
+  runtimeData[bindingKey] = filtered
+  runtimeData.rows = filtered
+  showToast(`查询完成，命中 ${filtered.length} 条演示记录。`, 'SUCCESS')
+}
+
+
+
+function rowMatchesA924L2AFilter(
+  row: RuntimeRow,
+  key: string,
+  expected: string,
+): boolean {
+  const candidates = expandA924L2AFilterCandidates(expected)
+  const exact = row && typeof row === 'object' ? row[key] : undefined
+
+  if (exact !== undefined && exact !== null) {
+    const exactText = comparableRuntimeText(exact)
+    if (candidates.some((candidate) => exactText.includes(candidate))) {
+      return true
+    }
+  }
+
+  const joined = Object.values(row || {})
+    .map((value) => comparableRuntimeText(value))
+    .join(' ')
+
+  return candidates.some((candidate) => joined.includes(candidate))
+}
+
+
+
+function normalizeA924L2AFilterValue(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (Array.isArray(value)) {
+    return value.map(normalizeA924L2AFilterValue).filter(Boolean).join(' ')
+  }
+
+  return comparableRuntimeText(value)
+}
+
+function comparableRuntimeText(value: unknown): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+}
+
+
+// A9.10.14.4.3.15.6.24L2A2_NAV_AND_QUERY_SOURCE_FIX
+function a924L2ANavigationTokenGroups(labelInput: string): string[][] {
+  const label = String(labelInput || '')
+  const groups: string[][] = []
+
+  if (/新增|新建|创建|录入/i.test(label)) groups.push(['新增', '新建', '创建', '录入', 'create', 'add'])
+  if (/详情|查看详情|查看/i.test(label)) groups.push(['详情', '查看', 'detail', 'view'])
+  if (/编辑|修改/i.test(label)) groups.push(['编辑', '修改', 'edit'])
+  if (/返回/i.test(label)) groups.push(['列表', '查询', '管理', 'list'])
+  if (/日志|记录/i.test(label)) groups.push(['日志', '操作日志', '记录', 'log'])
+  if (/提交|确认|审核|审批/i.test(label)) groups.push(['提交', '确认', '审核', '审批'])
+  if (/取消订单|取消|作废/i.test(label)) groups.push(['取消', '作废'])
+  if (/解锁/i.test(label)) groups.push(['解锁'])
+  if (/状态/i.test(label)) groups.push(['状态'])
+  if (/异常/i.test(label)) groups.push(['异常'])
+
+  return groups
+}
+
+function inferA924L2ANavigationTargetName(labelInput: string): string {
+  const label = String(labelInput || '')
+
+  if (/新增|新建|创建|录入/i.test(label)) return '新建页'
+  if (/详情|查看详情|查看/i.test(label)) return '详情页'
+  if (/编辑|修改/i.test(label)) return '编辑页'
+  if (/返回/i.test(label)) return '列表页'
+  if (/日志|操作日志/i.test(label)) return '操作日志页'
+  if (/提交|确认|审核|审批/i.test(label)) return '提交确认弹窗'
+  if (/取消订单|取消|作废/i.test(label)) return '订单取消确认弹窗'
+  if (/解锁/i.test(label)) return '订单解锁确认弹窗'
+  if (/状态/i.test(label)) return '状态更新弹窗'
+  if (/异常/i.test(label)) return '异常记录弹窗'
+
+  return ''
+}
+
+function resolveA924L2ANavigateTarget(action: UiContractInteraction): Record<string, any> | null {
+  const targets = Array.isArray(props.contract.navigationTargets)
+    ? props.contract.navigationTargets
+    : []
+
+  const actionAny = action as any
+  const payload = (actionAny.payload || {}) as Record<string, any>
+  const wantedId = comparableRuntimeText(action.targetPageId || payload.targetPageId || '')
+  const wantedKey = comparableRuntimeText(actionAny.targetPageKey || payload.targetPageKey || '')
+  const wantedName = comparableRuntimeText(actionAny.targetPageName || payload.targetPageName || inferA924L2ANavigationTargetName(String(action.label || '')))
+  const wantedRoute = comparableRuntimeText(actionAny.route || payload.route || '')
+
+  const matched = targets.find((target) => {
+    const targetId = comparableRuntimeText(target.targetPageId || '')
+    const targetKey = comparableRuntimeText(target.targetPageKey || '')
+    const targetName = comparableRuntimeText(target.targetPageName || '')
+    const targetRoute = comparableRuntimeText(target.route || '')
+
+    return Boolean(
+      (wantedId && targetId === wantedId) ||
+      (wantedKey && targetKey === wantedKey) ||
+      (wantedName && targetName.includes(wantedName)) ||
+      (wantedRoute && targetRoute === wantedRoute),
+    )
+  })
+
+  if (matched) return matched
+
+  if (wantedName || wantedKey || wantedId || wantedRoute) {
+    return {
+      targetPageId: action.targetPageId || payload.targetPageId || '',
+      targetPageKey: actionAny.targetPageKey || payload.targetPageKey || '',
+      targetPageName: actionAny.targetPageName || payload.targetPageName || inferA924L2ANavigationTargetName(String(action.label || '')),
+      route: actionAny.route || payload.route || '',
+      source: 'A9.10.14.4.3.15.6.24L2A2_SYNTHETIC_NAV_TARGET',
+    }
+  }
+
+  return null
+}
+
+function findA924L2APrimaryTableComponent(): UiContractComponent | null {
+  for (const component of Object.values(componentMap.value)) {
+    const type = String((component as any).type || '').toUpperCase()
+    if (['TABLE', 'DATA_TABLE', 'LIST_TABLE'].includes(type)) {
+      return component
+    }
+  }
+
+  return null
+}
+
+function a924L2ATableBindingKey(component: UiContractComponent): string {
+  const record = component as any
+  const componentProps = a924L2APropsOf(component)
+  return String(
+    componentProps.dataKey ||
+    componentProps.mockDataKey ||
+    record.dataKey ||
+    component.componentId ||
+    'rows',
+  ).trim()
+}
+
+function ensureA924L2ARuntimeRowsFromTable(
+  component: UiContractComponent,
+  key: string,
+): void {
+  if (!key || Array.isArray(runtimeData[key])) return
+
+  const rows = a924L2AExtractRowsFromTableComponent(component)
+  if (rows.length) {
+    runtimeData[key] = deepClone(rows)
+  }
+
+  if (key !== 'rows' && !Array.isArray(runtimeData.rows) && rows.length) {
+    runtimeData.rows = deepClone(rows)
+  }
+}
+
+function a924L2AExtractRowsFromTableComponent(component: UiContractComponent): RuntimeRow[] {
+  const record = component as any
+  const componentProps = a924L2APropsOf(component)
+  const candidates = [
+    componentProps.rows,
+    componentProps.data,
+    record.rows,
+    record.data,
+  ]
+
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) continue
+
+    const rows = candidate
+      .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+      .map((item) => ({ ...(item as RuntimeRow) }))
+
+    if (rows.length) return rows
+  }
+
+  return []
+}
+
+function a924L2APropsOf(component: UiContractComponent): Record<string, any> {
+  const record = component as any
+  return {
+    ...(record.props || {}),
+    ...(record.componentProps || {}),
+    ...(record.options || {}),
+  }
+}
+
+function expandA924L2AFilterCandidates(expectedInput: string): string[] {
+  const base = comparableRuntimeText(expectedInput)
+  const result = new Set<string>()
+
+  if (base) result.add(base)
+
+  const groups = [
+    ['已完成', '完成', 'finished', 'complete', 'completed', 'done', 'success', 'closed'],
+    ['处理中', '处理', 'process', 'processing', 'running', 'inprogress'],
+    ['待处理', '待办', 'pending', 'todo', 'waiting'],
+    ['已取消', '取消', 'cancelled', 'canceled', 'void', '作废'],
+    ['异常', 'error', 'exception', 'failed', 'fail'],
+    ['已确认', '确认', 'confirmed', 'approved'],
+  ]
+
+  for (const group of groups) {
+    if (group.some((item) => comparableRuntimeText(item) === base)) {
+      for (const item of group) result.add(comparableRuntimeText(item))
+    }
+  }
+
+  return Array.from(result).filter(Boolean)
+}
+
+// A9.10.14.4.3.15.6.24L2A3_GENERIC_RUNTIME_ACTION_CONTEXT
+function findA924L2A3ActionDomLabel(actionId: string): string {
+  if (!actionId || typeof document === 'undefined') return ''
+
+  const escaped = actionId.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  const el = document.querySelector(`[data-ui-action-id="${escaped}"]`) as HTMLElement | null
+
+  return String(
+    el?.getAttribute('data-ui-element-label') ||
+      el?.textContent ||
+      '',
+  ).trim()
+}
+
+function ensureA924L2A3RuntimeRows(
+  bindingKey: string,
+  context: ExecutePayload,
+): void {
+  if (!bindingKey) return
+  if (Array.isArray(runtimeData[bindingKey]) && runtimeData[bindingKey].length) return
+
+  const tableId = String(context.tableComponentId || '').trim()
+  const table =
+    (tableId && componentMap.value[tableId]) ||
+    findA924L2APrimaryTableComponent()
+
+  if (!table) return
+
+  const rows = a924L2AExtractRowsFromTableComponent(table)
+  if (!rows.length) return
+
+  runtimeData[bindingKey] = deepClone(rows)
+  runtimeData.rows = deepClone(rows)
+
+  const cacheKey = `${bindingKey}__a924L2AOriginalRows`
+  if (!Array.isArray(runtimeData[cacheKey])) {
+    runtimeData[cacheKey] = deepClone(rows)
+  }
 }
 
 function rowIdentity(
@@ -1865,18 +2899,84 @@ function rowIdentity(
   return row.id ?? row.key ?? row.code ?? row.order_no ?? row.inbound_order_no ?? JSON.stringify(row)
 }
 
+async function navigateAfterSubmit(
+  action: UiContractInteraction,
+  context: ExecutePayload,
+  mutatedRow?: RuntimeRow | null,
+): Promise<void> {
+  const afterSubmit = action.payload?.afterSubmit
+  if (!afterSubmit || typeof afterSubmit !== 'object' || Array.isArray(afterSubmit)) return
+
+  const record = afterSubmit as Record<string, unknown>
+  const targetPageId = String(record.targetPageId || record.target_page_id || '').trim()
+  const targetPageKey = String(record.targetPageKey || record.target_page_key || '').trim()
+  const targetPageName = String(record.targetPageName || record.target_page_name || '').trim()
+  const route = String(record.route || '').trim()
+  const targetDataBindingKey = String(
+    record.targetDataBindingKey ||
+      record.target_data_binding_key ||
+      action.payload?.targetDataBindingKey ||
+      action.payload?.target_data_binding_key ||
+      '',
+  ).trim()
+
+  if (!targetPageId && !targetPageKey && !targetPageName && !route) return
+
+  await navigateTo({
+    actionId: `${action.actionId}_after_submit`,
+    type: 'NAVIGATE',
+    label: String(action.label || '保存后返回'),
+    targetPageId: targetPageId || null,
+    dataBindingKey: action.dataBindingKey,
+    payload: {
+      targetPageId,
+      targetPageKey,
+      targetPageName,
+      route,
+      sourceDataBindingKey: action.payload?.sourceDataBindingKey || action.payload?.source_data_binding_key || action.dataBindingKey || '',
+      targetDataBindingKey,
+      runtimeDataPatch: snapshotRuntimeDataPatch(),
+      rowContext: deepClone(mutatedRow || context.row || buildRuntimeRowFromForms()),
+    },
+  } as UiContractInteraction, context)
+}
+
+function snapshotRuntimeDataPatch(): Record<string, unknown> {
+  const patch: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(runtimeDataSession)) {
+    patch[key] = deepClone(value)
+  }
+  return patch
+}
+
+function resolveNavigationRowContext(
+  action: UiContractInteraction,
+  context?: ExecutePayload,
+): RuntimeRow | null {
+  if (action.payload?.rowContext && typeof action.payload.rowContext === 'object') {
+    return deepClone(action.payload.rowContext) as RuntimeRow
+  }
+
+  const shouldCarry = Boolean(
+    action.payload?.rowContext ||
+      action.payload?.carryRowContext ||
+      action.payload?.carry_row_context ||
+      context?.row,
+  )
+
+  if (!shouldCarry || !context?.row) return null
+  return deepClone(context.row)
+}
+
 async function navigateTo(
   action: UiContractInteraction,
+  context?: ExecutePayload,
 ): Promise<void> {
-  const target = props.contract.navigationTargets.find(
-    (item) =>
-      String(item.targetPageId || '') ===
-      String(action.targetPageId || ''),
-  )
+  const target = resolveA924L2ANavigateTarget(action)
 
   if (!target) {
     showToast(
-      '目标页面未在当前 UI_CONTRACT 的 navigationTargets 中声明。',
+      '目标页面未在当前模块页面目录或当前 UI_CONTRACT 的 navigationTargets 中声明。',
       'ERROR',
     )
     return
@@ -1893,13 +2993,17 @@ async function navigateTo(
     targetPageKey: target.targetPageKey || null,
     targetPageName: target.targetPageName || null,
     route: target.route || null,
+    runtimeDataPatch: action.payload?.runtimeDataPatch && typeof action.payload.runtimeDataPatch === 'object'
+      ? deepClone(action.payload.runtimeDataPatch) as Record<string, unknown>
+      : snapshotRuntimeDataPatch(),
+    rowContext: resolveNavigationRowContext(action, context),
   }
 
   if (!props.navigateRequest) {
     emit('prototypeNavigate', payload)
 
     showToast(
-      `已发出页面切换请求：${target.targetPageName}`,
+      `已发出页面切换请求：${target.targetPageName || payload.label}`,
       'INFO',
     )
     return
@@ -1911,8 +3015,8 @@ async function navigateTo(
     if (!result.ok) {
       showToast(
         result.message ||
-        `无法切换到：${target.targetPageName}`,
-        'ERROR',
+        `无法切换到：${target.targetPageName || payload.label}`,
+        result.code === 'ARTIFACT_NOT_FOUND' ? 'WARNING' : 'ERROR',
       )
       return
     }
@@ -1931,11 +3035,12 @@ async function navigateTo(
     const message =
       error instanceof Error && error.message
         ? error.message
-        : '原型页面切换发生未知错误。'
-
+        : '页面切换失败。'
     showToast(message, 'ERROR')
   }
 }
+
+
 
 function deleteRow(
   action: UiContractInteraction,
@@ -2029,10 +3134,10 @@ function stateFallbackMessage(
   type: UiContractPageState['type'],
 ): string {
   return {
-    LOADING: '正在加载模拟数据。',
+    LOADING: '正在加载演示数据。',
     EMPTY: '当前没有可展示的数据。',
-    ERROR: '模拟业务处理失败。',
-    SUCCESS: '模拟业务处理成功。',
+    ERROR: '演示业务处理失败。',
+    SUCCESS: '演示业务处理成功。',
     DISABLED: '当前页面处于不可操作状态。',
     DEFAULT: '',
   }[type]
@@ -2221,7 +3326,9 @@ function elementKindLabel(kind: string): string {
     ACTION: '按钮',
     TABLE: '表格',
     TABLE_COLUMN: '表格列',
+    TABLE_COLUMN_LABEL: '列名',
     TABLE_CELL: '单元格',
+    TABLE_ROW: '表格行',
     TABLE_ACTION: '行操作',
     TAB: '标签页',
     METRIC: '指标卡',
@@ -2247,9 +3354,9 @@ function focusRuntimeComponent(
   }
 
   target.scrollIntoView({
-    block: 'center',
-    inline: 'center',
-    behavior: 'smooth',
+    block: isArtboardMode.value ? 'nearest' : 'center',
+    inline: 'nearest',
+    behavior: isArtboardMode.value ? 'auto' : 'smooth',
   })
 
   target.classList.remove('a9-component-focus-pulse')
@@ -3317,4 +4424,205 @@ dd {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--runtime-primary) 12%, transparent);
 }
 
+
+/* A9.10.14.4.3.15.6.24G4_SELECTION_OVERFLOW_FIX */
+.runtime-shell--artboard,
+.runtime-shell--artboard .artboard-runtime-main {
+  overflow-x: hidden !important;
+}
+
+.runtime-shell--artboard :deep(.pattern-runtime),
+.runtime-shell--artboard :deep(.business-page),
+.runtime-shell--artboard :deep(.business-body) {
+  overflow-x: hidden !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.runtime-shell--artboard :deep([data-ui-selectable]) {
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+}
+
+
+/* A9.10.14.4.3.15.6.24G5_SELECTION_SCROLL_LOCK
+   The inline selected label used ::before/::after on the selected element.
+   On right-edge buttons it expands horizontal scroll and shifts the whole canvas.
+   The right Prototype Copilot panel already shows the selected element, so keep
+   the blue outline but suppress the layout-affecting inline badge. */
+.runtime-shell :deep([data-ui-selectable="true"].a9-component-inspect-locked)::after,
+.runtime-shell :deep([data-ui-selectable="true"].a9-component-inspect-locked)::before,
+.runtime-shell :deep(.a9-component-inspect-locked)::after,
+.runtime-shell :deep(.a9-component-inspect-locked)::before {
+  content: none !important;
+  display: none !important;
+}
+
+.runtime-shell :deep([data-ui-selectable="true"].a9-component-inspect-locked),
+.runtime-shell :deep(.a9-component-inspect-locked) {
+  outline-offset: -2px !important;
+  box-sizing: border-box !important;
+}
+
+
+/* A9.10.14.4.3.15.6.24G6_SELECTION_BADGE_STABLE
+   Keep the selected badge, but prevent it from enlarging horizontal scroll.
+   The badge expands to the left of the selected element, and the selected
+   shadow is changed to non-layout-expanding outline/inset shadow. */
+.runtime-shell :deep([data-ui-selectable="true"].a9-component-inspect-locked),
+.runtime-shell :deep(.a9-component-inspect-locked) {
+  position: relative !important;
+  outline: 2px solid rgba(37, 99, 235, 0.98) !important;
+  outline-offset: -2px !important;
+  box-shadow:
+    inset 0 0 0 2px rgba(37, 99, 235, 0.20),
+    0 0 0 3px rgba(37, 99, 235, 0.12) !important;
+  box-sizing: border-box !important;
+}
+
+.runtime-shell :deep([data-ui-selectable="true"].a9-component-inspect-selected),
+.runtime-shell :deep(.a9-component-inspect-selected) {
+  box-shadow:
+    inset 0 0 0 2px rgba(37, 99, 235, 0.20),
+    0 0 0 3px rgba(37, 99, 235, 0.12) !important;
+}
+
+.runtime-shell :deep([data-ui-selectable="true"].a9-component-inspect-locked)::after,
+.runtime-shell :deep(.a9-component-inspect-locked)::after {
+  content: "已选中 · " attr(data-a9-selected-label) !important;
+  display: block !important;
+  position: absolute !important;
+  left: auto !important;
+  right: 0 !important;
+  top: -34px !important;
+  z-index: 2147483500 !important;
+  max-width: min(280px, 72vw) !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  border: 1px solid rgba(37, 99, 235, 0.28) !important;
+  border-radius: 999px !important;
+  padding: 6px 10px !important;
+  background: rgba(37, 99, 235, 0.96) !important;
+  color: #ffffff !important;
+  font-size: 12px !important;
+  font-weight: 900 !important;
+  line-height: 1.2 !important;
+  letter-spacing: 0.01em !important;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22) !important;
+  pointer-events: none !important;
+}
+
+.runtime-shell :deep([data-ui-selectable="true"].a9-component-inspect-locked)::before,
+.runtime-shell :deep(.a9-component-inspect-locked)::before {
+  content: "" !important;
+  display: block !important;
+  position: absolute !important;
+  left: auto !important;
+  right: 16px !important;
+  top: -7px !important;
+  z-index: 2147483499 !important;
+  width: 12px !important;
+  height: 12px !important;
+  background: rgba(37, 99, 235, 0.96) !important;
+  transform: rotate(45deg) !important;
+  pointer-events: none !important;
+}
+
+.runtime-shell--artboard,
+.runtime-shell--artboard .artboard-runtime-main,
+.runtime-shell--artboard :deep(.pattern-runtime),
+.runtime-shell--artboard :deep(.business-page),
+.runtime-shell--artboard :deep(.business-body) {
+  overflow-x: hidden !important;
+}
+
+
+/* A9.10.14.4.3.15.6.24G7_ADMIN_SELECTION_SCROLL_ROOTFIX
+   Root cause fix:
+   older list-page CSS forced table width:max-content and min-width:1280px.
+   Admin renderer tables must stay inside the visible canvas, otherwise selecting
+   right-side actions changes horizontal scrollLeft and shifts the page. */
+.runtime-shell :deep(.a9-admin-table),
+.runtime-shell :deep(.a9-admin-table .el-table__inner-wrapper),
+.runtime-shell :deep(.a9-admin-table .el-table__header-wrapper),
+.runtime-shell :deep(.a9-admin-table .el-table__body-wrapper),
+.runtime-shell :deep(.a9-admin-table .el-scrollbar),
+.runtime-shell :deep(.a9-admin-table .el-scrollbar__wrap),
+.runtime-shell :deep(.a9-admin-table .el-scrollbar__view) {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow-x: hidden !important;
+  box-sizing: border-box !important;
+}
+
+.runtime-shell :deep(.a9-admin-table table),
+.runtime-shell :deep(.business-page--list .a9-admin-table table),
+.runtime-shell :deep(.business-page--list .a9-admin-table .el-table__body),
+.runtime-shell :deep(.business-page--list .a9-admin-table .el-table__header) {
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  table-layout: fixed !important;
+}
+
+.runtime-shell :deep(.a9-admin-table .el-table__fixed-right),
+.runtime-shell :deep(.a9-admin-table .el-table__fixed) {
+  max-width: 100% !important;
+}
+
+.runtime-shell,
+.runtime-shell--artboard,
+.runtime-shell--artboard .artboard-runtime-main,
+.runtime-shell :deep(.pattern-runtime),
+.runtime-shell :deep(.business-page),
+.runtime-shell :deep(.business-body),
+.runtime-shell :deep(.a9-admin-page) {
+  overflow-x: hidden !important;
+  scroll-behavior: auto !important;
+}
+
+/* Keep selected badge visible, but make it expand left inside the canvas. */
+.runtime-shell :deep([data-ui-selectable="true"].a9-component-inspect-locked)::after,
+.runtime-shell :deep(.a9-component-inspect-locked)::after {
+  content: "已选中 · " attr(data-a9-selected-label) !important;
+  display: block !important;
+  left: auto !important;
+  right: 0 !important;
+  max-width: min(260px, 70vw) !important;
+  transform: none !important;
+}
+
+.runtime-shell :deep([data-ui-selectable="true"].a9-component-inspect-locked)::before,
+.runtime-shell :deep(.a9-component-inspect-locked)::before {
+  left: auto !important;
+  right: 16px !important;
+}
+
+
+/* A9.10.14.4.3.15.6.24J7B_TABLE_HIT_TEST_MODEL
+   TABLE_ROW is a synthesized <tr>; pseudo badge on <tr> is unreliable.
+   Keep row outline through td shadows and use right-side selected panel for label. */
+.runtime-shell :deep(tr[data-ui-element-kind="TABLE_ROW"].a9-component-inspect-hover > td) {
+  box-shadow: inset 0 0 0 1px rgba(14, 165, 233, 0.92) !important;
+}
+
+.runtime-shell :deep(tr[data-ui-element-kind="TABLE_ROW"].a9-component-inspect-locked > td) {
+  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.95) !important;
+}
+
+.runtime-shell :deep(tr[data-ui-element-kind="TABLE_ROW"].a9-component-inspect-locked)::after,
+.runtime-shell :deep(tr[data-ui-element-kind="TABLE_ROW"].a9-component-inspect-locked)::before {
+  display: none !important;
+  content: none !important;
+}
+
+.runtime-shell :deep([data-ui-element-kind="TABLE_COLUMN_LABEL"].a9-component-inspect-locked)::after,
+.runtime-shell :deep([data-ui-element-kind="TABLE_COLUMN_LABEL"].a9-component-inspect-locked)::before {
+  display: none !important;
+  content: none !important;
+}
+
 </style>
+<!-- A9.10.14.4.3.15.6.24L2A_RUNTIME_DEMO_ACTION_FALLBACK: runtime demo actions can execute from actionId even when interactions are incomplete. -->

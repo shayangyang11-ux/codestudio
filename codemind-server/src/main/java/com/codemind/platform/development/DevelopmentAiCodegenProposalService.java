@@ -228,6 +228,12 @@ public class DevelopmentAiCodegenProposalService {
         node.put("moduleType", plan.moduleType());
         node.put("sourceArtifactTypes", plan.sourceArtifactTypes());
 
+        Map<String, Object> developmentBuildContext =
+                handoffContext == null
+                        || handoffContext.developmentBuildContext() == null
+                        ? Map.of()
+                        : handoffContext.developmentBuildContext();
+
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("task_id", UUID.randomUUID().toString());
         payload.put("workspace_id", workspaceId == null ? null : workspaceId.toString());
@@ -238,6 +244,14 @@ public class DevelopmentAiCodegenProposalService {
         payload.put("generation_root", generationRoot);
         payload.put("node", node);
         payload.put("handoff_context", handoffContext == null ? Map.of() : handoffContext);
+        payload.put("development_build_context", developmentBuildContext);
+        payload.put(
+                "development_codegen_contract",
+                buildDevelopmentCodegenContract(
+                        handoffContext,
+                        developmentBuildContext
+                )
+        );
         payload.put("acceptance_summary", failedItems == null || failedItems.isEmpty() ? "未提供失败项。" : "验收失败项 " + failedItems.size() + " 个。");
         payload.put("failed_items", failedItems == null ? List.of() : failedItems.stream().map(this::acceptanceItemToPayload).toList());
         payload.put("log_tail", logTail == null ? List.of() : logTail);
@@ -423,9 +437,87 @@ public class DevelopmentAiCodegenProposalService {
         payload.put("node", node);
         payload.put("handoff_context", handoffContext == null ? Map.of() : handoffContext);
         payload.put("development_build_context", developmentBuildContext);
+        payload.put(
+                "development_codegen_contract",
+                buildDevelopmentCodegenContract(
+                        handoffContext,
+                        developmentBuildContext
+                )
+        );
         payload.put("deterministic_files", files.stream().map(this::fileToPayload).toList());
         payload.put("remarks", remarks);
         return payload;
+    }
+
+    private Map<String, Object> buildDevelopmentCodegenContract(
+            DevelopmentHandoffContextResponse handoffContext,
+            Map<String, Object> developmentBuildContext
+    ) {
+        Map<String, Object> contract = new LinkedHashMap<>();
+        Map<String, Object> confirmedUiContract =
+                handoffContext == null || handoffContext.confirmedUiContract() == null
+                        ? Map.of()
+                        : handoffContext.confirmedUiContract();
+
+        contract.put("contract_version", "A9.10.15_DEV_AGENT_PROTO_TO_REAL_V1");
+        contract.put("source_of_truth", List.of(
+                "MODULE_PROTOTYPE_SNAPSHOT",
+                "MODULE_APP_CONTRACT",
+                "PAGE_UI_CONTRACT",
+                "navigationEdges",
+                "prototype interactions",
+                "data binding keys"
+        ));
+        contract.put("ui_contract", confirmedUiContract);
+        contract.put("module_app_contract", firstMap(
+                developmentBuildContext.get("moduleAppContract"),
+                confirmedUiContract.get("moduleAppContract")
+        ));
+        contract.put("prototype_routing_contract", firstMap(
+                developmentBuildContext.get("prototypeRoutingContract"),
+                developmentBuildContext.get("routingContract")
+        ));
+        contract.put("mock_to_real_mapping", firstMap(
+                developmentBuildContext.get("mockToRealMapping"),
+                developmentBuildContext.get("dataBindingPlan")
+        ));
+        contract.put("api_plan", firstMap(
+                developmentBuildContext.get("apiPlan"),
+                Map.of()
+        ));
+        contract.put("database_plan", firstMap(
+                developmentBuildContext.get("databasePlan"),
+                Map.of()
+        ));
+        contract.put("renderer_contract", Map.of(
+                "primaryRenderer", "Ant Design Vue",
+                "rendererSemantic", "ant-design-vue@4 page renderer",
+                "catalogSource", "ui-contract-runtime/antDesignComponentCatalog.ts",
+                "mustPreserveLayout", true,
+                "mustPreserveComponentPreset", true
+        ));
+        contract.put("hard_rules", List.of(
+                "必须复用 PAGE_UI_CONTRACT / MODULE_APP_CONTRACT 的页面结构、应用壳、导航菜单和视觉层级。",
+                "必须复用 navigationEdges / prototype interactions 作为真实 Vue Router 路由、按钮跳转、保存后跳转和行上下文传递来源。",
+                "列表页新增进入新增页；新增保存后返回列表并显示新增数据。",
+                "列表页编辑进入编辑页并携带当前行；编辑保存后返回列表并显示更新数据。",
+                "列表页详情进入详情页并携带当前行。",
+                "前端禁止把 mock 数据作为主业务实现；允许 seed data 只用于首次运行初始化和验收。",
+                "前端必须通过 API client 请求 Node.js 后端；后端必须经过 service/repository 访问本地数据层。",
+                "mock table / runtime data binding key 必须映射为真实 API endpoint、数据库实体或持久化集合。",
+                "不得重新设计页面跳转，不得因为生成方便而改变用户在需求 Agent 中确认的原型流转。"
+        ));
+        return contract;
+    }
+
+    private Map<String, Object> firstMap(Object primary, Object fallback) {
+        Map<String, Object> primaryMap = mapValue(primary);
+        if (primaryMap != null && !primaryMap.isEmpty()) {
+            return primaryMap;
+        }
+
+        Map<String, Object> fallbackMap = mapValue(fallback);
+        return fallbackMap == null ? Map.of() : fallbackMap;
     }
 
     private Map<String, Object> fileToPayload(DevelopmentCodeFileResponse file) {

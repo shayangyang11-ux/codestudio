@@ -84,7 +84,7 @@
     />
 
     <div class="main-layout with-workspace-topbar">
-      <ModuleTreePanel :modules="modules" :selected-module-id="selectedRequirementTreeNodeId || selectedModule?.id" @select="handleSelectModule"
+      <ModuleTreePanel :modules="visibleRequirementTreeModules" :selected-module-id="selectedRequirementTreeNodeId || selectedModule?.id" @select="handleSelectModule"
         @create-root="handleCreateRootModuleNode" @create-child="handleCreateChildModuleNode"
         @rename-node="handleRenameModuleNode" @move-node="handleMoveModuleNode" @delete-node="handleDeleteModuleNode" />
 
@@ -119,7 +119,7 @@
         :data-model-markdown="dataModelMarkdown" :data-model-artifact="dataModelArtifact"
         :api-contract-markdown="apiContractMarkdown" :api-contract-artifact="apiContractArtifact"
         :test-spec-markdown="testSpecMarkdown" :test-spec-artifact="testSpecArtifact"
-        :is-generating-ui-contract="isGeneratingUiContract" :ui-contract-markdown="uiContractMarkdown"
+        :is-generating-ui-contract="isGeneratingUiContract" :is-syncing-prd-to-ui-contract="isSyncingPrdToUiContract" :ui-contract-markdown="uiContractMarkdown"
         :ui-contract-draft-content="uiContractDraftContent"
         :prototype-edit-draft-dirty="prototypeEditDraftDirty"
         :prototype-edit-draft-summary="prototypeEditDraftSummary"
@@ -142,6 +142,7 @@
         @open-impact-analysis="handleOpenImpactAnalysis" @export-artifacts-zip="handleExportArtifactsZip"
         @export-artifacts-docx="handleExportArtifactsDocx" @open-quality-check="handleOpenQualityCheck"
         @generate-ui-contract="handleGenerateUiContract"
+        @sync-prd-to-ui-contract="handleSyncPrdToUiContract"
         @refresh-ui-contract-readiness="handleRefreshUiContractReadiness"
         @preview-ui-contract="handlePreviewUiContract"
         @save-manual-artifact-edit="handleSaveManualArtifactEdit"
@@ -226,7 +227,7 @@
       <ModuleTreeNodeEditorDialog :visible="nodeEditorVisible" :mode="nodeEditorMode" :parent-node="nodeEditorParent"
         :editing-node="nodeEditorTarget" @cancel="closeNodeEditor" @submit="handleSubmitNodeEditor" />
 
-      <ModuleTreeNodeMoveDialog :visible="nodeMoveDialogVisible" :modules="modules" :moving-node="nodeMoveTarget"
+      <ModuleTreeNodeMoveDialog :visible="nodeMoveDialogVisible" :modules="visibleRequirementTreeModules" :moving-node="nodeMoveTarget"
         @cancel="closeNodeMoveDialog" @submit="handleSubmitMoveModuleNode" />
 
       <ModuleTreeDeleteConfirmDialog :visible="nodeDeleteDialogVisible" :node="nodeDeleteTarget"
@@ -356,6 +357,23 @@ import {
   isPrototypeLocalEditInstruction,
   type PrototypeElementSelection,
 } from '../domain/uiContractPrototypeLocalEdit'
+import {
+  applyPrdPageRequirementToUiContract,
+  resolvePrdPageRequirementForNode,
+  classifyContractToPrdChange,
+  applyContractDeltaToModulePrd,
+} from '../domain/prdUiContractSync'
+
+import { normalizePrdPrototypeModuleRequirement } from '../domain/prdPrototypeModuleSemantics'
+
+import {
+  analyzePrdChangeImpact,
+  pageChangeImpactForPage,
+  resolvePrdChangeImpactReport,
+  visualImpactPageIdsFromReport,
+  type PrdChangeImpactReport,
+  type PrdPageRequirementChangeImpact,
+} from '../domain/prdChangeImpactProcessor'
 
 const router = useRouter()
 
@@ -376,7 +394,132 @@ defineEmits<{
 const activeTab = ref<AgentTab>('requirement')
 const projectActionMenuOpen = ref(false)
 const modules = ref<ModuleTreeNode[]>([])
+
+// A9.10.14.4.3.15.6.24L0A_FEATURE_LAYER_RETIRE_TO_CAPABILITY
+// User-visible requirement tree no longer exposes FEATURE as a tree level.
+// Existing legacy FEATURE nodes are kept in the raw backend tree, but rendered as
+// capability bindings on their child PAGE nodes.
+const visibleRequirementTreeModules = computed<ModuleTreeNode[]>(() =>
+  a924L0AFlattenFeatureNodesForDisplay(modules.value),
+)
+
+function a924L0AFlattenFeatureNodesForDisplay(
+  nodes: ModuleTreeNode[],
+  ownerModule: ModuleTreeNode | null = null,
+  hiddenFeature: ModuleTreeNode | null = null,
+): ModuleTreeNode[] {
+  const result: ModuleTreeNode[] = []
+
+  for (const node of nodes || []) {
+    const nodeType = resolveRequirementNodeType(node)
+    const nextOwner = nodeType === 'MODULE' ? node : ownerModule
+
+    if (nodeType === 'FEATURE') {
+      for (const child of node.children || []) {
+        result.push(
+          ...a924L0AFlattenFeatureNodesForDisplay(
+            [child],
+            nextOwner,
+            node,
+          ),
+        )
+      }
+      continue
+    }
+
+    const clonedExtra = a924L0ACloneRecord(node.extra)
+    const clonedNode: ModuleTreeNode = {
+      ...node,
+      extra: clonedExtra,
+      children: a924L0AFlattenFeatureNodesForDisplay(
+        node.children || [],
+        nextOwner,
+        hiddenFeature,
+      ),
+    }
+
+    if (hiddenFeature && nodeType === 'PAGE') {
+      clonedNode.parentId = nextOwner?.id || node.parentId || null
+      clonedNode.modulePath = nextOwner?.modulePath
+        ? `${nextOwner.modulePath}/${getModuleDisplayName(node)}`
+        : node.modulePath
+
+      const featureExtra = a924L0ACloneRecord(hiddenFeature.extra)
+      const capabilityBinding = {
+        source: 'LEGACY_FEATURE_NODE',
+        featureNodeId: hiddenFeature.id || null,
+        featureKey:
+          hiddenFeature.moduleKey ||
+          hiddenFeature.key ||
+          featureExtra.featureKey ||
+          featureExtra.feature_key ||
+          '',
+        featureName: getModuleDisplayName(hiddenFeature),
+        originalParentId: hiddenFeature.id || null,
+      }
+
+      const existingBindings = Array.isArray(clonedExtra.capabilityBindings)
+        ? clonedExtra.capabilityBindings
+        : []
+
+      clonedExtra.capabilityBindings = a924L0ADedupeCapabilityBindings([
+        ...existingBindings,
+        capabilityBinding,
+      ])
+      clonedExtra.hiddenParentFeature = capabilityBinding
+      clonedExtra.hiddenParentFeatureKey = capabilityBinding.featureKey
+      clonedExtra.hiddenParentFeatureName = capabilityBinding.featureName
+      clonedExtra.displayParentId = nextOwner?.id || node.parentId || null
+    }
+
+    result.push(clonedNode)
+  }
+
+  return result
+}
+
+function a924L0ACloneRecord(value: unknown): Record<string, any> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? { ...(value as Record<string, any>) }
+    : {}
+}
+
+function a924L0ADedupeCapabilityBindings(
+  bindings: Array<Record<string, any>>,
+): Array<Record<string, any>> {
+  const seen = new Set<string>()
+  const result: Array<Record<string, any>> = []
+
+  for (const binding of bindings) {
+    const key = String(
+      binding.featureNodeId ||
+      binding.featureKey ||
+      binding.featureName ||
+      JSON.stringify(binding),
+    ).trim()
+
+    if (!key || seen.has(key)) {
+      continue
+    }
+
+    seen.add(key)
+    result.push(binding)
+  }
+
+  return result
+}
+
 const aiAssistantCollapsed = ref(false)
+
+// A9.10.14.4.3.15.4.14_MODULE_TREE_PREFLIGHT_PROPOSAL
+interface ModuleTreePreflightProposalState {
+  requirementText: string
+  createdAt: number
+  sourceReply?: string
+}
+
+const moduleTreePreflightProposal = ref<ModuleTreePreflightProposalState | null>(null)
+
 const latestAssistantResponse = ref<AssistantMessageResponse | null>(null)
 const assistantHistoryMessages = ref<AssistantConversationMessageResponse[]>([])
 const treePatchProposal = ref<ModuleTreePatchProposalResponse | null>(null)
@@ -386,6 +529,8 @@ const prototypeEditDraftDirty = ref(false)
 const prototypeEditDraftSummary = ref('')
 const isApplyingTreePatch = ref(false)
 const manualArtifactEditSaving = ref(false)
+const isSyncingPrdToUiContract = ref(false)
+const a91577ExplicitUiContractGenerationInProgress = ref(false)
 
 // A9.10.14.4.3.15.2.4_EXTERNAL_PRD_IMPORT_AND_LEGACY_PRD_MIGRATION_PROJECT_WORKSPACE
 // Avoid silently spending tokens: old PRD migration is auto-detected, then exposed as an explicit Assistant quick action.
@@ -397,6 +542,88 @@ const a91524LegacyPrdMigrationHintKeys = ref<Set<string>>(new Set())
 const requirementImpactPageIds = ref<Set<string>>(new Set())
 const requirementImpactPageIdList = computed(() => Array.from(requirementImpactPageIds.value))
 
+type A91575PrdPageSyncHint = {
+  pageId: string
+  previousRequirement: Record<string, any> | null
+  nextRequirement: Record<string, any>
+  changeImpact: PrdPageRequirementChangeImpact | null
+  updatedAt: string
+}
+
+const a91575PrdPageSyncHints = ref<Map<string, A91575PrdPageSyncHint>>(new Map())
+
+function a91575RememberPrdPageSyncHint(
+  pageId: string,
+  previousRequirement: Record<string, any> | null,
+  nextRequirement: Record<string, any>,
+  changeImpact: PrdPageRequirementChangeImpact | null = null,
+): void {
+  const id = String(pageId || '').trim()
+  if (!id) return
+
+  const next = new Map(a91575PrdPageSyncHints.value)
+  next.set(id, {
+    pageId: id,
+    previousRequirement: previousRequirement ? a91545CloneRecord(previousRequirement) : null,
+    nextRequirement: a91545CloneRecord(nextRequirement),
+    changeImpact,
+    updatedAt: new Date().toISOString(),
+  })
+  a91575PrdPageSyncHints.value = next
+}
+
+// A9.10.14.4.3.15.7.24L3B5B1_PRD_CHANGE_IMPACT_PROCESSOR
+function a91576BuildAndAttachPrdChangeImpactReport(
+  payload: ManualArtifactEditPayload,
+  previousContent: Record<string, any> | null,
+): PrdChangeImpactReport | null {
+  if (payload.artifactType !== 'MODULE_PRD') return null
+
+  const nextContent = (payload as any).content
+  if (!isPlainRecord(nextContent)) return null
+
+  const owner = selectedModule.value
+    ? findA9ModuleTreeNodeById(modules.value, selectedModule.value.id) || selectedModule.value
+    : null
+
+  const report = analyzePrdChangeImpact({
+    previousContent,
+    nextContent,
+    ownerModule: owner,
+  })
+
+  ;(nextContent as Record<string, any>)._prd_change_impact = report
+  ;(nextContent as Record<string, any>)._dev_agent_change_context = report.devAgentContext
+  ;(nextContent as Record<string, any>)._semantic_sync_policy = {
+    source: 'PRD_CHANGE_IMPACT_PROCESSOR',
+    mode: 'AUTO_BACKGROUND_SEMANTIC_SYNC',
+    userVisibleSyncScope: 'VISUAL_IMPACT_ONLY',
+    hiddenSemanticImpacts: report.semanticImpacts,
+    downstreamArtifactTypes: report.downstreamArtifactTypes,
+    capabilityHints: report.capabilityHints,
+    updatedAt: new Date().toISOString(),
+  }
+
+  return report
+}
+
+function a91576RememberPageSyncHintsFromImpactReport(
+  report: PrdChangeImpactReport | null,
+): void {
+  if (!report) return
+
+  for (const pageChange of report.pageRequirementChanges || []) {
+    if (!pageChange.pageId || !pageChange.visualImpact) continue
+
+    a91575RememberPrdPageSyncHint(
+      pageChange.pageId,
+      pageChange.previousRequirement || null,
+      pageChange.nextRequirement || {},
+      pageChange,
+    )
+  }
+}
+
 function a94371NodeType(node: ModuleTreeNode | null | undefined): string {
   const extra = node?.extra && typeof node.extra === 'object' && !Array.isArray(node.extra)
     ? node.extra as Record<string, unknown>
@@ -405,27 +632,22 @@ function a94371NodeType(node: ModuleTreeNode | null | undefined): string {
 }
 
 function a94371MarkRequirementImpactForDescendantPages(root: ModuleTreeNode | null | undefined): void {
+  // A9.10.14.4.3.15.7.24L3B4D_PRD_IMPACT_REPLACE_NOT_MERGE
+  // 禁止 MODULE_PRD 保存后全量污染当前模块下所有 PAGE。
+  // 页面原型过期提示必须由 a91545ResolvePrecisePrdImpact 计算出的 affectedPageIds 决定。
   if (!root) return
 
-  const next = new Set(requirementImpactPageIds.value)
-  const visit = (node: ModuleTreeNode | null | undefined) => {
-    if (!node) return
-    if (a94371NodeType(node) === 'PAGE' && node.id) {
-      next.add(String(node.id))
-    }
-    for (const child of node.children || []) {
-      visit(child)
-    }
-  }
-
-  visit(root)
-  requirementImpactPageIds.value = next
+  console.warn(
+    '[A9.10.14.4.3.15.7.24L3B4D] Skip descendant-wide PRD impact marker.',
+    root.id || root.key || root.name,
+  )
 }
 
 function a94371ClearRequirementImpactForPage(node: ModuleTreeNode | null | undefined): void {
   if (!node?.id) return
   const next = new Set(requirementImpactPageIds.value)
   next.delete(String(node.id))
+  a91575PrdPageSyncHints.value.delete(String(node.id))
   requirementImpactPageIds.value = next
 }
 
@@ -444,6 +666,54 @@ function a94371MarkRequirementImpactForPageIds(pageIds: Array<string | null | un
   for (const id of normalized) {
     next.add(id)
   }
+  requirementImpactPageIds.value = next
+}
+
+// A9.10.14.4.3.15.7.24L3B4D_PRD_IMPACT_REPLACE_NOT_MERGE
+function a94371CollectDescendantPageIds(root: ModuleTreeNode | null | undefined): Set<string> {
+  const pageIds = new Set<string>()
+
+  const visit = (node: ModuleTreeNode | null | undefined) => {
+    if (!node) return
+
+    if (a94371NodeType(node) === 'PAGE' && node.id) {
+      pageIds.add(String(node.id))
+    }
+
+    for (const child of node.children || []) {
+      visit(child)
+    }
+  }
+
+  visit(root)
+  return pageIds
+}
+
+function a94371ReplaceRequirementImpactWithinModule(
+  root: ModuleTreeNode | null | undefined,
+  affectedPageIds: Array<string | null | undefined>,
+): void {
+  const scopePageIds = a94371CollectDescendantPageIds(root)
+  const affected = new Set(
+    affectedPageIds
+      .map((id) => String(id || '').trim())
+      .filter(Boolean),
+  )
+
+  const next = new Set<string>()
+
+  for (const id of requirementImpactPageIds.value) {
+    if (!scopePageIds.has(id)) {
+      next.add(id)
+    }
+  }
+
+  for (const id of affected) {
+    if (scopePageIds.size === 0 || scopePageIds.has(id)) {
+      next.add(id)
+    }
+  }
+
   requirementImpactPageIds.value = next
 }
 
@@ -467,7 +737,7 @@ const artifactVersionSummaries = ref<ArtifactVersionSummaryResponse[]>([])
 const selectedArtifactVersion = ref<ArtifactVersionDetailResponse | null>(null)
 
 type ArtifactTaskFeedback = {
-  level: 'info' | 'success' | 'error'
+  level: 'info' | 'success' | 'warning' | 'error'
   message: string
 }
 
@@ -852,9 +1122,51 @@ async function handleAssistantTaskTerminalNotification(payload: {
   }
 }) {
   const task = payload.task
+  const terminalStatus = String(task.status || '').trim().toUpperCase()
+
+  if (
+    payload.definition.artifactType === 'UI_CONTRACT' &&
+    ['SUCCESS', 'PARTIAL_SUCCESS', 'FAILED', 'CANCELED', 'CANCELLED'].includes(terminalStatus)
+  ) {
+    a91577ExplicitUiContractGenerationInProgress.value = false
+  }
+
+  if (
+    payload.definition.artifactType === 'PAGE_SPEC' &&
+    ['FAILED', 'CANCELED', 'CANCELLED'].includes(terminalStatus)
+  ) {
+    a91577ExplicitUiContractGenerationInProgress.value = false
+  }
 
   if (!isAssistantTaskNotificationStatus(task.status)) {
     return
+  }
+
+
+  const taskSucceeded =
+    task.status === 'SUCCESS' ||
+    task.status === 'PARTIAL_SUCCESS'
+
+  // A9.10.14.4.3.15.4.15.3.2_MODULE_PRD_AUTO_MATERIALIZE_REFRESH_TREE
+  // MODULE_PRD may automatically materialize FEATURE/PAGE from structured PRD.
+  // Refresh the left tree after successful PRD task completion.
+  if (
+    payload.definition.artifactType === 'MODULE_PRD' &&
+    taskSucceeded
+  ) {
+    try {
+      modules.value = await fetchProjectModules(
+        props.workspace.workspaceId,
+        props.project.projectCode,
+      )
+
+      await Promise.allSettled([
+        loadCurrentModuleAgentTasks(),
+        loadDevelopmentHandoffReadiness(),
+      ])
+    } catch (error) {
+      console.error(error)
+    }
   }
 
   if (
@@ -883,6 +1195,11 @@ async function handleAssistantTaskTerminalNotification(payload: {
 
     selectedArtifactType.value = 'UI_CONTRACT'
 
+    artifactTaskFeedback.value = {
+      level: 'success',
+      message: '交互原型已重新生成完成。可点击“进入原型工作台”检查效果。',
+    }
+
     syncA9VirtualComponentNodesForPage(selectedModule.value)
 
     if (uiContractArtifact.value?.content) {
@@ -894,7 +1211,7 @@ async function handleAssistantTaskTerminalNotification(payload: {
       message:
         task.status === 'PARTIAL_SUCCESS'
           ? '交互原型已生成，但存在质量警告，请在契约检查中确认。'
-          : '交互原型已生成，已自动打开预览。',
+          : '交互原型已生成。请手动点击“进入原型工作台”检查效果。',
     }
   } else if (
     task.status === 'FAILED' ||
@@ -1046,7 +1363,7 @@ async function handleGenerateModuleTree(
     latestAssistantResponse.value = {
       messageId: `module_tree_generation_started_${Date.now()}`,
       intent: 'GENERATE_MODULE_TREE',
-      reply: '已读取你的文字和附件材料，正在生成需求骨架。生成完成后会自动刷新左侧结构，并优先选择一个适合继续完善的模块。',
+      reply: '已确认生成方案，正在生成项目模块树。生成完成后会自动刷新左侧模块树，并优先选择一个适合继续完善的最终模块。',
       requiresUserConfirmation: false,
       proposal: null,
       requirementChangeProposal: null,
@@ -1140,6 +1457,285 @@ async function handleGenerateModuleTree(
 }
 
 
+
+// A9.10.14.4.3.15.4.14_MODULE_TREE_PREFLIGHT_PROPOSAL
+function showModuleTreePreflightProposal(
+  requirementTextInput: string,
+  sourceResponse?: AssistantMessageResponse | null,
+) {
+  const requirementTextForProposal = String(requirementTextInput || '').trim()
+  if (!requirementTextForProposal) {
+    latestAssistantResponse.value = buildLocalAssistantResponse(
+      '请先输入或上传业务需求材料，AI 会先给出模块树生成方案，再开始生成模块树。',
+      'module_tree_preflight_empty',
+    )
+    return
+  }
+
+  moduleTreePreflightProposal.value = {
+    requirementText: requirementTextForProposal,
+    createdAt: Date.now(),
+    sourceReply: sourceResponse?.reply || '',
+  }
+
+  latestAssistantResponse.value = {
+    messageId: `module_tree_preflight_${Date.now()}`,
+    intent: 'GENERATE_MODULE_TREE',
+    reply: buildModuleTreePreflightReply(requirementTextForProposal, sourceResponse),
+    requiresUserConfirmation: true,
+    proposal: null,
+    requirementChangeProposal: null,
+    assetEditProposal: null,
+    attachmentDrivenChangeProposal: null,
+    attachmentArtifactDiffProposal: null,
+    actions: [
+      {
+        type: 'GENERATE_MODULE_TREE',
+        label: '直接生成模块树',
+        description: '按当前材料直接生成项目模块树。',
+        payload: { requirementText: requirementTextForProposal, modelingMode: 'PROGRESSIVE_MODULE_OUTLINE' },
+      },
+      {
+        type: 'GENERATE_MODULE_TREE',
+        label: 'AI补齐后生成',
+        description: '在当前材料基础上补齐页面、字段、状态、权限和模块边界建议后生成。',
+        payload: { requirementText: buildModuleTreeCompletionRequirementText(requirementTextForProposal), modelingMode: 'PROGRESSIVE_MODULE_OUTLINE' },
+      },
+    ],
+    quickReplies: [
+      { label: '直接生成模块树', text: '直接生成模块树' },
+      { label: 'AI 补齐后生成', text: 'AI补齐后生成' },
+      { label: '我再补充', text: '我再补充' },
+    ],
+  } as unknown as AssistantMessageResponse
+
+  artifactTaskFeedback.value = {
+    level: 'info',
+    message: '已生成模块树生成前提案。请在右侧选择“直接生成模块树”“AI 补齐后生成”或“我再补充”。',
+  }
+}
+
+async function tryHandleModuleTreePreflightReply(trimmedText: string): Promise<boolean> {
+  const pending = moduleTreePreflightProposal.value
+  if (!pending) {
+    return false
+  }
+
+  const commandText = String(trimmedText || '').trim()
+  const compactCommandText = commandText.replace(/\s+/g, '').toLowerCase()
+
+  if (isModuleTreePreflightDirectGenerateCommand(commandText, compactCommandText)) {
+    const requirementTextForGeneration = pending.requirementText
+    moduleTreePreflightProposal.value = null
+    await handleGenerateModuleTree(requirementTextForGeneration, 'PROGRESSIVE_MODULE_OUTLINE')
+    return true
+  }
+
+  if (isModuleTreePreflightAiCompleteCommand(commandText, compactCommandText)) {
+    const requirementTextForGeneration = buildModuleTreeCompletionRequirementText(pending.requirementText)
+    moduleTreePreflightProposal.value = null
+    await handleGenerateModuleTree(requirementTextForGeneration, 'PROGRESSIVE_MODULE_OUTLINE')
+    return true
+  }
+
+  if (isModuleTreePreflightHoldCommand(commandText, compactCommandText)) {
+    moduleTreePreflightProposal.value = null
+    latestAssistantResponse.value = buildLocalAssistantResponse(
+      '好的，已暂停生成模块树。你可以继续补充业务背景、用户角色、核心流程、页面、字段、状态、权限或重点测试模块；补充完成后再发送“生成模块树”。',
+      'module_tree_preflight_hold',
+    )
+    artifactTaskFeedback.value = {
+      level: 'info',
+      message: '已暂停生成模块树，等待你继续补充材料。',
+    }
+    return true
+  }
+
+  return false
+}
+
+function isModuleTreePreflightDirectGenerateCommand(
+  rawText: string,
+  compactText: string,
+): boolean {
+  if (!rawText.trim()) return false
+  return (
+    compactText === '1' ||
+    compactText === '确认' ||
+    compactText === '确认生成' ||
+    compactText === '直接生成' ||
+    compactText === '直接生成模块树' ||
+    compactText === '生成模块树' ||
+    compactText === '开始生成' ||
+    compactText === '开始生成模块树' ||
+    /^(按当前|就这样|可以|同意|确认).*(生成|开始)/.test(rawText)
+  )
+}
+
+function isModuleTreePreflightAiCompleteCommand(
+  rawText: string,
+  compactText: string,
+): boolean {
+  if (!rawText.trim()) return false
+  return (
+    compactText === '2' ||
+    compactText === 'ai补齐后生成' ||
+    compactText === 'ai补全后生成' ||
+    compactText === '补齐后生成' ||
+    compactText === '补全后生成' ||
+    /(AI|ai|系统|你).*(补齐|补全|完善).*(生成|模块树)/.test(rawText) ||
+    /(补齐|补全|完善).*(再|后).*(生成|模块树)/.test(rawText)
+  )
+}
+
+function isModuleTreePreflightHoldCommand(
+  rawText: string,
+  compactText: string,
+): boolean {
+  if (!rawText.trim()) return false
+  return (
+    compactText === '3' ||
+    compactText === '我再补充' ||
+    compactText === '稍后处理' ||
+    compactText === '取消' ||
+    compactText === '先不生成' ||
+    /(我|用户).*(再|继续).*(补充|完善)/.test(rawText) ||
+    /(暂停|先不|暂不|取消).*(生成|模块树)?/.test(rawText)
+  )
+}
+
+function buildModuleTreeCompletionRequirementText(requirementTextInput: string): string {
+  return [
+    String(requirementTextInput || '').trim(),
+    '',
+    '【AI 分析并生成模块层级提案】',
+    '请基于以上材料先完成业务信息架构推理，再生成项目模块树。要求：',
+    '1. 保留用户明确给出的业务事实，不要改写业务边界。',
+    '2. 从材料中识别业务域、子域、业务对象、业务流程、角色协作和边界约束。',
+    '3. 初始模块树阶段只生成 MODULE；MODULE 可以嵌套 MODULE，用来表达业务分类、业务域、子域、业务模块和末级需求模块。',
+    '4. 不要在初始模块树阶段生成 FEATURE/PAGE；功能点和页面应在叶子 MODULE 生成 MODULE_PRD 后再进入后续链路。',
+    '5. 不要使用行业固定模板，不要套用外贸、医院、学校、MES、OA、CRM 等任何固定行业词典。',
+    '6. 如果材料很完整，请体现为更专业的多层 MODULE 架构；如果材料不完整，请在 description 中写清假设和需要用户确认的边界。',
+    '7. 叶子 MODULE 应该是后续可以生成 MODULE_PRD 的业务对象或业务过程，不要把字段、按钮、接口、权限、日志、状态码直接当成模块。',
+    '8. 输出前请自检：不能只有一层平铺模块；不能把页面混入模块树；不能出现与用户材料无关的行业模板。',
+  ].filter(Boolean).join('\n')
+}
+
+function buildModuleTreePreflightReply(
+  requirementTextInput: string,
+  sourceResponse?: AssistantMessageResponse | null,
+): string {
+  const requirementTextForProposal = String(requirementTextInput || '').trim()
+  const summary = summarizeModuleTreeRequirementForProposal(requirementTextForProposal)
+  const sourceReply = String(sourceResponse?.reply || '').trim()
+  const sourceHint = sourceReply
+    ? `补充参考：${trimModuleTreePreflightText(sourceReply, 160)}`
+    : ''
+
+  return [
+    '已解析需求材料，建议先确认模块树生成方案。',
+    '',
+    '识别结果：',
+    `- 业务方向：${summary.domainLabel}`,
+    `- 材料完整度：${summary.completenessLabel}`,
+    `- 已识别重点：${summary.signals.join('、') || '业务对象、流程和页面线索'}`,
+    '',
+    '建议生成策略：',
+    '- 先生成项目模块树，不直接进入视觉风格或原型样式修改。',
+    '- 一级模块按项目实际业务域组织；叶子模块应落到可被用户理解、可生成 MODULE_PRD 的业务对象。',
+    '- 初始阶段先生成多层 MODULE 信息架构；页面、字段、状态、权限、关键操作进入后续 MODULE_PRD / 原型链路。',
+    '- 背景、目标、角色、验收、备注和补充说明进入“需求说明”。',
+    '- API、数据实体、日志、非功能、安全和集成约束进入后台开发上下文。',
+    '',
+    '请在下方选择处理方式。',
+    sourceHint,
+  ].filter(Boolean).join('\n')
+}
+
+function summarizeModuleTreeRequirementForProposal(text: string): {
+  domainLabel: string
+  completenessLabel: string
+  signals: string[]
+} {
+  const normalized = String(text || '').toLowerCase()
+  const signals: string[] = []
+
+  const checks: Array<[string, RegExp]> = [
+    ['客户/联系人', /客户|联系人|customer|client/],
+    ['询盘/报价', /询盘|报价|inquiry|quote|quotation/],
+    ['订单/合同', /订单|合同|order|contract/],
+    ['采购/生产', /采购|生产|供应商|purchase|production|supplier/],
+    ['仓储/出运', /仓储|库存|入库|出库|出运|物流|warehouse|inventory|shipping/],
+    ['单证/报关', /单证|报关|发票|装箱单|提单|清关|document|customs|invoice|packing|bill of lading/],
+    ['财务/收款', /财务|收款|应收|付款|finance|payment|receivable/],
+    ['页面/字段', /页面|列表|详情|新建|字段|表单|弹窗|page|field|form/],
+    ['状态/权限', /状态|权限|角色|审批|确认|status|permission|role|approve/],
+  ]
+
+  for (const [label, pattern] of checks) {
+    if (pattern.test(normalized)) {
+      signals.push(label)
+    }
+  }
+
+  let domainLabel = '通用企业业务系统'
+  if (/外贸|跨境|出口|询盘|报价|报关|单证|提单|目的港|foreign trade|export|customs/.test(normalized)) {
+    domainLabel = '外贸订单履约 / 跨境出口业务'
+  } else if (/仓储|库存|入库|出库|wms|warehouse|inventory/.test(normalized)) {
+    domainLabel = '仓储库存 / 供应链业务'
+  } else if (/电商|商城|零售|购物|会员|ecommerce|mall|shop/.test(normalized)) {
+    domainLabel = '电商零售业务'
+  } else if (/财务|收款|应收|账务|金融|finance|payment/.test(normalized)) {
+    domainLabel = '财务收款 / 资金管理业务'
+  }
+
+  let completenessLabel = '偏少，建议先补充业务对象、用户角色和核心流程'
+  if (signals.length >= 7 || text.length > 1600) {
+    completenessLabel = '较完整，可直接生成模块树，也可让 AI 先补齐细节后生成'
+  } else if (signals.length >= 4 || text.length > 500) {
+    completenessLabel = '中等，可生成主要模块树，建议 AI 补齐页面、字段、状态和权限'
+  }
+
+  return {
+    domainLabel,
+    completenessLabel,
+    signals,
+  }
+}
+
+function trimModuleTreePreflightText(value: string, maxLength = 240): string {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  if (text.length <= maxLength) return text
+  return `${text.slice(0, maxLength)}...`
+}
+
+void trimModuleTreePreflightText // A9.10.14.4.3.15.6.18_BUILD_TYPE_HOTFIX
+
+
+
+function isAssistantModuleTreePreflightResponse(
+  response: AssistantMessageResponse | null | undefined,
+): boolean {
+  if (!response || moduleTreeExists.value) {
+    return false
+  }
+
+  const intent = String(response.intent || '').trim()
+  if (intent === 'GENERATE_MODULE_TREE') {
+    return true
+  }
+
+  const hasGenerateModuleTreeAction = Boolean(
+    response.actions?.some((action) => String(action.type || '').trim() === 'GENERATE_MODULE_TREE'),
+  )
+
+  if (hasGenerateModuleTreeAction) {
+    return true
+  }
+
+  const reply = String(response.reply || '').trim()
+  return /已识别为模块树生成请求|生成结构化模块树|导入 PRD 并生成模块树|迁移为 CodeMind 模块树/.test(reply)
+}
 function resolveAssistantActionRequirementText(
   response: AssistantMessageResponse,
 ): string {
@@ -1168,6 +1764,9 @@ function resolveAssistantActionModelingMode(
   return null
 }
 
+void resolveAssistantActionModelingMode // A9.10.14.4.3.15.6.18_BUILD_TYPE_HOTFIX
+
+
 function resolvePreferredNodeAfterModuleTreeGenerated(
   tree: ModuleTreeNode[],
 ): ModuleTreeNode | null {
@@ -1190,10 +1789,6 @@ function buildModuleTreeGeneratedAssistantMessage(
   const selectedNodeName = selectedNode
     ? getModuleDisplayName(selectedNode)
     : ''
-
-  const selectedNodeType = selectedNode
-    ? resolveRequirementNodeType(selectedNode)
-    : null
 
   const selectedPart = selectedNode
     ? `已自动选中“${selectedNodeName}”，你可以直接查看和完善当前内容。`
@@ -1678,6 +2273,42 @@ function isUnauthorizedAssistantError(error: unknown): boolean {
   return candidates.some((item) => item === 'UNAUTHORIZED' || item.includes('UNAUTHORIZED') || item === '401')
 }
 
+
+// A9.10.14.4.3.15.4.14.9_EXISTING_TREE_COMPLETION_ROUTE
+function resolveExistingModuleTreeCompletionPatchInstruction(rawText: string): string {
+  const text = String(rawText || '').trim()
+  if (!text || !moduleTreeExists.value) {
+    return ''
+  }
+
+  const compact = text.replace(/\s+/g, '')
+  const hasCompletionVerb = /补齐|补全|完善|拆分|细化|扩展|补上|增加|添加|生成|创建/.test(compact)
+  const hasTreeTarget = /模块树|一级模块|所有模块|全部模块|当前模块树|业务能力|功能点|页面入口|页面节点|对应页面|页面/.test(compact)
+  const isAssetOnly = /模块PRD|MODULE_PRD|需求说明|页面规范|PAGE_SPEC|交互原型|UI_CONTRACT|接口契约|API_CONTRACT|数据模型|DATA_MODEL|测试规格|TEST_SPEC/.test(compact)
+
+  if (!hasCompletionVerb || !hasTreeTarget || isAssetOnly) {
+    return ''
+  }
+
+  return [
+    '请生成“模块树变更提案”，不要创建 MODULE_PRD、PAGE_SPEC 或其他需求资产生成任务。',
+    '',
+    '用户原始诉求：',
+    text,
+    '',
+    '执行目标：',
+    '- 基于当前已有模块树，为所有一级 MODULE 补齐业务能力和页面入口。',
+    '- 每个一级模块建议补齐 2 到 5 个 FEATURE 或 PAGE。',
+    '- FEATURE 表达业务能力，PAGE 表达可进入后续 PAGE_SPEC / UI_CONTRACT 的页面入口。',
+    '- 不要覆盖已有一级模块，不要删除已有模块。',
+    '- 输出应进入 PROPOSE_MODULE_TREE_PATCH 流程，由用户确认后再应用到左侧模块树。',
+  ].join('\n')
+}
+
+void resolveExistingModuleTreeCompletionPatchInstruction // A9.10.14.4.3.15.6.18_BUILD_TYPE_HOTFIX
+
+
+
 function showAssistantSafeError(error: unknown, fallbackMessage: string): void {
   if (isUnauthorizedAssistantError(error)) {
     const message = '登录状态已过期，请重新登录后再继续。'
@@ -1749,8 +2380,15 @@ async function handleAssistantSend(payload: {
     return
   }
 
+  const existingTreeCompletionPatchInstruction = ''
+
   latestAssistantResponse.value = null
   isSendingAssistantMessage.value = true
+
+  if (await tryHandleModuleTreePreflightReply(trimmedText)) {
+    isSendingAssistantMessage.value = false
+    return
+  }
 
   if (await tryHandlePrototypeLocalEdit(trimmedText)) {
     isSendingAssistantMessage.value = false
@@ -1762,26 +2400,27 @@ async function handleAssistantSend(payload: {
       props.workspace.workspaceId,
       props.project.projectCode,
       {
-        message: trimmedText,
+        message: existingTreeCompletionPatchInstruction || trimmedText,
+        expectedIntent: existingTreeCompletionPatchInstruction ? 'PROPOSE_MODULE_TREE_PATCH' : null,
         selectedNodeId: selectedModule.value?.id || null,
         selectedArtifactType: selectedArtifactType.value || null,
         attachments: payload.attachments || [],
       },
     )
 
+    if (isAssistantModuleTreePreflightResponse(response)) {
+      showModuleTreePreflightProposal(
+        resolveAssistantActionRequirementText(response) || trimmedText,
+        response,
+      )
+      return
+    }
+
     latestAssistantResponse.value = response
     await loadAssistantMessageHistory()
 
     if (response.intent === 'EXECUTE_UI_COMMAND') {
       await executeAssistantActions(response.actions || [])
-      return
-    }
-
-    if (response.intent === 'GENERATE_MODULE_TREE') {
-      await handleGenerateModuleTree(
-        resolveAssistantActionRequirementText(response) || trimmedText,
-        resolveAssistantActionModelingMode(response) || (hasReadyAttachment ? 'FULL_ENTERPRISE_BLUEPRINT' : 'PROGRESSIVE_MODULE_OUTLINE'),
-      )
       return
     }
 
@@ -1836,7 +2475,10 @@ async function tryHandlePrototypeLocalEdit(instruction: string): Promise<boolean
     return false
   }
 
-  const sourceContract = uiContractDraftContent.value || uiContractArtifact.value?.content
+  const sourceContract =
+    prototypeEditDraftDirty.value && uiContractDraftContent.value
+      ? uiContractDraftContent.value
+      : uiContractArtifact.value?.content
 
   if (!sourceContract) {
     return false
@@ -2062,6 +2704,8 @@ async function handleSavePrototypeEditDraft() {
 
   try {
     const content = uiContractDraftContent.value as Record<string, unknown>
+    const previousContract =
+      (uiContractArtifact.value?.content as Record<string, unknown> | null) || null
 
     const response = await saveManualArtifactEdit(
       props.workspace.workspaceId,
@@ -2086,7 +2730,10 @@ async function handleSavePrototypeEditDraft() {
       loadDevelopmentHandoffReadiness(),
     ])
 
+    await syncContractSemanticsBackToModulePrd(content, previousContract)
+
     resetPrototypeLocalEditDraft()
+    a94371ClearRequirementImpactForPage(selectedModule.value)
 
     // A9_6_14_REFRESH_AFTER_PROTOTYPE_SAVE
     if (selectedModule.value) {
@@ -2122,6 +2769,59 @@ async function handleSavePrototypeEditDraft() {
   }
 }
 
+async function syncContractSemanticsBackToModulePrd(
+  content: Record<string, unknown>,
+  previousContract: Record<string, unknown> | null,
+): Promise<void> {
+  if (!previousContract || !selectedModule.value) return
+
+  const delta = classifyContractToPrdChange(content, previousContract)
+  if (!delta.changed || delta.classification === 'VISUAL_ONLY') return
+
+  const ownerModule = resolveOwningModuleForSubmodule(selectedModule.value)
+  if (!ownerModule?.id) return
+
+  try {
+    const prdArtifact = await fetchCurrentModuleArtifact(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      ownerModule.id,
+      'MODULE_PRD',
+    )
+    if (
+      !prdArtifact?.content ||
+      typeof prdArtifact.content !== 'object' ||
+      Array.isArray(prdArtifact.content)
+    ) {
+      return
+    }
+
+    const applied = applyContractDeltaToModulePrd(
+      prdArtifact.content,
+      selectedModule.value,
+      delta,
+    )
+    if (!applied?.changed) return
+
+    await saveManualArtifactEdit(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      ownerModule.id,
+      {
+        artifactId: prdArtifact.artifactId || null,
+        artifactType: 'MODULE_PRD',
+        content: applied.content,
+        contentMarkdown:
+          prdArtifact.contentMarkdown || JSON.stringify(applied.content, null, 2),
+        reason: '交互原型语义调整反向同步到模块需求。',
+      } as any,
+    )
+
+    await Promise.allSettled([loadAllCurrentModuleArtifacts(ownerModule)])
+  } catch (error) {
+    console.warn('[reverse-sync] contract -> module prd failed:', error)
+  }
+}
 
 function buildPrototypeSaveFeedbackMessage(
   response: Record<string, any>,
@@ -3122,9 +3822,35 @@ async function handleSaveManualArtifactEdit(
     return
   }
 
-  const previousPrdContentForImpact = payload.artifactType === 'MODULE_PRD'
+  let previousPrdContentForImpact = payload.artifactType === 'MODULE_PRD'
     ? a91545ResolveCurrentModulePrdContentForImpact()
     : null
+
+  if (payload.artifactType === 'MODULE_PRD' && !previousPrdContentForImpact && selectedModule.value?.id) {
+    try {
+      const currentPrdArtifact = await fetchCurrentModuleArtifact(
+        props.workspace.workspaceId,
+        props.project.projectCode,
+        selectedModule.value.id,
+        'MODULE_PRD',
+      )
+
+      if (
+        currentPrdArtifact?.content &&
+        typeof currentPrdArtifact.content === 'object' &&
+        !Array.isArray(currentPrdArtifact.content)
+      ) {
+        previousPrdContentForImpact = a91545CloneRecord(currentPrdArtifact.content as Record<string, any>)
+      }
+    } catch (error) {
+      console.warn('[A9.10.14.4.3.15.7.24L3B5A2] fetch previous MODULE_PRD for impact failed:', error)
+    }
+  }
+
+  const prdChangeImpactReportForSave = a91576BuildAndAttachPrdChangeImpactReport(
+    payload,
+    previousPrdContentForImpact,
+  )
 
   manualArtifactEditSaving.value = true
 
@@ -3146,8 +3872,21 @@ async function handleSaveManualArtifactEdit(
 
     let precisePrdImpactMessage = ''
 
+    let pageRequirementTreeSyncWarning = ''
+
     if (payload.artifactType === 'MODULE_PRD') {
-      await a91522SyncModuleTreeFromModulePrdPageRequirements(payload, response)
+      try {
+        await a91522SyncModuleTreeFromModulePrdPageRequirements(payload, response)
+      } catch (syncError) {
+        const syncMessage = resolveErrorMessage(syncError, 'PRD 页面设计同步模块树失败。')
+        console.warn('[A9.10.14.4.3.15.7.24L3B4B_V2] PRD page_requirements -> module tree sync failed:', syncError)
+
+        pageRequirementTreeSyncWarning = syncMessage === 'UNAUTHORIZED'
+          ? '模块需求已保存，但登录状态已失效，页面设计暂未同步到左侧模块树。请刷新页面重新登录后，再保存一次页面设计。'
+          : `模块需求已保存，但页面设计暂未同步到左侧模块树：${syncMessage}`
+
+        ;(response as any).message = pageRequirementTreeSyncWarning
+      }
       precisePrdImpactMessage = a91545ApplyPrecisePrdEditImpact(
         payload,
         response,
@@ -3195,7 +3934,7 @@ async function handleSaveManualArtifactEdit(
     }
 
     artifactTaskFeedback.value = {
-      level: 'success',
+      level: pageRequirementTreeSyncWarning ? 'warning' : 'success',
       message:
         precisePrdImpactMessage ||
         response.message ||
@@ -3654,6 +4393,14 @@ async function handleProjectStyleOverrideAssistantCommand(
     return false
   }
 
+  // A9.10.14.4.3.15.4.13_ASSISTANT_MODULE_TREE_ENTRY_ROUTE
+  // Before the project has a module tree, the right-side AI Assistant is the
+  // requirement-entry point. Business text such as "外贸订单履约管理平台" must go
+  // to module-tree generation, not to project visual style locking.
+  if (!modules.value.length) {
+    return false
+  }
+
   if (isProjectStyleAutoModeCommand(instruction)) {
     await applyProjectStyleAutoMode(instruction)
     return true
@@ -3683,6 +4430,26 @@ function resolveProjectStyleOverridePreset(
   }
 
   const normalized = text.toLowerCase()
+
+  // A9.10.14.4.3.15.4.13_ASSISTANT_MODULE_TREE_ENTRY_ROUTE
+  // 外贸/跨境材料 usually contains "订单/商品", but that does not mean 电商零售风.
+  // Match foreign-trade before commerce so explicit business domain wins.
+  if (/外贸|跨境|贸易|询盘|报价|报关|出口|进口|海运|shipment|export|quotation|inquiry|foreign/.test(text) || /shipment|export|quotation|inquiry|foreign/.test(normalized)) {
+    return {
+      industry: 'FOREIGN_TRADE' as unknown as UpdateProjectThemeProfileRequest['industry'],
+      themeKey: 'enterprise_default',
+      visualTone: 'CLEAN',
+      primaryColor: '#2563eb',
+      secondaryColor: '#eff6ff',
+      accentColor: '#14b8a6',
+      density: 'STANDARD',
+      radius: 'MEDIUM',
+      loginLayout: 'BRAND_SPLIT',
+      navigationStyle: 'SIDE_NAV',
+      label: '外贸国际化风',
+      summary: '更干净国际化，突出客户、询盘、报价、订单和物流节点。',
+    }
+  }
 
   if (/电商|商城|零售|商品|购物|订单运营|commerce|retail|shop/.test(text) || /commerce|retail|shop/.test(normalized)) {
     return {
@@ -3860,6 +4627,13 @@ function resolveProjectStyleOverridePreset(
 function looksLikeProjectStyleOverrideInstruction(
   text: string,
 ): boolean {
+  // A9.10.14.4.3.15.4.13_ASSISTANT_MODULE_TREE_ENTRY_ROUTE
+  // Style override is a prototype/page-stage command. Empty-project input is
+  // always treated as requirement material for module-tree generation.
+  if (!modules.value.length) {
+    return false
+  }
+
   const styleSignal =
     /(风格|样式|主题|视觉|配色|颜色|界面|UI|圆角|密度|卡片|蓝灰|SaaS|saas|电商|仓储|外贸|工单|金融|政企|制造|CRM|crm|严肃|现代|科技|国际化)/.test(text)
 
@@ -4115,7 +4889,7 @@ function a915241BuildLegacyPrdMigrationRequirementText(
     `请用 LLM 升级当前「${moduleName}」MODULE_PRD。`,
     '这是旧 PRD 迁移，不是模块树结构变更。',
     '请保留当前旧 PRD 中已经合理的业务内容、业务规则、状态规则、异常场景和验收要点。',
-    '请重构为新版结构化 MODULE_PRD，并必须补齐 content.page_requirements 与“页面需求与原型契约”章节。',
+    '请重构为新版结构化 MODULE_PRD，并必须补齐 content.page_requirements 与“功能需求与页面需求”章节。',
     pageNames.length
       ? `page_requirements 必须覆盖当前 MODULE 下全部 PAGE：${pageNames.join('、')}。`
       : 'page_requirements 必须覆盖当前 MODULE 下全部 PAGE。',
@@ -4160,7 +4934,7 @@ async function a915241ApplyLegacyPrdMigrationProposal(
   try {
     artifactTaskFeedback.value = {
       level: 'info',
-      message: '正在创建旧 PRD 升级任务：Requirement Agent 将调用 LLM 补齐页面需求与原型契约。',
+      message: '正在创建旧 PRD 升级任务：Requirement Agent 将调用 LLM 补齐功能需求与页面需求。',
     }
 
     await startAsyncArtifactTask('GENERATE_MODULE_PRD')
@@ -4184,7 +4958,7 @@ async function a915241ApplyLegacyPrdMigrationProposal(
     latestAssistantResponse.value = {
       messageId: `legacy_prd_migration_started_${Date.now()}`,
       intent: 'GENERATE_REQUIREMENT_ARTIFACT',
-      reply: '已创建旧 PRD 升级任务。完成后请回到 MODULE_PRD 查看“页面需求与原型契约”章节，并确认每个 PAGE 都有 page_requirements。',
+      reply: '已创建旧 PRD 升级任务。完成后请回到 MODULE_PRD 查看“功能需求与页面需求”章节，并确认每个 PAGE 都有 page_requirements。',
       requiresUserConfirmation: false,
       proposal: null,
       requirementChangeProposal: null,
@@ -4220,7 +4994,7 @@ async function handleApplyTreePatchProposal(
   isApplyingTreePatch.value = true
 
   try {
-    const previousTree = a9152DeepCloneModuleTree(modules.value)
+  const previousTree = a9152DeepCloneModuleTree(modules.value)
     const currentSelectedModuleId = selectedModule.value?.id || null
     const addOperations = operations.filter(
       (operation) => operation.op === 'ADD_NODE',
@@ -4323,14 +5097,20 @@ const response = await applyModuleTreePatch(
       message: successMessage,
     }
 
+    // A9.10.14.4.3.15.4.15.6.7_PATCH_APPLY_SUCCESS_ASSISTANT_FEEDBACK
+    treePatchProposal.value = null
+    // A9.10.14.4.3.15.6.10_TREE_PATCH_SUCCESS_RESPONSE_FINAL
+    // A9.10.14.4.3.15.6.11_TREE_PATCH_SUCCESS_RESPONSE_STABLE
     latestAssistantResponse.value = {
-      messageId: `module_tree_patch_applied_${Date.now()}`,
-      intent: 'PROPOSE_MODULE_TREE_PATCH',
+      messageId: `tree_patch_apply_success_${Date.now()}`,
+      intent: 'GENERAL_QA',
       reply: successMessage,
       requiresUserConfirmation: false,
       proposal: null,
       requirementChangeProposal: null,
       assetEditProposal: null,
+      attachmentDrivenChangeProposal: null,
+      attachmentArtifactDiffProposal: null,
       actions: [],
     }
   } catch (error) {
@@ -4762,7 +5542,7 @@ function a91524MaybeSuggestLegacyPrdMigration(node: ModuleTreeNode): void {
 
   const instruction = [
     '请重新生成当前 MODULE_PRD：基于当前模块树和旧 PRD，调用 Requirement Agent 升级为新版结构化 PRD。',
-    '必须保留旧 PRD 已有业务内容和章节语义，只补齐或重构结构化 content.page_requirements / 页面需求与原型契约。',
+    '必须保留旧 PRD 已有业务内容和章节语义，只补齐或重构结构化 content.page_requirements / 功能需求与页面需求。',
     'page_requirements 必须覆盖当前 MODULE 下全部 PAGE，并锁定 page_key、page_name、page_type、route_path、form_fields、table_columns、primary_actions、row_actions。',
     '不要修改 Development Agent，不要生成 Node.js 代码，不要直接改 UI_CONTRACT。',
   ].join('\n')
@@ -4773,7 +5553,7 @@ function a91524MaybeSuggestLegacyPrdMigration(node: ModuleTreeNode): void {
     reply: [
       `检测到当前模块“${getModuleDisplayName(node)}”已有旧版 PRD，但还没有新版结构化页面契约 page_requirements。`,
       `当前模块树下已有 ${pageNodes.length} 个 PAGE：${pageNames}${pageNodes.length > 6 ? '等' : ''}。`,
-      '建议用 LLM 升级旧 PRD：保留旧文档语义，同时补齐“页面需求与原型契约”章节。',
+      '建议用 LLM 升级旧 PRD：保留旧文档语义，同时补齐“功能需求与页面需求”章节。',
     ].join('\n'),
     requiresUserConfirmation: false,
     proposal: null,
@@ -4858,6 +5638,102 @@ function closeNodeEditor() {
   nodeEditorVisible.value = false
   nodeEditorParent.value = null
   nodeEditorTarget.value = null
+}
+
+
+// A9.10.14.4.3.15.6.24L0B_NO_VISIBLE_FEATURE_ON_CREATE_OR_PRD_COMPLETION
+// FEATURE is now an internal capability concept. Manual tree creation must not
+// create visible FEATURE nodes anymore. MODULE/SUBMODULE children that arrive as
+// FEATURE from legacy editor defaults are normalized into PAGE before API submit.
+function a924L0BNormalizeNodeEditorPayload(
+  payload: {
+    moduleName: string
+    moduleKey?: string
+    moduleType: string
+    extra: Record<string, unknown>
+  },
+  parentNode: ModuleTreeNode | null | undefined,
+  mode: 'create-root' | 'create-child' | 'edit',
+): {
+  moduleName: string
+  moduleKey?: string
+  moduleType: string
+  extra: Record<string, unknown>
+} {
+  const parentType = resolveRequirementNodeType(parentNode)
+  const rawType = String(payload.moduleType || '').trim().toUpperCase()
+
+  if (
+    mode === 'create-child' &&
+    (parentType === 'MODULE' || parentType === 'SUBMODULE') &&
+    (
+      rawType === 'FEATURE' ||
+      rawType === '' ||
+      (rawType === 'MODULE' && a924L0BLooksLikePageCreatePayload(payload))
+    )
+  ) {
+    const pageName = String(payload.moduleName || '').trim() || '新页面'
+    const extra = {
+      ...(payload.extra || {}),
+      nodeType: 'PAGE',
+      type: 'PAGE',
+      moduleType: 'PAGE',
+      canGenerateUiContract: true,
+      pageKind: a924L0BInferPageKindFromName(pageName),
+      routePath: String((payload.extra || {}).routePath || (payload.extra || {}).route_path || '').trim(),
+      featureLayerHiddenFromUser: true,
+      capabilityDraft: {
+        source: 'MANUAL_CREATE_FEATURE_NORMALIZED_TO_PAGE',
+        originalRequestedType: rawType,
+        originalName: pageName,
+        ownerModuleId: parentNode?.id || null,
+        ownerModuleName: parentNode ? getModuleDisplayName(parentNode) : '',
+      },
+    }
+
+    return {
+      ...payload,
+      moduleName: pageName === '新功能点' ? '新页面' : pageName,
+      moduleType: 'PAGE',
+      extra,
+    }
+  }
+
+  return payload
+}
+
+
+function a924L0BLooksLikePageCreatePayload(payload: {
+  moduleName: string
+  moduleKey?: string
+  moduleType: string
+  extra: Record<string, unknown>
+}): boolean {
+  const name = String(payload.moduleName || '').trim()
+  const extra = payload.extra || {}
+  const signal = [
+    name,
+    String(extra.nodeType || ''),
+    String(extra.moduleType || ''),
+    String(extra.type || ''),
+    String(extra.pageKind || ''),
+    String(extra.pageType || ''),
+    String(extra.layoutType || ''),
+    String(extra.routePath || ''),
+    String(extra.route_path || ''),
+  ].join(' ')
+
+  return /页|页面|弹窗|弹框|列表|详情|新建|新增|编辑|维护|查看|查询|表单|日志|确认|取消|状态|异常|PAGE|LIST|DETAIL|CREATE|EDIT|FORM|DIALOG/i.test(signal)
+}
+
+function a924L0BInferPageKindFromName(nameInput: string): string {
+  const name = String(nameInput || '').trim()
+  if (/列表|查询|管理/.test(name)) return 'LIST_PAGE'
+  if (/详情|查看/.test(name)) return 'DETAIL_PAGE'
+  if (/编辑|修改/.test(name)) return 'EDIT_PAGE'
+  if (/新建|新增|创建|录入|表单/.test(name)) return 'CREATE_PAGE'
+  if (/弹窗|确认|取消|解锁|提交|状态|异常/.test(name)) return 'DIALOG'
+  return 'FORM_PAGE'
 }
 
 async function handleSubmitNodeEditor(payload: {
@@ -5045,6 +5921,7 @@ async function applyModuleMutationResponse(
 // PAGE nodes and PRD page cards aligned without touching Development Agent code.
 type A9152PrdPageGroup = {
   module: ModuleTreeNode
+  features: ModuleTreeNode[]
   pages: ModuleTreeNode[]
   signature: string
 }
@@ -5101,23 +5978,25 @@ async function a9152SyncModuleTreePageRequirementsToModulePrd(
     try {
       const changed = await a9152SaveSyncedModulePrdPageRequirements(
         group.module,
+        group.features,
         group.pages,
         request.source,
       )
 
       if (changed) {
         syncedCount += 1
-        a94371MarkRequirementImpactForDescendantPages(group.module)
+        // A9.10.14.4.3.15.7.24L3B4D: disabled descendant-wide PRD impact marker.
+        void group.module
       }
     } catch (error) {
-      console.warn('[A9.10.14.4.3.15.2.1] MODULE_PRD page_requirements sync failed:', error)
+      console.warn('[A9.10.14.4.3.15.2.1] MODULE_PRD functional/page requirements sync failed:', error)
     }
   }
 
   if (syncedCount > 0) {
     artifactTaskFeedback.value = {
       level: 'success',
-      message: `模块树 PAGE 变化已自动同步到 ${syncedCount} 个模块需求的“页面需求与原型契约”章节。`,
+      message: `模块树 PAGE 变化已自动同步到 ${syncedCount} 个模块需求的“功能需求与页面需求”章节。`,
     }
 
     if (
@@ -5134,17 +6013,42 @@ async function a9152SyncModuleTreePageRequirementsToModulePrd(
 }
 
 function a9152CollectPrdPageGroups(tree: ModuleTreeNode[]): Map<string, A9152PrdPageGroup> {
-  const groups = new Map<string, { module: ModuleTreeNode; pages: ModuleTreeNode[] }>()
+  // A9.10.14.4.3.15.6.13_FEATURE_PAGE_PRD_SYNC
+  // MODULE_TREE 是 FEATURE/PAGE 存在性的权威；PRD 的 functional_requirements/page_requirements
+  // 必须按当前树重建，避免删掉节点后 PRD 仍保留陈旧功能需求。
+  const groups = new Map<string, { module: ModuleTreeNode; features: ModuleTreeNode[]; pages: ModuleTreeNode[] }>()
+
+  const ensureGroup = (moduleNode: ModuleTreeNode): { module: ModuleTreeNode; features: ModuleTreeNode[]; pages: ModuleTreeNode[] } | null => {
+    if (!moduleNode?.id) {
+      return null
+    }
+
+    const key = String(moduleNode.id)
+    const existing = groups.get(key)
+
+    if (existing) {
+      return existing
+    }
+
+    const created = { module: moduleNode, features: [], pages: [] }
+    groups.set(key, created)
+    return created
+  }
 
   const visit = (node: ModuleTreeNode, owner: ModuleTreeNode | null) => {
     const nodeType = resolveRequirementNodeType(node)
     const nextOwner = nodeType === 'MODULE' ? node : owner
 
-    if (nodeType === 'PAGE' && nextOwner?.id) {
-      const key = String(nextOwner.id)
-      const existing = groups.get(key) || { module: nextOwner, pages: [] }
-      existing.pages.push(node)
-      groups.set(key, existing)
+    if (nodeType === 'MODULE') {
+      ensureGroup(node)
+    }
+
+    if (nextOwner?.id && nodeType === 'FEATURE') {
+      ensureGroup(nextOwner)?.features.push(node)
+    }
+
+    if (nextOwner?.id && nodeType === 'PAGE') {
+      ensureGroup(nextOwner)?.pages.push(node)
     }
 
     for (const child of node.children || []) {
@@ -5159,18 +6063,47 @@ function a9152CollectPrdPageGroups(tree: ModuleTreeNode[]): Map<string, A9152Prd
   const result = new Map<string, A9152PrdPageGroup>()
 
   for (const [moduleId, group] of groups.entries()) {
+    const features = [...group.features].sort((a, b) =>
+      a9152ComparableFeatureIdentity(a).localeCompare(a9152ComparableFeatureIdentity(b)),
+    )
     const pages = [...group.pages].sort((a, b) =>
       a9152ComparablePageIdentity(a).localeCompare(a9152ComparablePageIdentity(b)),
     )
+
     result.set(moduleId, {
       module: group.module,
+      features,
       pages,
-      signature: JSON.stringify(pages.map(a9152PageSignature)),
+      signature: JSON.stringify({
+        features: features.map(a9152FeatureSignature),
+        pages: pages.map(a9152PageSignature),
+      }),
     })
   }
 
   return result
 }
+
+
+function a9152FeatureSignature(node: ModuleTreeNode): Record<string, unknown> {
+  return {
+    id: node.id || '',
+    parentId: node.parentId || '',
+    key: a9152NodeStableKey(node),
+    name: getModuleDisplayName(node),
+    type: resolveRequirementNodeType(node),
+  }
+}
+
+
+function a9152ComparableFeatureIdentity(node: ModuleTreeNode): string {
+  return [
+    a9152NodeStableKey(node),
+    getModuleDisplayName(node),
+    node.id || '',
+  ].join('|')
+}
+
 
 function a9152PageSignature(node: ModuleTreeNode): Record<string, unknown> {
   return {
@@ -5211,10 +6144,22 @@ function a9152ResolveOwnerModuleIdFromOldTree(
 
 async function a9152SaveSyncedModulePrdPageRequirements(
   moduleNode: ModuleTreeNode,
-  pageNodes: ModuleTreeNode[],
-  source: string,
+  featureNodesInput: ModuleTreeNode[],
+  pageNodesInput: ModuleTreeNode[] | string,
+  sourceInput?: string,
 ): Promise<boolean> {
+  // A9.10.14.4.3.15.6.13_FEATURE_PAGE_PRD_SYNC_SAVE
   if (!moduleNode.id) return false
+
+  const featureNodes = Array.isArray(pageNodesInput)
+    ? featureNodesInput
+    : a915213CollectOwnedFeatureNodes(moduleNode)
+  const pageNodes = Array.isArray(pageNodesInput)
+    ? pageNodesInput
+    : featureNodesInput
+  const source = Array.isArray(pageNodesInput)
+    ? String(sourceInput || 'MODULE_TREE_MUTATION')
+    : String(pageNodesInput || 'MODULE_TREE_MUTATION')
 
   let artifact: any | null = null
 
@@ -5242,6 +6187,32 @@ async function a9152SaveSyncedModulePrdPageRequirements(
     source,
   )
 
+  // A9.10.14.4.3.15.6.24L0A_FEATURE_LAYER_RETIRE_TO_CAPABILITY
+  // FEATURE is no longer required as a visible tree node. If a MODULE has no
+  // FEATURE nodes, preserve existing functional_requirements from MODULE_PRD.
+  // Page existence still remains synchronized from MODULE_TREE.
+  if (featureNodes.length > 0) {
+    a915213SyncFeatureRequirementsInContent(
+      nextContent,
+      moduleNode,
+      featureNodes,
+      source,
+    )
+  } else {
+    const oldSync = a9152Record(nextContent._module_tree_prd_sync)
+      ? nextContent._module_tree_prd_sync as Record<string, any>
+      : {}
+
+    nextContent._module_tree_prd_sync = {
+      ...oldSync,
+      featureCount: Array.isArray(nextContent.functional_requirements)
+        ? nextContent.functional_requirements.length
+        : 0,
+      featureAuthority: 'MODULE_PRD_FUNCTIONAL_REQUIREMENTS',
+      featureSyncMode: 'PRESERVE_WHEN_FEATURE_TREE_LAYER_HIDDEN',
+    }
+  }
+
   const afterSignature = a9152PrdPageRequirementsSignature(nextContent)
 
   if (beforeSignature === afterSignature) {
@@ -5263,12 +6234,228 @@ async function a9152SaveSyncedModulePrdPageRequirements(
       artifactType: 'MODULE_PRD',
       content: nextContent,
       contentMarkdown: nextMarkdown,
-      reason: `模块树 PAGE 变化自动同步到 PRD 页面需求：${source}`,
+      reason: `模块树 PAGE 变化自动同步到 PRD 页面需求，功能清单保留在 MODULE_PRD：${source}`,
     } as any,
   )
 
   return true
 }
+
+
+function a915213CollectOwnedFeatureNodes(moduleNode: ModuleTreeNode): ModuleTreeNode[] {
+  const result: ModuleTreeNode[] = []
+
+  const visit = (node: ModuleTreeNode | null | undefined) => {
+    if (!node) return
+
+    if (node !== moduleNode && resolveRequirementNodeType(node) === 'FEATURE') {
+      result.push(node)
+    }
+
+    for (const child of node.children || []) {
+      visit(child)
+    }
+  }
+
+  visit(moduleNode)
+
+  return result.sort((a, b) =>
+    a9152ComparableFeatureIdentity(a).localeCompare(a9152ComparableFeatureIdentity(b)),
+  )
+}
+
+
+function a915213SyncFeatureRequirementsInContent(
+  nextContent: Record<string, any>,
+  moduleNode: ModuleTreeNode,
+  featureNodes: ModuleTreeNode[],
+  source: string,
+): void {
+  const existingFeatures = Array.isArray(nextContent.functional_requirements)
+    ? nextContent.functional_requirements
+        .map((item: unknown) => a9152Record(item) ? item as Record<string, any> : null)
+        .filter((item: Record<string, any> | null): item is Record<string, any> => Boolean(item))
+    : []
+
+  const usedExistingIndexes = new Set<number>()
+  const syncedFeatures = featureNodes.map((featureNode) => {
+    const matched = a915213FindExistingFeatureRequirement(
+      existingFeatures,
+      featureNode,
+      usedExistingIndexes,
+    )
+
+    return a915213BuildSyncedFeatureRequirement(featureNode, matched, moduleNode)
+  })
+
+  const activeKeys = new Set(
+    syncedFeatures.map((item) =>
+      a9152NormalizeKey(
+        item.requirement_key ||
+        item.requirementKey ||
+        item.feature_key ||
+        item.featureKey ||
+        item.title ||
+        item.requirement_name ||
+        item.name,
+      ),
+    ),
+  )
+
+  const archived = [
+    ...a9152Array(nextContent._archived_functional_requirements)
+      .filter((item): item is Record<string, any> => a9152Record(item)),
+    ...existingFeatures
+      .filter((_, index) => !usedExistingIndexes.has(index))
+      .filter((item) => !activeKeys.has(a915213FeatureRequirementStableKey(item)))
+      .map((item) => ({
+        ...item,
+        archived: true,
+        archived_at: new Date().toISOString(),
+        archived_reason: 'MODULE_TREE_FEATURE_REMOVED_OR_MOVED',
+      })),
+  ]
+
+  nextContent.functional_requirements = syncedFeatures
+
+  if (archived.length > 0) {
+    nextContent._archived_functional_requirements = a9152DedupeRecordsByKey(
+      archived,
+      (item) => a915213FeatureRequirementStableKey(item) || a9152NormalizeKey(JSON.stringify(item)),
+    )
+  } else {
+    delete nextContent._archived_functional_requirements
+  }
+
+  const oldSync = a9152Record(nextContent._module_tree_prd_sync)
+    ? nextContent._module_tree_prd_sync as Record<string, any>
+    : {}
+
+  nextContent._module_tree_prd_sync = {
+    ...oldSync,
+    syncedAt: new Date().toISOString(),
+    source,
+    featureCount: syncedFeatures.length,
+    authority: 'MODULE_TREE_FEATURE_PAGE_EXISTENCE_TO_MODULE_PRD_REQUIREMENTS',
+  }
+}
+
+
+function a915213FindExistingFeatureRequirement(
+  existingFeatures: Record<string, any>[],
+  featureNode: ModuleTreeNode,
+  usedIndexes: Set<number>,
+): Record<string, any> | null {
+  const candidates = [
+    featureNode.id,
+    a9152NodeStableKey(featureNode),
+    getModuleDisplayName(featureNode),
+  ].map(a9152NormalizeKey).filter(Boolean)
+
+  let bestIndex = -1
+  let bestScore = 0
+
+  existingFeatures.forEach((item, index) => {
+    if (usedIndexes.has(index)) return
+
+    const keys = [
+      item.node_id,
+      item.nodeId,
+      item.feature_node_id,
+      item.featureNodeId,
+      item.module_id,
+      item.requirement_key,
+      item.requirementKey,
+      item.feature_key,
+      item.featureKey,
+      item.key,
+      item.title,
+      item.requirement_name,
+      item.requirementName,
+      item.name,
+    ].map(a9152NormalizeKey).filter(Boolean)
+
+    let score = 0
+    for (const candidate of candidates) {
+      if (candidate && keys.includes(candidate)) {
+        score += 1
+      }
+    }
+
+    if (score > bestScore) {
+      bestScore = score
+      bestIndex = index
+    }
+  })
+
+  if (bestIndex < 0) {
+    return null
+  }
+
+  usedIndexes.add(bestIndex)
+  return existingFeatures[bestIndex]
+}
+
+
+function a915213BuildSyncedFeatureRequirement(
+  featureNode: ModuleTreeNode,
+  existing: Record<string, any> | null,
+  moduleNode: ModuleTreeNode,
+): Record<string, any> {
+  const featureName = getModuleDisplayName(featureNode)
+  const featureKey = a9152NodeStableKey(featureNode)
+  const extra = a9152NodeExtra(featureNode)
+
+  const result: Record<string, any> = {
+    ...(existing || {}),
+    node_id: featureNode.id || existing?.node_id || existing?.nodeId || null,
+    feature_node_id: featureNode.id || existing?.feature_node_id || existing?.featureNodeId || null,
+    module_id: moduleNode.id || existing?.module_id || existing?.moduleId || null,
+    requirement_key: featureKey,
+    feature_key: featureKey,
+    title: featureName,
+    requirement_name: featureName,
+    description:
+      a9152Text(existing?.description) ||
+      a9152Text((featureNode as any).description || extra.description || extra.summary) ||
+      `${featureName}用于支撑${getModuleDisplayName(moduleNode)}模块下的相关业务处理，并与当前模块的状态、权限和数据对象保持一致。`,
+    priority:
+      a9152Text(existing?.priority) ||
+      a9152Text((featureNode as any).priority || extra.priority) ||
+      'P1',
+    source_node_type: 'FEATURE',
+    sync_status: 'SYNCED_FROM_MODULE_TREE',
+  }
+
+  result._module_tree_sync = {
+    nodeId: featureNode.id || null,
+    nodeKey: featureKey,
+    nodeName: featureName,
+    syncedAt: new Date().toISOString(),
+  }
+
+  return result
+}
+
+
+function a915213FeatureRequirementStableKey(item: Record<string, any>): string {
+  return a9152NormalizeKey(
+    item.node_id ||
+    item.nodeId ||
+    item.feature_node_id ||
+    item.featureNodeId ||
+    item.requirement_key ||
+    item.requirementKey ||
+    item.feature_key ||
+    item.featureKey ||
+    item.key ||
+    item.title ||
+    item.requirement_name ||
+    item.requirementName ||
+    item.name,
+  )
+}
+
 
 function a9152BuildSyncedModulePrdContent(
   existingContent: Record<string, any>,
@@ -5661,10 +6848,13 @@ function a9152NodeExtra(node: ModuleTreeNode | null | undefined): Record<string,
 }
 
 function a9152PrdPageRequirementsSignature(content: Record<string, any>): string {
+  // A9.10.14.4.3.15.6.13_FEATURE_PAGE_PRD_SYNC_SIGNATURE
   return JSON.stringify({
     module_basic_info: content.module_basic_info || {},
+    functional_requirements: content.functional_requirements || [],
     page_requirements: content.page_requirements || [],
-    archived: content._archived_page_requirements || [],
+    archivedFunctional: content._archived_functional_requirements || [],
+    archivedPage: content._archived_page_requirements || [],
   })
 }
 
@@ -6048,25 +7238,58 @@ function a91545ApplyPrecisePrdEditImpact(
   }
 
   const owner = findA9ModuleTreeNodeById(modules.value, moduleNode.id) || moduleNode
-  const result = a91545ResolvePrecisePrdImpact(previousContent, nextContent, owner)
+  const embeddedReport = resolvePrdChangeImpactReport((nextContent as any)._prd_change_impact)
+  const impactReport = embeddedReport || analyzePrdChangeImpact({
+    previousContent,
+    nextContent,
+    ownerModule: owner,
+  })
 
-  if (result.documentOnly) {
+  a91576RememberPageSyncHintsFromImpactReport(impactReport)
+
+  if (impactReport.baselineStatus === 'DOCUMENT_ONLY') {
+    return `PRD 已保存为新版本 V${response.versionNo || ''}；本次为补充说明/自由栏目变更，不会标记页面原型为需同步。`
+  }
+
+  const visualPageIds = visualImpactPageIdsFromReport(impactReport)
+
+  if (visualPageIds.length > 0) {
+    a94371ReplaceRequirementImpactWithinModule(owner, visualPageIds)
+
+    const pageText = impactReport.visualImpactPageNames.length
+      ? impactReport.visualImpactPageNames.join('、')
+      : `${visualPageIds.length} 个页面`
+
+    const semanticText = impactReport.downstreamArtifactTypes.length
+      ? `后台已记录语义影响：${impactReport.downstreamArtifactTypes.join('、')}。`
+      : ''
+
+    return `PRD 已保存为新版本 V${response.versionNo || ''}；已定位需要同步原型的页面：${pageText}。${semanticText}`
+  }
+
+  const fallbackResult = a91545ResolvePrecisePrdImpact(previousContent, nextContent, owner)
+
+  if (fallbackResult.documentOnly) {
     return `PRD 已保存为新版本 V${response.versionNo || ''}；本次为补充说明/自由栏目变更，不会标记模块树、页面规范或交互原型为需更新。`
   }
 
-  if (result.affectedPageIds.length > 0) {
-    a94371MarkRequirementImpactForPageIds(result.affectedPageIds)
-    const pageText = result.affectedPageNames.length
-      ? result.affectedPageNames.join('、')
-      : `${result.affectedPageIds.length} 个页面`
-    return `PRD 已保存为新版本 V${response.versionNo || ''}；已精确定位受影响页面：${pageText}。仅这些页面会提示重新生成 PAGE_SPEC / 交互原型，未命中的页面不会被误标记。`
+  if (fallbackResult.affectedPageIds.length > 0) {
+    a94371ReplaceRequirementImpactWithinModule(owner, fallbackResult.affectedPageIds)
+    const pageText = fallbackResult.affectedPageNames.length
+      ? fallbackResult.affectedPageNames.join('、')
+      : `${fallbackResult.affectedPageIds.length} 个页面`
+    return `PRD 已保存为新版本 V${response.versionNo || ''}；已精确定位受影响页面：${pageText}。仅这些页面会提示同步 PRD 变更到原型，未命中的页面不会被误标记。`
   }
 
-  if (result.confidence === 'NONE') {
-    return `PRD 已保存为新版本 V${response.versionNo || ''}；${result.reason || '本次未识别到页面字段、按钮、表格列、跳转或状态变更，未标记页面原型。'}`
+  if (impactReport.baselineStatus === 'MISSING_PREVIOUS_BASELINE') {
+    return `PRD 已保存为新版本 V${response.versionNo || ''}；旧 PRD 页面设计基线缺失，系统已避免误标记全部页面。`
   }
 
-  return `PRD 已保存为新版本 V${response.versionNo || ''}；检测到“${result.sectionLabel}”变化，但未可靠定位到具体页面。系统不会自动点亮页面重生成提示，避免误耗 token；请按需检查模块树或页面设计。`
+  if (impactReport.downstreamArtifactTypes.length > 0) {
+    return `PRD 已保存为新版本 V${response.versionNo || ''}；未识别到需要同步视觉原型的页面，但后台已记录语义影响：${impactReport.downstreamArtifactTypes.join('、')}。`
+  }
+
+  return `PRD 已保存为新版本 V${response.versionNo || ''}；本次未识别到页面字段、按钮、表格列、跳转或状态变更，未标记页面原型。`
 }
 
 function a91545ResolvePrecisePrdImpact(
@@ -6139,6 +7362,17 @@ function a91545CollectChangedPageRequirementIds(
 ): void {
   const previousRequirements = a91522NormalizePageRequirements(previousContent?.page_requirements)
   const nextRequirements = a91522NormalizePageRequirements(nextContent.page_requirements)
+
+  // A9.10.14.4.3.15.7.24L3B5A2:
+  // 旧 PRD 内容拿不到时，不能把下一版所有 page_requirements 都当作“本次修改”。
+  // 否则用户只改“列表页-导出”，新建页、详情页也会被误标记。
+  if (!previousRequirements.length && nextRequirements.length > 1) {
+    console.warn(
+      '[A9.10.14.4.3.15.7.24L3B5A2] Skip page_requirements impact because previous PRD page requirements are missing.',
+    )
+    return
+  }
+
   const previousByIdentity = new Map<string, A91522PageRequirementRecord>()
 
   for (const requirement of previousRequirements) {
@@ -6157,8 +7391,15 @@ function a91545CollectChangedPageRequirementIds(
     }
 
     const matchedPage = a91522FindMatchingPageNode(requirement, pages, new Set())
+
     if (matchedPage?.id) {
-      affectedIds.add(String(matchedPage.id))
+      const pageId = String(matchedPage.id)
+      affectedIds.add(pageId)
+      a91575RememberPrdPageSyncHint(
+        pageId,
+        oldRequirement ? oldRequirement as Record<string, any> : null,
+        requirement as Record<string, any>,
+      )
     }
 
     const requirementText = a91545StableJson(requirement)
@@ -6978,6 +8219,362 @@ async function handleGenerateApiContract() {
 async function handleGenerateTestSpec() {
   await startAsyncArtifactTask('GENERATE_TEST_SPEC')
 }
+
+// A9.10.14.4.3.15.7.24L3B5A_PRD_TO_UI_CONTRACT_SYNC_ENTRY
+function a91575ShouldSyncPrdToUiContract(node: ModuleTreeNode | null | undefined): boolean {
+  if (!node?.id || !isPageNode(node)) return false
+  if (!uiContractArtifact.value?.content && !uiContractDraftContent.value) return false
+  return requirementImpactPageIds.value.has(String(node.id))
+}
+
+function a91575ResolveOwnerModuleForPage(node: ModuleTreeNode | null | undefined): ModuleTreeNode | null {
+  if (!node?.id) return null
+
+  const path = findRequirementNodePath(modules.value, node.id) || []
+  for (let index = path.length - 1; index >= 0; index -= 1) {
+    const candidate = path[index]
+    if (candidate && resolveRequirementNodeType(candidate) === 'MODULE') {
+      return candidate
+    }
+  }
+
+  return null
+}
+
+async function a91575SyncPrdChangesToUiContract(): Promise<boolean> {
+  const pageNode = selectedModule.value
+
+  if (!pageNode?.id || !isPageNode(pageNode)) {
+    return false
+  }
+
+  const sourceContract = uiContractDraftContent.value || uiContractArtifact.value?.content
+  if (!sourceContract) {
+    return false
+  }
+
+  const ownerModule = a91575ResolveOwnerModuleForPage(pageNode)
+  if (!ownerModule?.id) {
+    return false
+  }
+
+  let modulePrdArtifact: any = null
+let modulePrdContent: Record<string, any> | null = null
+
+try {
+  modulePrdArtifact = await fetchCurrentModuleArtifact(
+    props.workspace.workspaceId,
+    props.project.projectCode,
+    ownerModule.id,
+    'MODULE_PRD',
+  )
+
+  if (
+    modulePrdArtifact?.content &&
+    typeof modulePrdArtifact.content === 'object' &&
+    !Array.isArray(modulePrdArtifact.content)
+  ) {
+    modulePrdContent = modulePrdArtifact.content as Record<string, any>
+  }
+} catch (error) {
+  console.warn('[A9.10.14.4.3.15.7.24L3B5A] fetch owner MODULE_PRD failed:', error)
+}
+
+  if (!modulePrdContent) {
+    return false
+  }
+
+  const syncHint = a91575PrdPageSyncHints.value.get(String(pageNode.id)) || null
+const rawPageRequirement =
+  syncHint?.nextRequirement ||
+  resolvePrdPageRequirementForNode(modulePrdContent, pageNode)
+
+const normalizedPageRequirement = rawPageRequirement
+  ? normalizePrdPrototypeModuleRequirement(rawPageRequirement, {
+      pageNode,
+      uiContract: sourceContract,
+      modulePrdArtifact,
+      uiContractArtifact: uiContractArtifact.value || null,
+    })
+  : null
+
+const previousPageRequirement = syncHint?.previousRequirement
+  ? normalizePrdPrototypeModuleRequirement(syncHint.previousRequirement, {
+      pageNode,
+      uiContract: sourceContract,
+      modulePrdArtifact,
+      uiContractArtifact: uiContractArtifact.value || null,
+    })
+  : null
+
+if (!normalizedPageRequirement) {
+  return false
+}
+
+  try {
+    const result = applyPrdPageRequirementToUiContract({
+    contract: sourceContract,
+    pageRequirement: normalizedPageRequirement,
+    previousPageRequirement,
+    changeImpact: syncHint?.changeImpact || null,
+    pageNode,
+  })
+
+    if (!result.changed) {
+      artifactTaskFeedback.value = {
+        level: 'error',
+        message: [
+          result.summary || '同步器没有产生可保存的 UI_CONTRACT 变化。',
+          '系统不会再把旧原型保存成新版本；请保留同步按钮并检查 PRD 页面设计与当前 UI_CONTRACT 的匹配关系。',
+        ].join(''),
+      }
+      return false
+    }
+
+    uiContractDraftContent.value = result.contract as any
+    prototypeEditDraftDirty.value = true
+    prototypeEditDraftSummary.value = result.summary
+    selectedArtifactType.value = 'UI_CONTRACT'
+
+    artifactTaskFeedback.value = {
+      level: 'success',
+      message: `${result.summary}（本地预览，尚未保存为新版本）`,
+    }
+
+    latestAssistantResponse.value = {
+      messageId: `prd_ui_contract_sync_${Date.now()}`,
+      intent: 'GENERAL_QA',
+      reply: [
+        result.summary,
+        '',
+        '已把最新 PRD 变更同步到当前原型草稿。请在预览中检查效果，确认后保存为 UI_CONTRACT 新版本。',
+      ].join('\n'),
+      message: result.summary,
+      requiresUserConfirmation: false,
+      proposal: null,
+      requirementChangeProposal: null,
+      assetEditProposal: null,
+      attachmentDrivenChangeProposal: null,
+      attachmentArtifactDiffProposal: null,
+      actions: [],
+    } as any
+
+    return true
+  } catch (error) {
+    console.error('[A9.10.14.4.3.15.7.24L3B5B1_5] PRD -> UI_CONTRACT sync crashed:', error)
+    throw error
+  }
+}
+
+async function handleSyncPrdToUiContract() {
+  const module = selectedModule.value
+
+  if (isSyncingPrdToUiContract.value) {
+    return
+  }
+
+  if (!module?.id || !isPageNode(module)) {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message: '请先选择一个需要同步的 PAGE 页面。',
+    }
+    return
+  }
+
+  if (!uiContractArtifact.value?.content && !uiContractDraftContent.value) {
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message: '当前页面还没有交互原型，请先生成交互原型。',
+    }
+    return
+  }
+
+  isSyncingPrdToUiContract.value = true
+
+  artifactTaskFeedback.value = {
+    level: 'info',
+    message: '正在同步 PRD 变更到交互原型，请稍候。',
+  }
+
+  latestAssistantResponse.value = {
+    messageId: `prd_ui_contract_sync_running_${Date.now()}`,
+    intent: 'GENERAL_QA',
+    reply: '正在同步 PRD 变更到交互原型。同步期间当前页面按钮会临时锁定，避免重复操作。',
+    message: '正在同步 PRD 变更到交互原型。',
+    requiresUserConfirmation: false,
+    proposal: null,
+    requirementChangeProposal: null,
+    assetEditProposal: null,
+    attachmentDrivenChangeProposal: null,
+    attachmentArtifactDiffProposal: null,
+    actions: [],
+  } as any
+
+  try {
+    const synced = await a91575SyncPrdChangesToUiContract()
+
+    if (!synced) {
+      const message = '暂未找到可同步到当前原型的 PRD 页面设计变更。'
+
+      artifactTaskFeedback.value = {
+        level: 'error',
+        message,
+      }
+
+      latestAssistantResponse.value = {
+        messageId: `prd_ui_contract_sync_empty_${Date.now()}`,
+        intent: 'GENERAL_QA',
+        reply: message,
+        message,
+        requiresUserConfirmation: false,
+        proposal: null,
+        requirementChangeProposal: null,
+        assetEditProposal: null,
+        attachmentDrivenChangeProposal: null,
+        attachmentArtifactDiffProposal: null,
+        actions: [],
+      } as any
+      return
+    }
+
+    const syncedContract = uiContractDraftContent.value || uiContractArtifact.value?.content
+
+    if (!syncedContract) {
+      const message = 'PRD 同步已执行，但没有生成可保存的交互原型内容。'
+
+      artifactTaskFeedback.value = {
+        level: 'error',
+        message,
+      }
+
+      latestAssistantResponse.value = {
+        messageId: `prd_ui_contract_sync_no_contract_${Date.now()}`,
+        intent: 'GENERAL_QA',
+        reply: message,
+        message,
+        requiresUserConfirmation: false,
+        proposal: null,
+        requirementChangeProposal: null,
+        assetEditProposal: null,
+        attachmentDrivenChangeProposal: null,
+        attachmentArtifactDiffProposal: null,
+        actions: [],
+      } as any
+      return
+    }
+
+    const response = await saveManualArtifactEdit(
+      props.workspace.workspaceId,
+      props.project.projectCode,
+      module.id,
+      {
+        artifactId:
+          (uiContractArtifact.value as any)?.artifactId ||
+          (uiContractArtifact.value as any)?.id ||
+          null,
+        artifactType: 'UI_CONTRACT',
+        content: syncedContract,
+        contentMarkdown: JSON.stringify(syncedContract, null, 2),
+        reason: '同步 PRD 变更到交互原型',
+      } as any,
+    )
+
+    // Save is complete. From this point on, the page must read the saved UI_CONTRACT artifact,
+    // not a stale draft. Otherwise Prototype Studio may keep rendering the old draft content.
+    uiContractDraftContent.value = null
+    prototypeEditDraftDirty.value = false
+    prototypeEditDraftSummary.value = ''
+
+    if (uiContractArtifact.value && typeof uiContractArtifact.value === 'object') {
+      ;(uiContractArtifact.value as any).content = syncedContract
+      ;(uiContractArtifact.value as any).contentMarkdown = JSON.stringify(syncedContract, null, 2)
+      ;(uiContractArtifact.value as any).versionNo = response.versionNo || (uiContractArtifact.value as any).versionNo
+      ;(uiContractArtifact.value as any).artifactId = response.artifactId || (uiContractArtifact.value as any).artifactId
+    }
+
+    uiContractSnapshot.value = null
+    uiContractSnapshotError.value = ''
+
+    a94371ClearRequirementImpactForPage(module)
+
+    selectedArtifactType.value = 'UI_CONTRACT'
+
+    await Promise.allSettled([
+      loadCurrentArtifactByType(module, 'UI_CONTRACT'),
+      loadAllCurrentModuleArtifacts(module),
+      loadCurrentModuleAgentTasks(),
+      loadUiContractReadiness(),
+      loadDevelopmentHandoffReadiness(),
+    ])
+
+    if (uiContractArtifact.value && typeof uiContractArtifact.value === 'object' && !(uiContractArtifact.value as any).content) {
+      ;(uiContractArtifact.value as any).content = syncedContract
+      ;(uiContractArtifact.value as any).contentMarkdown = JSON.stringify(syncedContract, null, 2)
+      ;(uiContractArtifact.value as any).versionNo = response.versionNo || (uiContractArtifact.value as any).versionNo
+      ;(uiContractArtifact.value as any).artifactId = response.artifactId || (uiContractArtifact.value as any).artifactId
+    }
+
+    uiContractDraftContent.value = null
+    prototypeEditDraftDirty.value = false
+
+    await saveCurrentWorkspaceState({
+      selectedModuleId: module.id,
+      selectedArtifactType: 'UI_CONTRACT',
+      selectedArtifactId: response.artifactId || null,
+      activeAgentTab: activeTab.value,
+      uiState: {
+        lastAction: 'sync-prd-to-ui-contract',
+        versionNo: response.versionNo || null,
+      },
+    })
+
+    const versionText = response.versionNo ? ` V${response.versionNo}` : ''
+    const message = `已根据最新 PRD 同步交互原型，并保存为 UI_CONTRACT 新版本${versionText}。可以进入原型工作台检查页面主操作、表格列、表单字段等变更。`
+
+    artifactTaskFeedback.value = {
+      level: 'success',
+      message,
+    }
+
+    latestAssistantResponse.value = {
+      messageId: `prd_ui_contract_sync_saved_${Date.now()}`,
+      intent: 'GENERAL_QA',
+      reply: message,
+      message,
+      requiresUserConfirmation: false,
+      proposal: null,
+      requirementChangeProposal: null,
+      assetEditProposal: null,
+      attachmentDrivenChangeProposal: null,
+      attachmentArtifactDiffProposal: null,
+      actions: [],
+    } as any
+  } catch (error) {
+    const message = resolveErrorMessage(error, '同步 PRD 变更到交互原型失败。')
+
+    artifactTaskFeedback.value = {
+      level: 'error',
+      message,
+    }
+
+    latestAssistantResponse.value = {
+      messageId: `prd_ui_contract_sync_failed_${Date.now()}`,
+      intent: 'GENERAL_QA',
+      reply: message,
+      message,
+      requiresUserConfirmation: false,
+      proposal: null,
+      requirementChangeProposal: null,
+      assetEditProposal: null,
+      attachmentDrivenChangeProposal: null,
+      attachmentArtifactDiffProposal: null,
+      actions: [],
+    } as any
+  } finally {
+    isSyncingPrdToUiContract.value = false
+  }
+}
+
 async function handleGenerateUiContract() {
   const module = selectedModule.value
 
@@ -7034,6 +8631,12 @@ async function handleGenerateUiContract() {
         '当前页面尚未满足交互原型生成条件。',
     }
     return
+  }
+
+  a91577ExplicitUiContractGenerationInProgress.value = true
+  artifactTaskFeedback.value = {
+    level: 'info',
+    message: '正在重新生成交互原型：系统会先更新隐藏页面规范，然后继续生成原型。期间不会自动打开原型工作台。',
   }
 
   await startAsyncArtifactTask('GENERATE_UI_CONTRACT')
@@ -9218,5 +10821,7 @@ void closeImpactAnalysisDrawer
   background: transparent;
 }
 </style>
+
+
 
 

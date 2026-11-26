@@ -622,6 +622,99 @@ public class AssistantAttachmentService {
         }
     }
 
+
+    @Transactional(readOnly = true)
+    public AttachmentContent loadAttachmentContent(
+            UUID workspaceId,
+            String projectCode,
+            UUID attachmentId
+    ) {
+        String sql = """
+                SELECT
+                    file_name,
+                    mime_type,
+                    storage_path
+                FROM assistant_attachment
+                WHERE id = :attachmentId
+                  AND workspace_id = :workspaceId
+                  AND project_code = :projectCode
+                LIMIT 1
+                """;
+
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                sql,
+                new MapSqlParameterSource()
+                        .addValue("attachmentId", attachmentId)
+                        .addValue("workspaceId", workspaceId)
+                        .addValue("projectCode", projectCode)
+        );
+
+        if (rows.isEmpty()) {
+            throw new IllegalArgumentException("附件不存在或无权访问。");
+        }
+
+        Map<String, Object> row = rows.get(0);
+
+        String fileName = Objects.toString(
+                row.get("file_name"),
+                "attachment"
+        );
+
+        String mimeType = Objects.toString(
+                row.get("mime_type"),
+                "application/octet-stream"
+        );
+
+        String storagePath = Objects.toString(
+                row.get("storage_path"),
+                ""
+        );
+
+        Path path =
+                assistantAttachmentStorageService.resolveStoredPath(
+                        storagePath
+                );
+
+        if (!Files.exists(path) || !Files.isRegularFile(path)) {
+            throw new IllegalArgumentException("附件文件不存在或已被移除。");
+        }
+
+        return new AttachmentContent(
+                path,
+                fileName,
+                mimeType
+        );
+    }
+
+    public static class AttachmentContent {
+
+        private final Path path;
+        private final String fileName;
+        private final String mimeType;
+
+        public AttachmentContent(
+                Path path,
+                String fileName,
+                String mimeType
+        ) {
+            this.path = path;
+            this.fileName = fileName;
+            this.mimeType = mimeType;
+        }
+
+        public Path getPath() {
+            return path;
+        }
+
+        public String getFileName() {
+            return fileName;
+        }
+
+        public String getMimeType() {
+            return mimeType;
+        }
+    }
+
     private void insertAttachment(
             UUID attachmentId,
             UUID workspaceId,
