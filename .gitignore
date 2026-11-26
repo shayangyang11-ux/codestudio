@@ -46,3 +46,14 @@ codemind_project_manifest.txt
 /codemind-server/data/
 
 codemind-agent-service/
+
+
+# CodeMind 本地补丁备份与临时文件
+.codemind_patch_backups/
+*.bak
+*.broken
+*_backup_*
+
+# 代码快照与压缩包
+**/.codemind/snapshots/
+*.zip
